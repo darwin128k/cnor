@@ -1,0 +1,3 @@
+# Line 3 uses a name nothing declares.
+let known = 1
+let wrong = known + missing

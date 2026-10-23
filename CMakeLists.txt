@@ -9,6 +9,14 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 option(CNOR_BUILD_TESTS "Build tests" OFF)
 option(CNOR_BUILD_BENCH "Build the benchmark runner (bench/)" OFF)
+# The command line is for a cnor checkout built on its own; a project that
+# embeds cnor as a subdirectory gets the library only, unless it asks.
+if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(cnor_build_cli_default ON)
+else ()
+    set(cnor_build_cli_default OFF)
+endif ()
+option(CNOR_BUILD_CLI "Build the cnor command line (cli/)" ${cnor_build_cli_default})
 option(CNOR_VM_COMPUTED_GOTO
         "Dispatch VM instructions through a label table where the compiler supports it (GCC, Clang); OFF forces the portable switch"
         ON)
@@ -138,6 +146,10 @@ if (NOT CNOR_PGO STREQUAL "OFF")
     else ()
         message(FATAL_ERROR "CNOR_PGO must be OFF, GENERATE or USE, not ${CNOR_PGO}")
     endif ()
+endif ()
+
+if (CNOR_BUILD_CLI)
+    add_subdirectory(cli)
 endif ()
 
 if (CNOR_BUILD_TESTS)

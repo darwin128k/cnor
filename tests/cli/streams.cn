@@ -1,0 +1,5 @@
+# print / println go to the standard output, eprint / eprintln to the error.
+print("out")
+println("", 1)
+eprint("err")
+eprintln("", 2)

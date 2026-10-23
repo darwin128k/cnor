@@ -392,6 +392,25 @@ missing native fails the load; the call itself is still one indexed jump with
 no lookup or string comparison. This keeps compiled images valid when the host
 reorders or extends its table.
 
+### 9.1 The command line's natives
+
+The language itself has no natives; every host chooses its own. The `cnor`
+command line (`cli/`, README.md) gives scripts these, and passes the same
+table to the compiler, so no `native fn` declaration is needed:
+
+| Native | Arguments | Does | Returns |
+|---|---|---|---|
+| `print(...)` | 0 to 255, any kind | writes them to the standard output, separated by one space | `none` |
+| `println(...)` | 0 to 255, any kind | the same, then a newline | `none` |
+| `eprint(...)` | 0 to 255, any kind | `print` on the standard error | `none` |
+| `eprintln(...)` | 0 to 255, any kind | `println` on the standard error | `none` |
+
+A value is written as `none`, `true` or `false`, an integer in decimal, a real
+with the fewest digits that read back as the same value (`.0` added when it
+would look like an integer; `nan`, `inf`, `-inf`), a string as its bytes
+unquoted. A failed write is `native_fail`. A script function of the same name
+takes precedence, as for any native.
+
 ## 10. Runtime
 
 `cnor_vm_t` (`include/cnor/vm.h`) holds:
@@ -463,7 +482,8 @@ and the machine) and, when the failure is about a name, a copy of that name.
 
 ## 14. Status
 
-Done and covered by tests (`tests/`, 175 cases):
+Done and covered by tests (`tests/`, 175 cases, and 33 runs of the command
+line in `tests/cli/`, 34 on Windows):
 
 - [x] lexer: tokens, keywords, indentation as `indent` / `dedent`, newline
   tokens, bracket continuations, `#` comments, integers in three bases, reals,
@@ -477,6 +497,8 @@ Done and covered by tests (`tests/`, 175 cases):
 - [x] machine: arithmetic, comparisons, jumps, calls, natives bound by name at
   load, strings, globals, line mapping for errors, a per-run instruction
   budget;
+- [x] command line: `cnor run`, `compile`, `exec`, natives `print`,
+  `println`, `eprint`, `eprintln` (section 9.1), tested through CTest;
 - [x] performance: a dispatch loop with inline fast paths and computed goto,
   loops tested at the bottom, operand forms on locals and immediates, a
   one-instruction `for` step, inline string indexing, `len`, equality and
@@ -490,7 +512,7 @@ Not done, in a sensible order:
 2. Initial values of globals in the image (today they start as `none` and the
    entry function assigns them).
 3. `import`.
-4. A command-line compiler and a VM-only build of the library.
+4. A VM-only build of the library.
 
 ## 15. Decisions that differ from the original draft
 

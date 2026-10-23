@@ -15,3 +15,8 @@ foreach (suite ${CNOR_TEST_SUITES})
     target_link_libraries(cnor_test_${suite} PRIVATE cnor)
     add_test(NAME cnor_${suite} COMMAND cnor_test_${suite})
 endforeach ()
+
+# The command line, run on sample scripts (cli/).
+if (TARGET cnor_cli)
+    add_subdirectory(cli)
+endif ()

@@ -12,6 +12,7 @@ is organised and how to extend it.
 
 - `include/cnor/` - public headers
 - `src/cnor/` - implementation (headers here are library-private)
+- `cli/` - the `cnor` command line (`CNOR_BUILD_CLI`)
 - `tests/` - tests (`CNOR_BUILD_TESTS`)
 - `bench/` - benchmarks (`CNOR_BUILD_BENCH`), see [bench/README.md](bench/README.md)
 - `docs/` - language specification and architecture notes
@@ -40,6 +41,56 @@ Benchmarks (use an optimised build):
 cmake -S . -B build-bench -DCMAKE_BUILD_TYPE=Release -DCNOR_BUILD_BENCH=ON
 cmake --build build-bench
 ./build-bench/bench/cnor_bench
+```
+
+## Command line
+
+The build also makes `cnor` (`build/cli/cnor`, `cnor.exe` on Windows) when
+cnor is the top-level project; `-DCNOR_BUILD_CLI=OFF` leaves it out, `ON`
+builds it when cnor is a subdirectory of another project.
+
+```sh
+cnor run script.cn                 # compile and run; prints the result unless it is none
+cnor script.cn                     # the same
+cnor run - < script.cn             # the source from the standard input
+cnor run script.cn --max-steps 100000 --stack 1024 --depth 64 --pool 65536
+cnor compile script.cn -o script.tbc   # write the image (default: script.tbc)
+cnor compile script.cn --no-lines      # without the line table
+cnor exec script.tbc               # load and run an image
+cnor --version
+cnor --help
+```
+
+| Option (`run`, `exec`) | Default | |
+|---|---|---|
+| `--max-steps N` | 0 (unlimited) | instructions per run |
+| `--stack N` | 65536 | value stack, in values |
+| `--depth N` | 4096 | nested calls |
+| `--pool N` | 16777216 | string pool, in bytes |
+
+Scripts get four natives, without declaring them: `print(...)` and
+`println(...)` write their arguments to the standard output separated by one
+space (`println` ends the line), `eprint(...)` and `eprintln(...)` do the
+same on the standard error. Values are written as `none`, `true` / `false`,
+decimal integers, reals in their shortest exact form (`0.1`, `2.0`), and
+strings as their bytes.
+
+Errors go to the standard error as `file:line: message`, for example
+`script.cn:3: unknown name: missing` or `script.cn:12: division by zero`; an
+image keeps the source name and line table, so `exec` reports the same.
+Exit status: 0 done, 1 runtime error (including `--max-steps`), 2 bad command
+line, 3 compile error or bad image, 4 file error. File names are UTF-8 on every
+system; a leading UTF-8 byte order mark in a source file is skipped.
+
+```sh
+$ cat hello.cn
+fn fib(n: i32) -> i32:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+println("fib(20) =", fib(20))
+$ cnor hello.cn
+fib(20) = 6765
 ```
 
 ## Use

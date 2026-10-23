@@ -42,6 +42,7 @@ offset, copied name), with codes in `cnor_error_t` and messages from
 | compiler | `compiler.h`, `src/cnor/compiler/*.c` | AST to image; see below |
 | vm | `vm.h`, `vm/stack.h`, `vm/str_pool.h`, `src/cnor/vm/**` | Loader, dispatch loop with a handler table, opcode families under `vm/op/` |
 | cnor | `cnor.h`, `cnor.c` | Library version |
+| command line | `cli/*.{h,c}` | The `cnor` program (`CNOR_BUILD_CLI`); see below |
 
 ### Compiler modules (`src/cnor/compiler/`)
 
@@ -397,6 +398,29 @@ the last arm).
 | `struct cnor_name_index` (`src/cnor/compiler/internal.h`) | A string-keyed hash map (lh has FNV-1a hashing but no map) |
 | `src/cnor/vm/fast.h` | Header-inline variants of the `lh_value_t` accessors |
 | `bench/clock.c` | A nanosecond monotonic clock (`lh_os_tick_us` is microseconds and needs the OS option) |
+
+## The command line
+
+`cli/` is the `cnor` program (CMake target `cnor_cli`, since `cnor` is the
+library), built when `CNOR_BUILD_CLI` is ON: by default when cnor is the
+top-level project, not when another project adds it as a subdirectory. It is a
+host like any other, written only against the public headers:
+
+| File | Role |
+|---|---|
+| `main.c` | Entry point: arguments, then the subcommand |
+| `args.{h,c}` | Arguments as UTF-8; on Windows re-read from `GetCommandLineW` and converted |
+| `options.{h,c}` | Subcommands, options, defaults, `--help`, the exit codes |
+| `command.{h,c}` | `run`, `compile`, `exec`: compile, load, run, report `file:line: message` |
+| `file.{h,c}` | Whole-file reads and writes through lh's file API (UTF-8 paths, UTF-16 calls on Windows); `-` is the standard stream |
+| `natives.{h,c}` | `print`, `println`, `eprint`, `eprintln`; their `ctx` holds the two streams |
+| `text.{h,c}` | How a value is written, for the natives and the result |
+
+The natives are given to the compiler too, so a script calls them without a
+`native fn` declaration, and an image compiled by `cnor compile` binds them by
+name when `cnor exec` loads it. `tests/cli/` runs the program on sample
+scripts through CTest (`check.cmake` compares the exit status and both
+outputs; `CMAKE_CROSSCOMPILING_EMULATOR` runs a Windows build under wine).
 
 ## Benchmarks
 

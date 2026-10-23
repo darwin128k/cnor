@@ -1,0 +1,11 @@
+# Natives, arguments of every kind, a function, and a result.
+fn fib(n: i32) -> i32:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+println("hello from cnor")
+println("fib(20) =", fib(20))
+print("kinds:", true, none, 7, 0xFFFFFFFF, "text")
+println()
+"the result"

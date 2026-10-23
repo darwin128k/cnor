@@ -1,0 +1,6 @@
+# Prints, then divides by zero on line 5.
+println("before")
+let zero = 0
+let ten = 10
+let broken = ten / zero
+println("after")

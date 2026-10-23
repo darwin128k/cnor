@@ -1,0 +1,5 @@
+# 100000 passes: well past a budget of 1000 instructions.
+let mut total = 0
+for i in 0..100000:
+    total = total + i
+total

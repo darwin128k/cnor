@@ -1,0 +1,2 @@
+# The result is none: nothing is printed after the script's own output.
+println("only this")
