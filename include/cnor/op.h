@@ -3,7 +3,7 @@
  * @brief The instruction set (::cnor_op_t) and its description table
  *        (::cnor_op_info_t).
  *
- * One opcode is one byte, followed by at most two little-endian operands.
+ * One opcode is one byte, followed by at most three little-endian operands.
  * Everything the compiler, the verifier and the machine need to know about an
  * opcode besides what it does lives in its ::cnor_op_info_t row: operand
  * layout, encoded size, stack effect and control-flow flags. The compiler
@@ -64,7 +64,60 @@ enum cnor_op
     cnor_op_native,       /**< Call a native import. Operands: u16 index, u8 argc. */
     cnor_op_len,          /**< Length of a string in bytes. */
     cnor_op_index,        /**< One-byte string at an index of a string. */
-    cnor_op_count         /**< Number of opcodes; any byte at or above is invalid. */
+
+    /* Operand forms of the binary operators (format v2): the same operation
+     * as the plain opcode, with operands taken from local slots or from the
+     * code instead of the stack. `_ll`: slot, slot; `_li`: slot, s32; `_i`:
+     * the top of the stack and an s32, which replaces the top. The `_ll` and
+     * `_li` forms push the result. Each family follows the order of
+     * ::cnor_op_get_operand_form. */
+    cnor_op_add_ll, /**< fp[a] + fp[b]. Operands: slot, slot. */
+    cnor_op_sub_ll, /**< fp[a] - fp[b]. */
+    cnor_op_mul_ll, /**< fp[a] * fp[b]. */
+    cnor_op_div_ll, /**< fp[a] / fp[b]. */
+    cnor_op_mod_ll, /**< fp[a] % fp[b]. */
+    cnor_op_eq_ll,  /**< fp[a] == fp[b]. */
+    cnor_op_ne_ll,  /**< fp[a] != fp[b]. */
+    cnor_op_lt_ll,  /**< fp[a] < fp[b]. */
+    cnor_op_le_ll,  /**< fp[a] <= fp[b]. */
+    cnor_op_gt_ll,  /**< fp[a] > fp[b]. */
+    cnor_op_ge_ll,  /**< fp[a] >= fp[b]. */
+    cnor_op_add_li, /**< fp[a] + k. Operands: slot, s32. */
+    cnor_op_sub_li, /**< fp[a] - k. */
+    cnor_op_mul_li, /**< fp[a] * k. */
+    cnor_op_div_li, /**< fp[a] / k. */
+    cnor_op_mod_li, /**< fp[a] % k. */
+    cnor_op_eq_li,  /**< fp[a] == k. */
+    cnor_op_ne_li,  /**< fp[a] != k. */
+    cnor_op_lt_li,  /**< fp[a] < k. */
+    cnor_op_le_li,  /**< fp[a] <= k. */
+    cnor_op_gt_li,  /**< fp[a] > k. */
+    cnor_op_ge_li,  /**< fp[a] >= k. */
+    cnor_op_add_i,  /**< top + k, in place. Operand: s32. */
+    cnor_op_sub_i,  /**< top - k. */
+    cnor_op_mul_i,  /**< top * k. */
+    cnor_op_div_i,  /**< top / k. */
+    cnor_op_mod_i,  /**< top % k. */
+    cnor_op_eq_i,   /**< top == k. */
+    cnor_op_ne_i,   /**< top != k. */
+    cnor_op_lt_i,   /**< top < k. */
+    cnor_op_le_i,   /**< top <= k. */
+    cnor_op_gt_i,   /**< top > k. */
+    cnor_op_ge_i,   /**< top >= k. */
+    /**
+     * One step of `for v in a..b`: fp[v] = fp[v] + 1, then jump when
+     * fp[v] < fp[b]; both by the rules of `add` and `lt`. Operands: s32 jump,
+     * slot v, slot b.
+     */
+    cnor_op_for_loop,
+    /**
+     * Dispatch on an integer (format v3): `count` `jmp` instructions follow,
+     * the table. When fp[v] == k + i by the rule of `==` for some i below
+     * `count`, continue at the i-th of them; otherwise after the table.
+     * Operands: slot v, s32 k, u8 count (at least 1).
+     */
+    cnor_op_switch,
+    cnor_op_count /**< Number of opcodes; any byte at or above is invalid. */
 };
 /** @copybrief cnor_op */
 typedef enum cnor_op cnor_op_t;
@@ -79,7 +132,8 @@ enum cnor_operand_kind
     cnor_operand_u8,       /**< 1 byte, unsigned. */
     cnor_operand_u16,      /**< 2 bytes, unsigned, little-endian. */
     cnor_operand_u32,      /**< 4 bytes, unsigned, little-endian. */
-    cnor_operand_s32       /**< 4 bytes, two's complement, little-endian. */
+    cnor_operand_s32,      /**< 4 bytes, two's complement, little-endian. */
+    cnor_operand_slot      /**< 1 byte, a local slot of the current frame. */
 };
 /** @copybrief cnor_operand_kind */
 typedef enum cnor_operand_kind cnor_operand_kind_t;
@@ -95,10 +149,10 @@ typedef lh_u8_t cnor_op_flags_t;
 #define CNOR_OP_FLAG_POPS_ARGC 0x04U  /**< Also pops as many values as operand 1. */
 
 /** @def CNOR_OP_MAX_OPERANDS @brief Operands an instruction can have. */
-#define CNOR_OP_MAX_OPERANDS 2U
+#define CNOR_OP_MAX_OPERANDS 3U
 
 /** @def CNOR_OP_MAX_SIZE @brief Largest encoded instruction, in bytes. */
-#define CNOR_OP_MAX_SIZE 5U
+#define CNOR_OP_MAX_SIZE 7U
 
 /**
  * @struct cnor_op_info
@@ -130,6 +184,21 @@ struct cnor_insn
 /** @copybrief cnor_insn */
 typedef struct cnor_insn cnor_insn_t;
 
+/**
+ * @enum cnor_operand_form
+ * @brief Where a binary operator finds its operands.
+ */
+enum cnor_operand_form
+{
+    cnor_operand_form_stack = 0,   /**< Both on the stack: the plain opcode. */
+    cnor_operand_form_local_local, /**< `_ll`: two local slots. */
+    cnor_operand_form_local_int,   /**< `_li`: a local slot and an s32. */
+    cnor_operand_form_stack_int,   /**< `_i`: the top of the stack and an s32. */
+    cnor_operand_form_count
+};
+/** @copybrief cnor_operand_form */
+typedef enum cnor_operand_form cnor_operand_form_t;
+
 LH_COMPILER_EXTERN_C_BEGIN
 
 /** @brief Whether @p byte is an opcode. */
@@ -160,9 +229,27 @@ cnor_error_t
 cnor_insn_decode(const lh_byte_t *code, cnor_code_addr_t size, cnor_code_addr_t at,
                  cnor_insn_t *out);
 
+/** @def CNOR_OP_SWITCH_ENTRY_SIZE @brief Bytes of one `switch` table entry, a `jmp`. */
+#define CNOR_OP_SWITCH_ENTRY_SIZE 5U
+
 /** @brief Target of a jump instruction; meaningful with ::CNOR_OP_FLAG_JUMP. */
 lh_s64_t
 cnor_insn_get_jump_target(const cnor_insn_t *insn);
+
+/**
+ * @brief The opcode for binary operator @p op (`add` .. `mod`, `eq` .. `ge`)
+ *        with its operands in @p form.
+ * @return ::cnor_op_count when @p op is not a binary operator.
+ */
+cnor_op_t
+cnor_op_get_operand_form(cnor_op_t op, cnor_operand_form_t form);
+
+/**
+ * @brief The plain binary operator of an operand-form opcode, and the form
+ *        through @p form; any other opcode is its own operator, on the stack.
+ */
+cnor_op_t
+cnor_op_get_binary_base(cnor_op_t op, cnor_operand_form_t *form);
 
 LH_COMPILER_EXTERN_C_END
 

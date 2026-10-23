@@ -23,6 +23,67 @@ cnor_vm_op_jmp_if(cnor_vm_t *vm, const cnor_insn_t *insn)
     return lh_bool_true;
 }
 
+/*
+ * One step of a `for` loop: the variable becomes `var + 1` by the rule of
+ * `add`, then the loop jumps back when `var < bound` holds by the rule of
+ * `lt`, exactly as the instructions it replaces did.
+ */
+lh_bool_t
+cnor_vm_op_for_loop(cnor_vm_t *vm, const cnor_insn_t *insn)
+{
+    lh_value_t *var = cnor_vm_stack_at(&vm->stack, vm->fp + insn->operands[1]);
+    const lh_value_t *bound = cnor_vm_stack_at(&vm->stack, vm->fp + insn->operands[2]);
+    const lh_value_t one = lh_value_make_sint(1);
+    lh_value_t next;
+    lh_value_t below;
+
+    if (!cnor_vm_arith_values(vm, insn, cnor_op_add, var, &one, &next))
+    {
+        return lh_bool_false;
+    }
+    *var = next;
+    if (!cnor_vm_compare_values(vm, insn, cnor_op_lt, var, bound, &below))
+    {
+        return lh_bool_false;
+    }
+    if (lh_value_get_data(&below)->b)
+    {
+        vm->ip = (cnor_code_addr_t) cnor_insn_get_jump_target(insn);
+    }
+    return lh_bool_true;
+}
+
+/*
+ * Pick a `switch` table entry: the first k + i that the subject equals by the
+ * rule of `==`, as the chain of `eq_li` tests it replaces would. The
+ * verifier proved the table is all `jmp`s and the code after it exists.
+ */
+lh_bool_t
+cnor_vm_op_switch(cnor_vm_t *vm, const cnor_insn_t *insn)
+{
+    const lh_value_t *subject = cnor_vm_stack_at(&vm->stack, vm->fp + insn->operands[0]);
+    const lh_sllong_t first = (lh_sllong_t) (lh_s32_t) insn->operands[1];
+    const lh_u32_t count = insn->operands[2];
+    lh_u32_t i;
+
+    for (i = 0U; i < count; ++i)
+    {
+        const lh_value_t pattern = lh_value_make_sint(first + (lh_sllong_t) i);
+        lh_value_t equal;
+
+        if (!cnor_vm_compare_values(vm, insn, cnor_op_eq, subject, &pattern, &equal))
+        {
+            return lh_bool_false;
+        }
+        if (lh_value_get_data(&equal)->b)
+        {
+            break;
+        }
+    }
+    vm->ip = insn->next + i * CNOR_OP_SWITCH_ENTRY_SIZE;
+    return lh_bool_true;
+}
+
 /* -- script calls ---------------------------------------------------------- */
 
 /*

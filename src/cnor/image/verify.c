@@ -42,18 +42,61 @@ cnor_verify_call(struct cnor_verify *self, const cnor_insn_t *insn)
     return insn->operands[1] == callee.param_count ? lh_bool_true : lh_bool_false;
 }
 
+/* A `switch` table is `count` (at least one) `jmp` instructions right after
+ * it, inside the function; that they decode and where they jump is checked
+ * with every other instruction. */
+static lh_bool_t
+cnor_verify_switch(const struct cnor_verify *self, const cnor_insn_t *insn)
+{
+    const lh_u64_t count = insn->operands[2];
+    const lh_u64_t end = (lh_u64_t) self->function.entry + self->function.size;
+    lh_u64_t i;
+
+    if (count == 0U || (lh_u64_t) insn->next + count * CNOR_OP_SWITCH_ENTRY_SIZE > end)
+    {
+        return lh_bool_false;
+    }
+    for (i = 0U; i < count; ++i)
+    {
+        if (self->view->code[insn->next + i * CNOR_OP_SWITCH_ENTRY_SIZE] != (lh_byte_t) cnor_op_jmp)
+        {
+            return lh_bool_false;
+        }
+    }
+    return lh_bool_true;
+}
+
+/* Every operand of kind `slot` names a slot of the function's frame. */
+static lh_bool_t
+cnor_verify_slots(const struct cnor_verify *self, const cnor_insn_t *insn)
+{
+    const cnor_op_info_t *info = cnor_op_get_info(insn->op);
+    lh_uint_t i;
+
+    for (i = 0U; i < CNOR_OP_MAX_OPERANDS; ++i)
+    {
+        if (info->operands[i] == cnor_operand_slot
+            && insn->operands[i] >= self->function.slot_count)
+        {
+            return lh_bool_false;
+        }
+    }
+    return lh_bool_true;
+}
+
 static lh_bool_t
 cnor_verify_operands(struct cnor_verify *self, const cnor_insn_t *insn)
 {
     const lh_u32_t operand = insn->operands[0];
 
+    if (!cnor_verify_slots(self, insn))
+    {
+        return lh_bool_false;
+    }
     switch (insn->op)
     {
     case cnor_op_push_const:
         return operand < self->view->const_count;
-    case cnor_op_load_local:
-    case cnor_op_store_local:
-        return operand < self->function.slot_count;
     case cnor_op_load_global:
     case cnor_op_store_global:
         return operand < self->view->header.globals_count;
@@ -61,6 +104,8 @@ cnor_verify_operands(struct cnor_verify *self, const cnor_insn_t *insn)
         return cnor_verify_call(self, insn);
     case cnor_op_native:
         return operand < self->view->native_count;
+    case cnor_op_switch:
+        return cnor_verify_switch(self, insn);
     default:
         return lh_bool_true;
     }
@@ -159,6 +204,20 @@ cnor_verify_step(struct cnor_verify *self, const cnor_insn_t *insn, lh_s32_t dep
         && !cnor_verify_reach(self, (lh_s64_t) insn->next, after, insn->at))
     {
         return lh_bool_false;
+    }
+    if (insn->op == cnor_op_switch)
+    {
+        /* Every later table entry, and the code after the table. */
+        lh_u32_t i;
+
+        for (i = 1U; i <= insn->operands[2]; ++i)
+        {
+            if (!cnor_verify_reach(self, (lh_s64_t) insn->next + i * CNOR_OP_SWITCH_ENTRY_SIZE,
+                                   after, insn->at))
+            {
+                return lh_bool_false;
+            }
+        }
     }
     return lh_bool_true;
 }

@@ -809,6 +809,448 @@ CNOR_TEST(rejects_functions_that_do_not_tile_the_code)
     p_deinit(&p);
 }
 
+/* -- operand forms and for_loop -------------------------------------------- */
+
+static void
+op_slot(program_t *p, cnor_op_t code, lh_u8_t slot)
+{
+    op(p, code);
+    cnor_byte_writer_put_u8(&p->code, slot);
+}
+
+static void
+op_slots(program_t *p, cnor_op_t code, lh_u8_t a, lh_u8_t b)
+{
+    op_slot(p, code, a);
+    cnor_byte_writer_put_u8(&p->code, b);
+}
+
+static void
+op_slot_s32(program_t *p, cnor_op_t code, lh_u8_t slot, lh_s32_t k)
+{
+    op_slot(p, code, slot);
+    cnor_byte_writer_put_u32(&p->code, (lh_u32_t) k);
+}
+
+static void
+op_for_loop(program_t *p, lh_s32_t jump, lh_u8_t var, lh_u8_t bound)
+{
+    op_u32(p, cnor_op_for_loop, (lh_u32_t) jump);
+    cnor_byte_writer_put_u8(&p->code, var);
+    cnor_byte_writer_put_u8(&p->code, bound);
+}
+
+/* Every operand-form opcode maps back to its plain operator, every encoded
+ * size matches its operand layout, and nothing else claims to be a form. */
+CNOR_TEST(describes_every_operand_form_in_the_op_table)
+{
+    lh_u32_t code;
+    int forms = 0;
+
+    for (code = 0U; code < (lh_u32_t) cnor_op_count; ++code)
+    {
+        const cnor_op_info_t *info = cnor_op_get_info((cnor_op_t) code);
+        cnor_operand_form_t form = cnor_operand_form_count;
+        const cnor_op_t base = cnor_op_get_binary_base((cnor_op_t) code, &form);
+        lh_u32_t size = 1U;
+        lh_u32_t k;
+
+        for (k = 0U; k < CNOR_OP_MAX_OPERANDS; ++k)
+        {
+            size += cnor_operand_get_size(info->operands[k]);
+        }
+        CHECK_EQ(size, info->size);
+        CHECK(info->size <= CNOR_OP_MAX_SIZE);
+        if (form != cnor_operand_form_stack)
+        {
+            forms++;
+            CHECK_EQ(cnor_op_get_operand_form(base, form), (cnor_op_t) code);
+        }
+        else
+        {
+            CHECK_EQ(base, (cnor_op_t) code);
+        }
+    }
+    CHECK_EQ(forms, 33);
+    CHECK_EQ(cnor_op_get_operand_form(cnor_op_add, cnor_operand_form_stack), cnor_op_add);
+    CHECK_EQ(cnor_op_get_operand_form(cnor_op_ge, cnor_operand_form_local_int), cnor_op_ge_li);
+    CHECK_EQ(cnor_op_get_operand_form(cnor_op_neg, cnor_operand_form_local_local), cnor_op_count);
+    CHECK_EQ(cnor_op_get_operand_form(cnor_op_add_ll, cnor_operand_form_local_int),
+             cnor_op_count);
+}
+
+/* slot 0 counts 0..4, slot 2 sums it: 6 set-up steps, then per pass three
+ * loads/adds, a store and one for_loop, then a load and the halt. */
+static void
+build_counted_loop(program_t *p, lh_s32_t to)
+{
+    p_init(p);
+    op_u32(p, cnor_op_push_i32, 0U);
+    op_slot(p, cnor_op_store_local, 0U);
+    op_u32(p, cnor_op_push_i32, (lh_u32_t) to);
+    op_slot(p, cnor_op_store_local, 1U);
+    op_u32(p, cnor_op_push_i32, 0U);
+    op_slot(p, cnor_op_store_local, 2U);
+    /* 21: body. */
+    op_slot(p, cnor_op_load_local, 2U);
+    op_slot(p, cnor_op_load_local, 0U);
+    op(p, cnor_op_add);
+    op_slot(p, cnor_op_store_local, 2U);
+    /* 28: back to 21, relative to the end at 35. */
+    op_for_loop(p, -14, 0U, 1U);
+    op_slot(p, cnor_op_load_local, 2U);
+    op(p, cnor_op_halt);
+    end_function(p, 0U, 0U, 3U, 2U);
+    build(p, 0U);
+}
+
+static cnor_error_t
+run_counted(program_t *p, cnor_step_count_t budget, cnor_step_count_t *steps, long long *sum)
+{
+    cnor_vm_t vm;
+    cnor_vm_config_t config = cnor_vm_config_initializer();
+    cnor_error_t code;
+
+    config.max_steps = budget;
+    cnor_vm_init(&vm, &config);
+    if (cnor_vm_load(&vm, p->image.data, p->image.size))
+    {
+        (void) cnor_vm_run(&vm);
+    }
+    code = vm_code(&vm);
+    *steps = cnor_vm_get_steps(&vm);
+    if (sum != lh_null)
+    {
+        const lh_value_t result = cnor_vm_get_result(&vm);
+
+        *sum = sint_of(&result);
+    }
+    cnor_vm_deinit(&vm);
+    return code;
+}
+
+CNOR_TEST(runs_a_counted_loop_one_step_per_pass)
+{
+    program_t p;
+    cnor_step_count_t steps = 0U;
+    cnor_step_count_t budget;
+    long long sum = 0;
+
+    build_counted_loop(&p, 4);
+    CHECK_EQ(run_counted(&p, 0U, &steps, &sum), cnor_error_none);
+    CHECK_EQ(sum, 0 + 1 + 2 + 3);
+    CHECK_EQ(steps, 6U + 4U * 5U + 2U);
+    /* Every budget short of that stops after exactly that many. */
+    for (budget = 1U; budget < 28U; ++budget)
+    {
+        CHECK_EQ(run_counted(&p, budget, &steps, lh_null), cnor_error_step_limit);
+        CHECK_EQ(steps, budget);
+    }
+    p_deinit(&p);
+    /* The body runs once even when the bound is behind: for_loop only tests
+     * after a pass, the compiler guards the entry. */
+    build_counted_loop(&p, -3);
+    CHECK_EQ(run_counted(&p, 0U, &steps, &sum), cnor_error_none);
+    CHECK_EQ(sum, 0);
+    CHECK_EQ(steps, 6U + 5U + 2U);
+    p_deinit(&p);
+}
+
+/* A non-number in the loop variable fails like `add` does, at the for_loop. */
+CNOR_TEST(fails_a_for_loop_over_text_like_its_add)
+{
+    program_t p;
+    cnor_vm_t vm;
+
+    p_init(&p);
+    add_const(&p, "a");
+    op(&p, cnor_op_push_const);
+    cnor_byte_writer_put_u16(&p.code, 0U);
+    op_slot(&p, cnor_op_store_local, 0U);
+    op_u32(&p, cnor_op_push_i32, 4U);
+    op_slot(&p, cnor_op_store_local, 1U);
+    /* 12: a loop on itself. */
+    op_for_loop(&p, -7, 0U, 1U);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 2U, 1U);
+    build(&p, 0U);
+    vm_open(&vm);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK(!cnor_vm_run(&vm));
+    CHECK_EQ(vm_code(&vm), cnor_error_type);
+    CHECK_EQ(cnor_diag_get_offset(cnor_vm_get_diag(&vm)), 12U);
+    cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
+/* Operand forms on non-integers go the slow way and agree with the stack
+ * forms: text joins and compares, a bad mix is a type error. */
+CNOR_TEST(runs_operand_forms_on_other_kinds)
+{
+    program_t p;
+    lh_value_t result;
+
+    p_init(&p);
+    add_const(&p, "ab");
+    add_const(&p, "cd");
+    op(&p, cnor_op_push_const);
+    cnor_byte_writer_put_u16(&p.code, 0U);
+    op_slot(&p, cnor_op_store_local, 0U);
+    op(&p, cnor_op_push_const);
+    cnor_byte_writer_put_u16(&p.code, 1U);
+    op_slot(&p, cnor_op_store_local, 1U);
+    op_slots(&p, cnor_op_add_ll, 0U, 1U);
+    op(&p, cnor_op_len);
+    op_slots(&p, cnor_op_ne_ll, 0U, 1U);
+    op(&p, cnor_op_pop);
+    op_u32(&p, cnor_op_add_i, 3U);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 2U, 2U);
+    build(&p, 0U);
+    CHECK_EQ(load_and_run(&p, &result), cnor_error_none);
+    CHECK_EQ(sint_of(&result), 7);
+    p_deinit(&p);
+
+    p_init(&p);
+    add_const(&p, "ab");
+    op(&p, cnor_op_push_const);
+    cnor_byte_writer_put_u16(&p.code, 0U);
+    op_slot(&p, cnor_op_store_local, 0U);
+    op_slot_s32(&p, cnor_op_lt_li, 0U, 1);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 1U, 1U);
+    build(&p, 0U);
+    CHECK_EQ(load_and_run(&p, &result), cnor_error_type);
+    p_deinit(&p);
+
+    p_init(&p);
+    op_u32(&p, cnor_op_push_i32, 5U);
+    op_slot(&p, cnor_op_store_local, 0U);
+    op_slot_s32(&p, cnor_op_mod_li, 0U, 0);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 1U, 1U);
+    build(&p, 0U);
+    CHECK_EQ(load_and_run(&p, &result), cnor_error_div_by_zero);
+    p_deinit(&p);
+}
+
+CNOR_TEST(rejects_slot_operands_outside_the_frame)
+{
+    program_t p;
+
+    p_init(&p);
+    op_slots(&p, cnor_op_add_ll, 0U, 1U);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 1U, 1U);
+    build(&p, 0U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_operand);
+    p_deinit(&p);
+
+    p_init(&p);
+    op_slot_s32(&p, cnor_op_lt_li, 3U, 7);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 3U, 1U);
+    build(&p, 0U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_operand);
+    p_deinit(&p);
+
+    p_init(&p);
+    op_for_loop(&p, -7, 0U, 9U);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 2U, 0U);
+    build(&p, 0U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_operand);
+    p_deinit(&p);
+
+    /* In range they load. */
+    p_init(&p);
+    op_for_loop(&p, -7, 0U, 1U);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 2U, 0U);
+    build(&p, 0U);
+    CHECK_EQ(load_error(&p), cnor_error_none);
+    p_deinit(&p);
+}
+
+CNOR_TEST(rejects_a_for_loop_into_the_middle_of_an_instruction)
+{
+    program_t p;
+
+    p_init(&p);
+    op_for_loop(&p, -3, 0U, 1U);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 2U, 0U);
+    build(&p, 0U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_jump);
+    p_deinit(&p);
+}
+
+CNOR_TEST(rejects_a_stack_form_without_its_operand)
+{
+    program_t p;
+
+    p_init(&p);
+    op_u32(&p, cnor_op_add_i, 1U);
+    op(&p, cnor_op_halt);
+    build(&p, 1U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_stack);
+    p_deinit(&p);
+}
+
+/* -- switch ---------------------------------------------------------------- */
+
+static void
+op_switch(program_t *p, lh_u8_t slot, lh_s32_t first, lh_u8_t count)
+{
+    op_slot_s32(p, cnor_op_switch, slot, first);
+    cnor_byte_writer_put_u8(&p->code, count);
+}
+
+/*
+ * Slot 0 holds the subject @p subject_op pushes; `switch` on 10..12 picks a
+ * result 0, 1 or 2, or 99 after the table:
+ *
+ *     S: switch 0, 10, 3
+ *     S+7: jmp e0; jmp e1; jmp e2
+ *     S+22: push 99; halt
+ *     S+28: e0: push 0; halt   S+34: e1: push 1; halt   S+40: e2: push 2; halt
+ */
+static void
+build_switch(program_t *p, cnor_op_t subject_op, lh_u32_t subject)
+{
+    p_init(p);
+    if (subject_op == cnor_op_push_const)
+    {
+        add_const(p, "11");
+        op(p, cnor_op_push_const);
+        cnor_byte_writer_put_u16(&p->code, 0U);
+    }
+    else
+    {
+        op_u32(p, subject_op, subject);
+    }
+    op_slot(p, cnor_op_store_local, 0U);
+    op_switch(p, 0U, 10, 3U);
+    op_u32(p, cnor_op_jmp, 16U);
+    op_u32(p, cnor_op_jmp, 17U);
+    op_u32(p, cnor_op_jmp, 18U);
+    op_u32(p, cnor_op_push_i32, 99U);
+    op(p, cnor_op_halt);
+    op_u32(p, cnor_op_push_i32, 0U);
+    op(p, cnor_op_halt);
+    op_u32(p, cnor_op_push_i32, 1U);
+    op(p, cnor_op_halt);
+    op_u32(p, cnor_op_push_i32, 2U);
+    op(p, cnor_op_halt);
+    end_function(p, 0U, 0U, 1U, 1U);
+    build(p, 0U);
+}
+
+/* A signed subject indexes the table; others compare by `==`, so an unsigned
+ * 11 finds the same entry and text none. The entry's jump is a step of its
+ * own, also when it runs fused with the switch. */
+CNOR_TEST(switches_on_an_integer_by_its_value)
+{
+    static const struct
+    {
+        cnor_op_t op;
+        lh_u32_t subject;
+        long long result;
+        cnor_step_count_t steps;
+    } cases[] = {
+        {cnor_op_push_i32, 10U, 0, 6U},
+        {cnor_op_push_i32, 11U, 1, 6U},
+        {cnor_op_push_i32, 12U, 2, 6U},
+        {cnor_op_push_i32, 13U, 99, 5U},
+        {cnor_op_push_i32, 9U, 99, 5U},
+        {cnor_op_push_i32, 0x80000000U, 99, 5U},
+        {cnor_op_push_u32, 11U, 1, 6U},
+        {cnor_op_push_u32, 0xFFFFFFFFU, 99, 5U},
+        {cnor_op_push_const, 0U, 99, 5U},
+    };
+    size_t k;
+
+    for (k = 0U; k < sizeof(cases) / sizeof(cases[0]); ++k)
+    {
+        program_t p;
+        cnor_step_count_t steps = 0U;
+        cnor_step_count_t budget;
+        long long result = 0;
+
+        build_switch(&p, cases[k].op, cases[k].subject);
+        CHECK_EQ(run_counted(&p, 0U, &steps, &result), cnor_error_none);
+        CHECK_EQ(result, cases[k].result);
+        CHECK_EQ(steps, cases[k].steps);
+        for (budget = 1U; budget < cases[k].steps; ++budget)
+        {
+            CHECK_EQ(run_counted(&p, budget, &steps, lh_null), cnor_error_step_limit);
+            CHECK_EQ(steps, budget);
+        }
+        p_deinit(&p);
+    }
+}
+
+CNOR_TEST(rejects_a_switch_without_its_table)
+{
+    program_t p;
+
+    /* No entries. */
+    p_init(&p);
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op_slot(&p, cnor_op_store_local, 0U);
+    op_switch(&p, 0U, 0, 0U);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 1U, 1U);
+    build(&p, 0U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_operand);
+    p_deinit(&p);
+
+    /* An entry that is not a jmp. */
+    p_init(&p);
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op_slot(&p, cnor_op_store_local, 0U);
+    op_switch(&p, 0U, 0, 2U);
+    op_u32(&p, cnor_op_jmp, 5U);
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 1U, 1U);
+    build(&p, 0U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_operand);
+    p_deinit(&p);
+
+    /* More entries than the function holds. */
+    p_init(&p);
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op_slot(&p, cnor_op_store_local, 0U);
+    op_switch(&p, 0U, 0, 3U);
+    op_u32(&p, cnor_op_jmp, (lh_u32_t) -19);
+    end_function(&p, 0U, 0U, 1U, 1U);
+    build(&p, 0U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_operand);
+    p_deinit(&p);
+
+    /* Nothing after the table for the values without an entry. */
+    p_init(&p);
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op_slot(&p, cnor_op_store_local, 0U);
+    op_switch(&p, 0U, 0, 1U);
+    op_u32(&p, cnor_op_jmp, (lh_u32_t) -19);
+    end_function(&p, 0U, 0U, 1U, 1U);
+    build(&p, 0U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_jump);
+    p_deinit(&p);
+
+    /* A subject outside the frame. */
+    p_init(&p);
+    op_switch(&p, 1U, 0, 1U);
+    op_u32(&p, cnor_op_jmp, 0U);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 1U, 1U);
+    build(&p, 0U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_operand);
+    p_deinit(&p);
+}
+
 static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(refuses_a_buffer_shorter_than_a_header),
     CNOR_TEST_CASE(refuses_a_buffer_without_the_signature),
@@ -842,6 +1284,15 @@ static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(rejects_operands_outside_their_tables),
     CNOR_TEST_CASE(rejects_a_call_with_the_wrong_argument_count),
     CNOR_TEST_CASE(rejects_functions_that_do_not_tile_the_code),
+    CNOR_TEST_CASE(describes_every_operand_form_in_the_op_table),
+    CNOR_TEST_CASE(runs_a_counted_loop_one_step_per_pass),
+    CNOR_TEST_CASE(fails_a_for_loop_over_text_like_its_add),
+    CNOR_TEST_CASE(runs_operand_forms_on_other_kinds),
+    CNOR_TEST_CASE(rejects_slot_operands_outside_the_frame),
+    CNOR_TEST_CASE(rejects_a_for_loop_into_the_middle_of_an_instruction),
+    CNOR_TEST_CASE(rejects_a_stack_form_without_its_operand),
+    CNOR_TEST_CASE(switches_on_an_integer_by_its_value),
+    CNOR_TEST_CASE(rejects_a_switch_without_its_table),
 };
 
 int

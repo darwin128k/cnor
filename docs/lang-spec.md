@@ -1,6 +1,6 @@
 # The cnor language
 
-Status: draft, language version 0.1, image format v1.
+Status: draft, language version 0.1, image format v3.
 
 > A small script language for embedded systems and hosts, run by an
 > interpreter built on `lh`.
@@ -202,18 +202,20 @@ closures, a preprocessor, metatables, arrays.
 
 ---
 
-## 7. The `.tbc` image format, v1
+## 7. The `.tbc` image format, v3
 
-**[cnor]** v1 replaces the original header (whose layout used `sizeof` and
+**[cnor]** v1 replaced the original header (whose layout used `sizeof` and
 was not portable) and its names section. Every field is a fixed-width
-little-endian integer; nothing depends on the compiler's struct layout.
+little-endian integer; nothing depends on the compiler's struct layout. v2
+keeps the v1 layout and adds opcodes (the operand forms and `for_loop`,
+section 8); v3 adds `switch`. An image of another version is refused.
 
 ### 7.1 Header (68 bytes)
 
 | Offset | Field | Type | Meaning |
 |---|---|---|---|
 | 0 | `magic` | 4 bytes | `"cnor"` |
-| 4 | `version` | u16 | format version, currently 1 |
+| 4 | `version` | u16 | format version, currently 2 |
 | 6 | `flags` | u16 | bit 0: the image carries a line table |
 | 8 | `image_size` | u32 | size of the whole image |
 | 12 | `stack_slots` | u32 | largest frame (slots + operands), **computed by the compiler** |
@@ -264,7 +266,7 @@ relocation pass.
 
 ## 8. Instruction set
 
-The full list is `include/cnor/op.h` and its info table `src/cnor/op.c`: 35
+The full list is `include/cnor/op.h` and its info table `src/cnor/op.c`: 70
 opcodes. An opcode is one byte; operands follow it, little-endian. The info
 table holds each opcode's operands and stack effect; the compiler, the
 verifier and the machine all read it.
@@ -277,7 +279,8 @@ verifier and the machine all read it.
 | Arithmetic | `add`, `sub`, `mul`, `div`, `mod`, `neg` |
 | Comparison | `eq`, `ne`, `lt`, `le`, `gt`, `ge` |
 | Logic | `not` |
-| Jumps | `jmp`, `jmp_if_false`, `jmp_if_true` |
+| Operand forms | `add_ll` .. `ge_ll`, `add_li` .. `ge_li`, `add_i` .. `ge_i` |
+| Jumps | `jmp`, `jmp_if_false`, `jmp_if_true`, `for_loop`, `switch` |
 | Functions | `call`, `ret`, `native` |
 | Text | `len`, `index` |
 | Other | `halt` |
@@ -285,6 +288,42 @@ verifier and the machine all read it.
 Operands: `push_i32` / `push_u32`: 32 bits; `push_const`: u16 ordinal; local
 slot: u8; global index: u16; `jmp*`: s32 offset from the end of the
 instruction; `call` / `native`: u16 index, then u8 argument count.
+
+**Operand forms.** **[cnor]** Each of the eleven binary operators `add` `sub`
+`mul` `div` `mod` `eq` `ne` `lt` `le` `gt` `ge` has three more opcodes that
+take their operands from somewhere other than the stack, so the common
+`x < n`, `i + 1` or `s + i` is one instruction instead of three:
+
+| Form | Operands | Computes |
+|---|---|---|
+| `<op>_ll` | slot a, slot b | push `FRAME.a <op> FRAME.b` |
+| `<op>_li` | slot a, s32 k | push `FRAME.a <op> k` |
+| `<op>_i` | s32 k | replace the top `t` with `t <op> k` |
+
+`k` is a signed 32-bit integer value. A form computes exactly what the plain
+operator computes on the same two values: the same kinds, results and errors.
+The compiler picks a form when an operand is a local or an integer literal (a
+negated literal included) and the plain operator otherwise. A `match` arm with
+an integer pattern tests the subject with `eq_li`, unless the whole `match`
+uses a `switch` (below).
+
+**`for_loop`** (s32 offset, slot v, slot b) is one step of `for v in a..b`:
+`FRAME.v = FRAME.v + 1`, then it jumps when `FRAME.v < FRAME.b`, both by the
+rules of `add` and `lt`. The compiler emits `lt_ll v, b` and `jmp_if_false`
+before the first pass, so a range that starts at or past its end runs zero
+times, then the body, then `for_loop` back to the body; `continue` jumps to
+the `for_loop`.
+
+**`switch`** (slot v, s32 k, u8 count; format v3) is followed by its table,
+`count` (at least 1) `jmp` instructions. When `FRAME.v == k + i` by the rule
+of `==` for some `i` below `count`, execution continues at the `i`-th `jmp`;
+otherwise right after the table. The verifier checks that the table is all
+`jmp`s inside the function and that code follows it. The compiler uses it for
+a `match` with at least four distinct `i32` patterns, then at most a final
+`_`, spanning at most twice as many values as arms (and at most 255): arm
+bodies follow the default code, holes in the range jump to the default. The
+arm that runs is the one the tests in turn would pick, since the patterns
+are distinct; it costs two steps (the `switch` and its `jmp`) to reach.
 
 **[cnor]** `concat` is gone (`add` joins two strings); `line` is gone (the
 optional line table replaces it, so line information costs nothing at run
@@ -294,7 +333,8 @@ Three things are deliberately absent:
 
 - **`break`, `continue`, `and`, `or`** are compiled to `jmp*`. The target is
   known when the branch is emitted; a dedicated opcode would make the machine
-  guess where a loop ends.
+  guess where a loop ends. In the condition of `if` or `while`, `and`, `or`
+  and `not` jump straight to the branch targets and never build a value.
 - **`else`** is a jump target, not an instruction.
 - **Arrays.** `lh_value_t` has no array kind, and adding one for a container is
   exactly the kind of abstraction the language stays tiny to avoid. Indexing
@@ -307,7 +347,8 @@ part of the file format.
 
 Before a single instruction runs, the loader proves that functions tile the
 code in order; every instruction decodes inside its function and the last one
-does not fall through; every operand indexes inside its table and every call
+does not fall through; every operand indexes inside its table (a local slot
+inside its function's frame) and every call
 passes the callee's parameter count; every jump lands on an instruction start
 inside the same function; and the operand stack never underflows, agrees at
 every join and stays within the function's declared depth, which itself fits
@@ -422,7 +463,7 @@ and the machine) and, when the failure is about a name, a copy of that name.
 
 ## 14. Status
 
-Done and covered by tests (`tests/`, 138 cases):
+Done and covered by tests (`tests/`, 169 cases):
 
 - [x] lexer: tokens, keywords, indentation as `indent` / `dedent`, newline
   tokens, bracket continuations, `#` comments, integers in three bases, reals,
@@ -432,12 +473,15 @@ Done and covered by tests (`tests/`, 138 cases):
   with literal patterns and `_`;
 - [x] compiler: every construct above, two passes (declarations, then bodies),
   computed frame sizes and stack depths, optional line table;
-- [x] image format v1: writer, reader, load-time verifier;
+- [x] image format v3: writer, reader, load-time verifier;
 - [x] machine: arithmetic, comparisons, jumps, calls, natives bound by name at
   load, strings, globals, line mapping for errors, a per-run instruction
   budget;
 - [x] performance: a dispatch loop with inline fast paths and computed goto,
-  loops tested at the bottom, a benchmark suite (`bench/`).
+  loops tested at the bottom, operand forms on locals and immediates, a
+  one-instruction `for` step, inline string indexing, `len`, equality and
+  joins, conditions compiled to jumps, jump tables for dense integer
+  `match`, in-place global updates, a benchmark suite (`bench/`).
 
 Not done, in a sensible order:
 
@@ -458,7 +502,7 @@ Not done, in a sensible order:
 | Newlines | implicit | `NEWLINE` token | Removes statement-boundary ambiguity |
 | Match arms | parser bound a name pattern | literal or `_` only | The spec says literal patterns |
 | Keywords | no `in`, no `none` | both | `for x in` and the `none` literal need them |
-| Header | `sizeof`-based, names section | v1, fixed-width LE, function/native/line tables | Portability |
+| Header | `sizeof`-based, names section | v1 (now v3), fixed-width LE, function/native/line tables | Portability |
 | `line` opcode | inline | line table | Zero run-time cost |
 | Natives | resolved to host indices by the compiler | bound by name at load | Images survive host table changes |
 | Reset | rewound the stack past globals | sets globals to `none` | Clean state per event |

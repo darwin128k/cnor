@@ -1,6 +1,6 @@
 /**
  * @file vm.h
- * @brief The interpreter (::cnor_vm_t): load a v1 image, run it, read the result.
+ * @brief The interpreter (::cnor_vm_t): load a v3 image, run it, read the result.
  *
  * Loading checks the image (header, sections, verifier), binds every native
  * import by name against the host table, decodes the constants and allocates

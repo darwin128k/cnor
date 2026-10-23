@@ -108,11 +108,30 @@ lh_bool_t cnor_vm_op_ret(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_native(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_len(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_index(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_operands(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_for_loop(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_switch(cnor_vm_t *vm, const cnor_insn_t *insn);
 
-/** @brief Join two strings into the pool (`add` on two strings). */
+/**
+ * @brief `add` `sub` `mul` `div` `mod` (@p op) on two values, into @p out;
+ *        failures are reported at @p insn.
+ */
+lh_bool_t
+cnor_vm_arith_values(cnor_vm_t *vm, const cnor_insn_t *insn, cnor_op_t op,
+                     const lh_value_t *left, const lh_value_t *right, lh_value_t *out);
+
+/**
+ * @brief `eq` `ne` `lt` `le` `gt` `ge` (@p op) on two values, into @p out as a
+ *        boolean; failures are reported at @p insn.
+ */
+lh_bool_t
+cnor_vm_compare_values(cnor_vm_t *vm, const cnor_insn_t *insn, cnor_op_t op,
+                       const lh_value_t *left, const lh_value_t *right, lh_value_t *out);
+
+/** @brief Join two strings into the pool (`add` on two strings), into @p out. */
 lh_bool_t
 cnor_vm_text_join(cnor_vm_t *vm, const cnor_insn_t *insn, const lh_value_t *left,
-                  const lh_value_t *right);
+                  const lh_value_t *right, lh_value_t *out);
 
 /**
  * @brief Replace @p text with its character at @p index (`text[index]`).

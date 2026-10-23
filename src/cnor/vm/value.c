@@ -1,3 +1,4 @@
+#include <cnor/vm/fast.h>
 #include <cnor/vm/internal.h>
 
 #if LH_REAL_ENABLED
@@ -158,6 +159,10 @@ cnor_vm_value_equals(const lh_value_t *left, const lh_value_t *right)
         }
 #endif
         return cnor_vm_value_compare(left, right) == 0 ? lh_bool_true : lh_bool_false;
+    }
+    if (cnor_vm_fast_both_str(left, right))
+    {
+        return cnor_vm_fast_str_equals(left, right) ? lh_bool_true : lh_bool_false;
     }
     return lh_value_equals(left, right);
 }

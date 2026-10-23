@@ -17,7 +17,10 @@
 #include <lh/bool.h>
 #include <lh/byte.h>
 #include <lh/compiler/attribute/force_inline.h>
+#include <cnor/vm/str_pool.h>
+#include <lh/bit/endian.h>
 #include <lh/compiler/type.h>
+#include <lh/memory/std.h>
 #include <lh/null.h>
 #include <lh/numeric/fixed/types.h>
 #include <lh/value.h>
@@ -92,6 +95,182 @@ cnor_vm_fast_set_uint(lh_value_t *value, lh_ullong_t number)
 {
     value->kind = lh_value_kind_uint;
     value->data.u = number;
+}
+
+/** @brief Whether both values are strings. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE int
+cnor_vm_fast_both_str(const lh_value_t *left, const lh_value_t *right)
+{
+    return (left->kind == lh_value_kind_str) & (right->kind == lh_value_kind_str);
+}
+
+/** @brief First byte of the string @p value holds; its kind is known. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE const lh_char_t *
+cnor_vm_fast_str_data(const lh_value_t *value)
+{
+    return (const lh_char_t *) value->data.s.begin;
+}
+
+/** @brief Length in bytes of the string @p value holds; its kind is known. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_usize_t
+cnor_vm_fast_str_size(const lh_value_t *value)
+{
+    return value->data.s.size;
+}
+
+/**
+ * @brief Overwrite @p value with the string of @p size bytes at @p data; the
+ *        same value `lh_value_make_str` builds, without the 24-byte return.
+ */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE void
+cnor_vm_fast_set_str(lh_value_t *value, const lh_char_t *data, lh_usize_t size)
+{
+    value->kind = lh_value_kind_str;
+    value->data.s.begin = data;
+    value->data.s.size = size;
+}
+
+/** @def CNOR_VM_FAST_LONG_TEXT @brief Beyond this many bytes a call into lh's
+ *       block compare and copy beats the inline word loop. */
+#define CNOR_VM_FAST_LONG_TEXT 64U
+
+/** @brief The 8 bytes at @p at as one word, at any alignment. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_u64_t
+cnor_vm_fast_word(const lh_char_t *at)
+{
+    return lh_bit_unpack_le64((const lh_byte_ptr) at);
+}
+
+/** @brief The 4 bytes at @p at as one word, at any alignment. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_u32_t
+cnor_vm_fast_half_word(const lh_char_t *at)
+{
+    return lh_bit_unpack_le32((const lh_byte_ptr) at);
+}
+
+/**
+ * @brief Whether the @p size bytes at @p a and @p b are the same; @p size is
+ *        at least 1. The last word is compared first (keys often share a
+ *        prefix and differ at the end), then the rest a word at a time, the
+ *        words overlapping rather than running a byte loop over a tail.
+ */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE int
+cnor_vm_fast_bytes_equal(const lh_char_t *a, const lh_char_t *b, lh_usize_t size)
+{
+    lh_usize_t i;
+
+    if (size >= 8U)
+    {
+        if (cnor_vm_fast_word(a + size - 8U) != cnor_vm_fast_word(b + size - 8U))
+        {
+            return 0;
+        }
+        if (size > CNOR_VM_FAST_LONG_TEXT)
+        {
+            return lh_memory_std_compare((lh_ptr) a, (lh_ptr) b, size - 8U) == lh_null ? 1 : 0;
+        }
+        for (i = 0U; i + 8U < size; i += 8U)
+        {
+            if (cnor_vm_fast_word(a + i) != cnor_vm_fast_word(b + i))
+            {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    if (size >= 4U)
+    {
+        return cnor_vm_fast_half_word(a + size - 4U) == cnor_vm_fast_half_word(b + size - 4U)
+               && cnor_vm_fast_half_word(a) == cnor_vm_fast_half_word(b);
+    }
+    /* 1 to 3 bytes: first, middle and last cover them all. */
+    return a[size - 1U] == b[size - 1U] && a[0] == b[0] && a[size / 2U] == b[size / 2U];
+}
+
+/**
+ * @brief Whether two strings hold the same bytes; the rule of
+ *        `lh_value_equals` for two strings (case-sensitive, length first),
+ *        without its call chain. The same view, or two empty ones, is equal
+ *        without reading a byte.
+ */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE int
+cnor_vm_fast_str_equals(const lh_value_t *left, const lh_value_t *right)
+{
+    const lh_usize_t size = cnor_vm_fast_str_size(left);
+    const lh_char_t *const a = cnor_vm_fast_str_data(left);
+    const lh_char_t *const b = cnor_vm_fast_str_data(right);
+
+    if (size != cnor_vm_fast_str_size(right))
+    {
+        return 0;
+    }
+    if (a == b || size == 0U)
+    {
+        return 1;
+    }
+    return cnor_vm_fast_bytes_equal(a, b, size);
+}
+
+/** @brief Copy @p size bytes from @p from to @p to; the ranges do not overlap. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE void
+cnor_vm_fast_copy(lh_char_t *to, const lh_char_t *from, lh_usize_t size)
+{
+    lh_usize_t i;
+
+    if (size > CNOR_VM_FAST_LONG_TEXT)
+    {
+        (void) lh_memory_std_copy(to, (lh_ptr) from, size);
+        return;
+    }
+    if (size >= 8U)
+    {
+        /* Whole words, the last one overlapping what is already copied. */
+        for (i = 0U; i + 8U < size; i += 8U)
+        {
+            lh_bit_pack_le64(cnor_vm_fast_word(from + i), (lh_byte_ptr) (to + i));
+        }
+        lh_bit_pack_le64(cnor_vm_fast_word(from + size - 8U), (lh_byte_ptr) (to + size - 8U));
+        return;
+    }
+    for (i = 0U; i < size; ++i)
+    {
+        to[i] = from[i];
+    }
+}
+
+/**
+ * @brief `left + right` for two strings into @p out (which may be either
+ *        operand): the bytes are copied into @p pool, except that two empty
+ *        strings give @p left itself.
+ * @return 0, with nothing changed, when the pool cannot hold the result.
+ */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE int
+cnor_vm_fast_join(cnor_str_pool_t *pool, lh_value_t *out, const lh_value_t *left,
+                  const lh_value_t *right)
+{
+    const lh_usize_t a_size = cnor_vm_fast_str_size(left);
+    const lh_usize_t b_size = cnor_vm_fast_str_size(right);
+    const lh_ullong_t total = (lh_ullong_t) a_size + (lh_ullong_t) b_size;
+    const lh_char_t *const a = cnor_vm_fast_str_data(left);
+    const lh_char_t *const b = cnor_vm_fast_str_data(right);
+    lh_char_t *bytes;
+
+    if (total == 0U)
+    {
+        *out = *left;
+        return 1;
+    }
+    /* A pool without a block has no room either, and no pool holds 4 GiB. */
+    if ((lh_ullong_t) (pool->size - pool->used) < total)
+    {
+        return 0;
+    }
+    bytes = pool->data + pool->used;
+    pool->used += (lh_u32_t) total;
+    cnor_vm_fast_copy(bytes, a, a_size);
+    cnor_vm_fast_copy(bytes + a_size, b, b_size);
+    cnor_vm_fast_set_str(out, bytes, (lh_usize_t) total);
+    return 1;
 }
 
 /**

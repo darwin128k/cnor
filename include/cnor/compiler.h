@@ -5,7 +5,7 @@
  * The compiler resolves every name (local slot, global index, function index,
  * native import), writes the code section one function after another, builds
  * the constant pool, the function table and the optional line table, computes
- * every function's frame size and operand stack depth, and assembles a v1
+ * every function's frame size and operand stack depth, and assembles a v3
  * image (see image.h).
  *
  * Statements and expressions are compiled through a table keyed by node kind,

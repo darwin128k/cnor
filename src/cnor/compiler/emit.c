@@ -93,6 +93,7 @@ cnor_emit_operand(cnor_emit_t *self, cnor_operand_kind_t kind, lh_u32_t value)
     switch (kind)
     {
     case cnor_operand_u8:
+    case cnor_operand_slot:
         cnor_byte_writer_put_u8(&self->code, (lh_u8_t) value);
         break;
     case cnor_operand_u16:
@@ -108,7 +109,7 @@ cnor_emit_operand(cnor_emit_t *self, cnor_operand_kind_t kind, lh_u32_t value)
 }
 
 lh_bool_t
-cnor_emit_insn(cnor_compiler_t *self, cnor_op_t op, lh_u32_t a, lh_u32_t b)
+cnor_emit_insn3(cnor_compiler_t *self, cnor_op_t op, lh_u32_t a, lh_u32_t b, lh_u32_t c)
 {
     const cnor_op_info_t *info = cnor_op_get_info(op);
 
@@ -116,7 +117,14 @@ cnor_emit_insn(cnor_compiler_t *self, cnor_op_t op, lh_u32_t a, lh_u32_t b)
     cnor_byte_writer_put_u8(&self->emit.code, (lh_u8_t) op);
     cnor_emit_operand(&self->emit, info->operands[0], a);
     cnor_emit_operand(&self->emit, info->operands[1], b);
+    cnor_emit_operand(&self->emit, info->operands[2], c);
     return cnor_emit_track(self, op, b);
+}
+
+lh_bool_t
+cnor_emit_insn(cnor_compiler_t *self, cnor_op_t op, lh_u32_t a, lh_u32_t b)
+{
+    return cnor_emit_insn3(self, op, a, b, 0U);
 }
 
 lh_bool_t
@@ -155,8 +163,19 @@ cnor_emit_meet(cnor_compiler_t *self, cnor_label_t *label, lh_s32_t depth)
     return lh_bool_true;
 }
 
+/* Distance from the end of the jump whose operand is at @p operand_at (right
+ * after its opcode) to @p target. */
+static lh_u32_t
+cnor_emit_distance(const lh_byte_t *code, lh_u32_t operand_at, cnor_code_addr_t target)
+{
+    const cnor_op_info_t *info = cnor_op_get_info((cnor_op_t) code[operand_at - 1U]);
+
+    return (lh_u32_t) ((lh_s64_t) target - (lh_s64_t) (operand_at - 1U + info->size));
+}
+
 lh_bool_t
-cnor_emit_jump(cnor_compiler_t *self, cnor_op_t op, cnor_label_t *label)
+cnor_emit_jump_with(cnor_compiler_t *self, cnor_op_t op, cnor_label_t *label, lh_u32_t b,
+                    lh_u32_t c)
 {
     cnor_emit_t *emit = &self->emit;
     const cnor_code_addr_t operand_at = cnor_emit_get_addr(emit) + 1U;
@@ -166,7 +185,8 @@ cnor_emit_jump(cnor_compiler_t *self, cnor_op_t op, cnor_label_t *label)
     if (label->bound)
     {
         /* Backward: the distance is known now. */
-        operand = (lh_u32_t) ((lh_s64_t) label->addr - (lh_s64_t) (operand_at + 4U));
+        operand = (lh_u32_t) ((lh_s64_t) label->addr
+                              - (lh_s64_t) (operand_at - 1U + cnor_op_get_info(op)->size));
     }
     else
     {
@@ -174,12 +194,18 @@ cnor_emit_jump(cnor_compiler_t *self, cnor_op_t op, cnor_label_t *label)
         operand = label->pending;
         label->pending = operand_at;
     }
-    if (!cnor_emit_insn(self, op, operand, 0U))
+    if (!cnor_emit_insn3(self, op, operand, b, c))
     {
         return lh_bool_false;
     }
     return was_reachable ? cnor_emit_meet(self, label, emit->depth)
                          : lh_bool_true;
+}
+
+lh_bool_t
+cnor_emit_jump(cnor_compiler_t *self, cnor_op_t op, cnor_label_t *label)
+{
+    return cnor_emit_jump_with(self, op, label, 0U, 0U);
 }
 
 lh_bool_t
@@ -196,7 +222,7 @@ cnor_emit_bind(cnor_compiler_t *self, cnor_label_t *label)
         const lh_u32_t at = label->pending;
 
         label->pending = lh_bit_unpack_le32(code + at);
-        lh_bit_pack_le32((lh_u32_t) ((lh_s64_t) label->addr - (lh_s64_t) (at + 4U)), code + at);
+        lh_bit_pack_le32(cnor_emit_distance(code, at, label->addr), code + at);
     }
     if (emit->reachable && !cnor_emit_meet(self, label, emit->depth))
     {

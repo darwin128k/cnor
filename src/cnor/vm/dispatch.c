@@ -7,9 +7,9 @@
  * instruction start, every index is in range and the operand stack stays
  * within its declared depth) and executes the common cases inline: constants,
  * locals, globals, signed-integer arithmetic and comparisons, jumps, calls,
- * returns, natives, string indexing and equality.
+ * returns, natives, and on strings indexing, `len`, equality and joins.
  *
- * Everything else (unsigned and real numbers, string joins, `len`, `halt`,
+ * Everything else (unsigned and real numbers, `halt`, a full string pool,
  * failures) goes through the slow path: the locals are written back to the
  * machine, the instruction is decoded and its handler from the table below
  * runs, exactly as it would without the fast paths. A fast path therefore
@@ -38,7 +38,12 @@
 #    endif
 #endif
 
-_Static_assert(cnor_op_count == 35, "a new opcode needs a handler and a dispatch label below");
+_Static_assert(cnor_op_count == 70, "a new opcode needs a handler and a dispatch label below");
+
+/* The three operand forms of binary operator @p name share one handler. */
+#define CNOR_VM_FORM_HANDLERS(name)                                                                \
+    [cnor_op_##name##_ll] = cnor_vm_op_operands, [cnor_op_##name##_li] = cnor_vm_op_operands,     \
+    [cnor_op_##name##_i] = cnor_vm_op_operands
 
 /* One handler per opcode, for the slow path; families share a handler and
  * look at `insn->op`. */
@@ -78,6 +83,19 @@ static const cnor_vm_handler_t m_handlers[cnor_op_count] = {
     [cnor_op_native] = cnor_vm_op_native,
     [cnor_op_len] = cnor_vm_op_len,
     [cnor_op_index] = cnor_vm_op_index,
+    CNOR_VM_FORM_HANDLERS(add),
+    CNOR_VM_FORM_HANDLERS(sub),
+    CNOR_VM_FORM_HANDLERS(mul),
+    CNOR_VM_FORM_HANDLERS(div),
+    CNOR_VM_FORM_HANDLERS(mod),
+    CNOR_VM_FORM_HANDLERS(eq),
+    CNOR_VM_FORM_HANDLERS(ne),
+    CNOR_VM_FORM_HANDLERS(lt),
+    CNOR_VM_FORM_HANDLERS(le),
+    CNOR_VM_FORM_HANDLERS(gt),
+    CNOR_VM_FORM_HANDLERS(ge),
+    [cnor_op_for_loop] = cnor_vm_op_for_loop,
+    [cnor_op_switch] = cnor_vm_op_switch,
 };
 
 /* -- out of the loop ------------------------------------------------------- */
@@ -187,47 +205,67 @@ cnor_vm_slow(cnor_vm_t *vm)
 
 /*
  * Tails shared by binary operators on signed integers. `pc` is at the operator,
- * whose operands are gone except for the slot that takes the result, sp[-1].
+ * which is @p n bytes long; the result goes to sp[-1], the slot the operator
+ * leaves its value in.
  *
  * A comparison followed by a conditional jump takes the jump without building
  * the boolean; arithmetic followed by `store_local` stores into the slot
  * directly.
  */
-#define CNOR_VM_BRANCH_OR_SET(expr)                                                                \
+#define CNOR_VM_BRANCH_OR_SET(n, expr)                                                             \
     do                                                                                             \
     {                                                                                              \
         const int truth = (expr);                                                                  \
                                                                                                    \
-        if ((pc[1] == cnor_op_jmp_if_false || pc[1] == cnor_op_jmp_if_true) && CNOR_VM_CAN_FUSE()) \
+        if ((pc[n] == cnor_op_jmp_if_false || pc[n] == cnor_op_jmp_if_true) && CNOR_VM_CAN_FUSE()) \
         {                                                                                          \
-            const int taken = truth == (pc[1] == cnor_op_jmp_if_true);                             \
+            const int taken = truth == (pc[n] == cnor_op_jmp_if_true);                             \
                                                                                                    \
             ++steps;                                                                               \
             --sp;                                                                                  \
-            pc += taken ? 6 + cnor_vm_fast_s32(pc + 2) : 6;                                        \
+            pc += taken ? (n) + 5 + cnor_vm_fast_s32(pc + (n) + 1) : (n) + 5;                      \
             CNOR_VM_NEXT();                                                                        \
         }                                                                                          \
         cnor_vm_fast_set_bool(&sp[-1], truth);                                                     \
-        pc += 1;                                                                                   \
+        pc += (n);                                                                                 \
         CNOR_VM_NEXT();                                                                            \
     } while (0)
 
-#define CNOR_VM_STORE_OR_SET(expr)                                                                 \
+#define CNOR_VM_STORE_OR_SET(n, expr)                                                              \
     do                                                                                             \
     {                                                                                              \
         const lh_sllong_t result = (expr);                                                         \
                                                                                                    \
-        if (pc[1] == cnor_op_store_local && CNOR_VM_CAN_FUSE())                                    \
+        if (pc[n] == cnor_op_store_local && CNOR_VM_CAN_FUSE())                                    \
         {                                                                                          \
             ++steps;                                                                               \
             --sp;                                                                                  \
-            cnor_vm_fast_set_sint(&fp[pc[2]], result);                                             \
-            pc += 3;                                                                               \
+            cnor_vm_fast_set_sint(&fp[pc[(n) + 1]], result);                                       \
+            pc += (n) + 2;                                                                         \
             CNOR_VM_NEXT();                                                                        \
         }                                                                                          \
         cnor_vm_fast_set_sint(&sp[-1], result);                                                    \
-        pc += 1;                                                                                   \
+        pc += (n);                                                                                 \
         CNOR_VM_NEXT();                                                                            \
+    } while (0)
+
+/* CNOR_VM_STORE_OR_SET for the stack forms, which also fuse with a following
+ * store_global (`g = g + x`); the local forms rarely meet one, and the extra
+ * test costs the tight local loops more than it would save. */
+#define CNOR_VM_STORE_ANY_OR_SET(n, expr)                                                          \
+    do                                                                                             \
+    {                                                                                              \
+        const lh_sllong_t result_any = (expr);                                                     \
+                                                                                                   \
+        if (pc[n] == cnor_op_store_global && CNOR_VM_CAN_FUSE())                                   \
+        {                                                                                          \
+            ++steps;                                                                               \
+            --sp;                                                                                  \
+            cnor_vm_fast_set_sint(&values[cnor_vm_fast_u16(pc + (n) + 1)], result_any);            \
+            pc += (n) + 3;                                                                         \
+            CNOR_VM_NEXT();                                                                        \
+        }                                                                                          \
+        CNOR_VM_STORE_OR_SET(n, result_any);                                                       \
     } while (0)
 
 /* Two signed integers on top: pop one and finish with @p tail. */
@@ -240,10 +278,165 @@ cnor_vm_slow(cnor_vm_t *vm)
             const lh_sllong_t b = cnor_vm_fast_sint(&sp[-1]);                                      \
                                                                                                    \
             --sp;                                                                                  \
-            tail(expr);                                                                            \
+            tail(1U, expr);                                                                        \
         }                                                                                          \
         CNOR_VM_SLOW();                                                                            \
     } while (0)
+
+/*
+ * The tail of an instruction @p n bytes long that left a value of any kind in
+ * sp[-1]: a `store_local` after it stores the value directly, as
+ * CNOR_VM_STORE_OR_SET does for integers.
+ */
+#define CNOR_VM_STORE_OR_KEEP(n)                                                                   \
+    do                                                                                             \
+    {                                                                                              \
+        if (pc[n] == cnor_op_store_local && CNOR_VM_CAN_FUSE())                                    \
+        {                                                                                          \
+            ++steps;                                                                               \
+            fp[pc[(n) + 1]] = *--sp;                                                               \
+            pc += (n) + 2;                                                                         \
+            CNOR_VM_NEXT();                                                                        \
+        }                                                                                          \
+        pc += (n);                                                                                 \
+        CNOR_VM_NEXT();                                                                            \
+    } while (0)
+
+/* Equality by the full rule, with integers and strings compared in place. */
+#define CNOR_VM_EQUALS(left, right)                                                                \
+    (cnor_vm_fast_both_sint(left, right)  ? (left)->data.i == (right)->data.i                      \
+     : cnor_vm_fast_both_str(left, right) ? cnor_vm_fast_str_equals(left, right)                   \
+                                          : (int) cnor_vm_value_equals(left, right))
+
+/*
+ * Operand forms. `a` and `b` are the operands when both are signed integers
+ * and @p ok holds for them (division and remainder leave 0 and -1 to the slow
+ * path); otherwise the slow path runs the instruction.
+ *
+ * `_ll`: slots pc[1] and pc[2]; `_li`: slot pc[1] and the s32 at pc + 2. Both
+ * push their result. `_i`: the top of the stack and the s32 at pc + 1; the
+ * result replaces the top.
+ */
+#define CNOR_VM_FORM_LL(tail, ok, expr)                                                            \
+    do                                                                                             \
+    {                                                                                              \
+        const lh_value_t *const left = &fp[pc[1]];                                                 \
+        const lh_value_t *const right = &fp[pc[2]];                                                \
+                                                                                                   \
+        if (CNOR_VM_LIKELY(cnor_vm_fast_both_sint(left, right)))                                   \
+        {                                                                                          \
+            const lh_sllong_t a = cnor_vm_fast_sint(left);                                         \
+            const lh_sllong_t b = cnor_vm_fast_sint(right);                                        \
+                                                                                                   \
+            if (ok)                                                                                \
+            {                                                                                      \
+                ++sp;                                                                              \
+                tail(3U, expr);                                                                    \
+            }                                                                                      \
+        }                                                                                          \
+        CNOR_VM_SLOW();                                                                            \
+    } while (0)
+
+#define CNOR_VM_FORM_LI(tail, ok, expr)                                                            \
+    do                                                                                             \
+    {                                                                                              \
+        const lh_value_t *const left = &fp[pc[1]];                                                 \
+                                                                                                   \
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(left) == lh_value_kind_sint))                         \
+        {                                                                                          \
+            const lh_sllong_t a = cnor_vm_fast_sint(left);                                         \
+            const lh_sllong_t b = cnor_vm_fast_s32(pc + 2);                                        \
+                                                                                                   \
+            if (ok)                                                                                \
+            {                                                                                      \
+                ++sp;                                                                              \
+                tail(6U, expr);                                                                    \
+            }                                                                                      \
+        }                                                                                          \
+        CNOR_VM_SLOW();                                                                            \
+    } while (0)
+
+#define CNOR_VM_FORM_I(tail, ok, expr)                                                             \
+    do                                                                                             \
+    {                                                                                              \
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_sint))                      \
+        {                                                                                          \
+            const lh_sllong_t a = cnor_vm_fast_sint(&sp[-1]);                                      \
+            const lh_sllong_t b = cnor_vm_fast_s32(pc + 1);                                        \
+                                                                                                   \
+            if (ok)                                                                                \
+            {                                                                                      \
+                tail(5U, expr);                                                                    \
+            }                                                                                      \
+        }                                                                                          \
+        CNOR_VM_SLOW();                                                                            \
+    } while (0)
+
+/* The three forms of an arithmetic or ordering operator, as labels. */
+#define CNOR_VM_FORMS(name, tail, ok, expr)                                                        \
+    CNOR_VM_OP(name##_ll)                                                                          \
+    {                                                                                              \
+        CNOR_VM_FORM_LL(tail, ok, expr);                                                           \
+    }                                                                                              \
+    CNOR_VM_OP(name##_li)                                                                          \
+    {                                                                                              \
+        CNOR_VM_FORM_LI(tail, ok, expr);                                                           \
+    }                                                                                              \
+    CNOR_VM_OP(name##_i)                                                                           \
+    {                                                                                              \
+        CNOR_VM_FORM_I(tail, ok, expr);                                                            \
+    }
+
+/*
+ * The three forms of `eq` (@p want 1) or `ne` (@p want 0). Equality never
+ * fails, so other kinds are compared inline by the full rule as well.
+ */
+#define CNOR_VM_EQUALITY_FORMS(name, want)                                                         \
+    CNOR_VM_OP(name##_ll)                                                                          \
+    {                                                                                              \
+        const lh_value_t *const left = &fp[pc[1]];                                                 \
+        const lh_value_t *const right = &fp[pc[2]];                                                \
+        const int equal = CNOR_VM_EQUALS(left, right);                                             \
+                                                                                                   \
+        ++sp;                                                                                      \
+        CNOR_VM_BRANCH_OR_SET(3U, equal == (want));                                                \
+    }                                                                                              \
+    CNOR_VM_OP(name##_li)                                                                          \
+    {                                                                                              \
+        const lh_value_t *const left = &fp[pc[1]];                                                 \
+        const lh_sllong_t k = cnor_vm_fast_s32(pc + 2);                                            \
+        const int equal = cnor_vm_fast_kind(left) == lh_value_kind_sint                            \
+                              ? left->data.i == k                                                  \
+                              : cnor_vm_fast_equals_sint(left, k);                                 \
+                                                                                                   \
+        ++sp;                                                                                      \
+        CNOR_VM_BRANCH_OR_SET(6U, equal == (want));                                                \
+    }                                                                                              \
+    CNOR_VM_OP(name##_i)                                                                           \
+    {                                                                                              \
+        const lh_sllong_t k = cnor_vm_fast_s32(pc + 1);                                            \
+        const int equal = cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_sint                         \
+                              ? sp[-1].data.i == k                                                 \
+                              : cnor_vm_fast_equals_sint(&sp[-1], k);                              \
+                                                                                                   \
+        CNOR_VM_BRANCH_OR_SET(5U, equal == (want));                                                \
+    }
+
+/* Labels of the three forms of binary operator @p name. */
+#define CNOR_VM_FORM_LABELS(name)                                                                  \
+    [cnor_op_##name##_ll] = &&cnor_vm_label_##name##_ll,                                          \
+    [cnor_op_##name##_li] = &&cnor_vm_label_##name##_li,                                          \
+    [cnor_op_##name##_i] = &&cnor_vm_label_##name##_i
+
+/* Whether @p value equals the signed integer @p k by the full rule. */
+static int
+cnor_vm_fast_equals_sint(const lh_value_t *value, lh_sllong_t k)
+{
+    lh_value_t other;
+
+    cnor_vm_fast_set_sint(&other, k);
+    return (int) cnor_vm_value_equals(value, &other);
+}
 
 lh_bool_t
 cnor_vm_dispatch(cnor_vm_t *vm)
@@ -286,6 +479,19 @@ cnor_vm_dispatch(cnor_vm_t *vm)
         [cnor_op_native] = &&cnor_vm_label_native,
         [cnor_op_len] = &&cnor_vm_label_len,
         [cnor_op_index] = &&cnor_vm_label_index,
+        CNOR_VM_FORM_LABELS(add),
+        CNOR_VM_FORM_LABELS(sub),
+        CNOR_VM_FORM_LABELS(mul),
+        CNOR_VM_FORM_LABELS(div),
+        CNOR_VM_FORM_LABELS(mod),
+        CNOR_VM_FORM_LABELS(eq),
+        CNOR_VM_FORM_LABELS(ne),
+        CNOR_VM_FORM_LABELS(lt),
+        CNOR_VM_FORM_LABELS(le),
+        CNOR_VM_FORM_LABELS(gt),
+        CNOR_VM_FORM_LABELS(ge),
+        [cnor_op_for_loop] = &&cnor_vm_label_for_loop,
+        [cnor_op_switch] = &&cnor_vm_label_switch,
     };
 #endif
     const lh_byte_t *const code = vm->code;
@@ -347,15 +553,15 @@ cnor_vm_next:
             if (pc[5] == cnor_op_add)
             {
                 pc += 5;
-                CNOR_VM_STORE_OR_SET(CNOR_VM_WRAP(a, +, value));
+                CNOR_VM_STORE_OR_SET(1U, CNOR_VM_WRAP(a, +, value));
             }
             if (pc[5] == cnor_op_sub)
             {
                 pc += 5;
-                CNOR_VM_STORE_OR_SET(CNOR_VM_WRAP(a, -, value));
+                CNOR_VM_STORE_OR_SET(1U, CNOR_VM_WRAP(a, -, value));
             }
             pc += 5;
-            CNOR_VM_BRANCH_OR_SET(a < value);
+            CNOR_VM_BRANCH_OR_SET(1U, a < value);
         }
         cnor_vm_fast_set_sint(sp++, value);
         pc += 5;
@@ -437,15 +643,26 @@ cnor_vm_next:
 
     CNOR_VM_OP(add)
     {
-        CNOR_VM_SINT_PAIR(CNOR_VM_STORE_OR_SET, CNOR_VM_WRAP(a, +, b));
+        if (!cnor_vm_fast_both_sint(&sp[-2], &sp[-1]))
+        {
+            /* Two strings join here; the pool running out is the slow path's. */
+            if (cnor_vm_fast_both_str(&sp[-2], &sp[-1])
+                && cnor_vm_fast_join(&vm->str_pool, &sp[-2], &sp[-2], &sp[-1]))
+            {
+                --sp;
+                CNOR_VM_STORE_OR_KEEP(1U);
+            }
+            CNOR_VM_SLOW();
+        }
+        CNOR_VM_SINT_PAIR(CNOR_VM_STORE_ANY_OR_SET, CNOR_VM_WRAP(a, +, b));
     }
     CNOR_VM_OP(sub)
     {
-        CNOR_VM_SINT_PAIR(CNOR_VM_STORE_OR_SET, CNOR_VM_WRAP(a, -, b));
+        CNOR_VM_SINT_PAIR(CNOR_VM_STORE_ANY_OR_SET, CNOR_VM_WRAP(a, -, b));
     }
     CNOR_VM_OP(mul)
     {
-        CNOR_VM_SINT_PAIR(CNOR_VM_STORE_OR_SET, CNOR_VM_WRAP(a, *, b));
+        CNOR_VM_SINT_PAIR(CNOR_VM_STORE_ANY_OR_SET, CNOR_VM_WRAP(a, *, b));
     }
     CNOR_VM_OP(div)
     {
@@ -484,10 +701,10 @@ cnor_vm_next:
         /* Equality never fails: other kinds are compared by the full rule. */
         if (!cnor_vm_fast_both_sint(&sp[-2], &sp[-1]))
         {
-            const lh_bool_t equal = cnor_vm_value_equals(&sp[-2], &sp[-1]);
+            const int equal = CNOR_VM_EQUALS(&sp[-2], &sp[-1]);
 
             --sp;
-            CNOR_VM_BRANCH_OR_SET(equal);
+            CNOR_VM_BRANCH_OR_SET(1U, equal);
         }
         CNOR_VM_SINT_PAIR(CNOR_VM_BRANCH_OR_SET, a == b);
     }
@@ -496,10 +713,10 @@ cnor_vm_next:
         /* Equality never fails: other kinds are compared by the full rule. */
         if (!cnor_vm_fast_both_sint(&sp[-2], &sp[-1]))
         {
-            const lh_bool_t equal = cnor_vm_value_equals(&sp[-2], &sp[-1]);
+            const int equal = CNOR_VM_EQUALS(&sp[-2], &sp[-1]);
 
             --sp;
-            CNOR_VM_BRANCH_OR_SET(!equal);
+            CNOR_VM_BRANCH_OR_SET(1U, !equal);
         }
         CNOR_VM_SINT_PAIR(CNOR_VM_BRANCH_OR_SET, a != b);
     }
@@ -630,6 +847,92 @@ cnor_vm_next:
         CNOR_VM_NEXT();
     }
 
+    /* -- operand forms ---------------------------------------------------- */
+
+    CNOR_VM_OP(add_ll)
+    {
+        /* Two strings join here; the pool running out is the slow path's. */
+        const lh_value_t *const text_left = &fp[pc[1]];
+        const lh_value_t *const text_right = &fp[pc[2]];
+
+        if (cnor_vm_fast_both_str(text_left, text_right)
+            && cnor_vm_fast_join(&vm->str_pool, sp, text_left, text_right))
+        {
+            ++sp;
+            CNOR_VM_STORE_OR_KEEP(3U);
+        }
+        CNOR_VM_FORM_LL(CNOR_VM_STORE_OR_SET, 1, CNOR_VM_WRAP(a, +, b));
+    }
+    CNOR_VM_OP(add_li)
+    {
+        CNOR_VM_FORM_LI(CNOR_VM_STORE_OR_SET, 1, CNOR_VM_WRAP(a, +, b));
+    }
+    CNOR_VM_OP(add_i)
+    {
+        CNOR_VM_FORM_I(CNOR_VM_STORE_OR_SET, 1, CNOR_VM_WRAP(a, +, b));
+    }
+    CNOR_VM_FORMS(sub, CNOR_VM_STORE_OR_SET, 1, CNOR_VM_WRAP(a, -, b))
+    CNOR_VM_FORMS(mul, CNOR_VM_STORE_OR_SET, 1, CNOR_VM_WRAP(a, *, b))
+    CNOR_VM_FORMS(div, CNOR_VM_STORE_OR_SET, b != 0 && b != -1, a / b)
+    CNOR_VM_FORMS(mod, CNOR_VM_STORE_OR_SET, b != 0 && b != -1, a % b)
+    CNOR_VM_EQUALITY_FORMS(eq, 1)
+    CNOR_VM_EQUALITY_FORMS(ne, 0)
+    CNOR_VM_FORMS(lt, CNOR_VM_BRANCH_OR_SET, 1, a < b)
+    CNOR_VM_FORMS(le, CNOR_VM_BRANCH_OR_SET, 1, a <= b)
+    CNOR_VM_FORMS(gt, CNOR_VM_BRANCH_OR_SET, 1, a > b)
+    CNOR_VM_FORMS(ge, CNOR_VM_BRANCH_OR_SET, 1, a >= b)
+
+    /* -- loops ------------------------------------------------------------ */
+
+    CNOR_VM_OP(for_loop)
+    {
+        /* Same steps as cnor_vm_op_for_loop: `var + 1`, then `var < bound`. */
+        lh_value_t *const var = &fp[pc[5]];
+        const lh_value_t *const bound = &fp[pc[6]];
+
+        if (CNOR_VM_LIKELY(cnor_vm_fast_both_sint(var, bound)))
+        {
+            const lh_sllong_t next = CNOR_VM_WRAP(var->data.i, +, 1);
+
+            var->data.i = next;
+            pc += next < bound->data.i ? 7 + cnor_vm_fast_s32(pc + 1) : 7;
+            CNOR_VM_NEXT();
+        }
+        CNOR_VM_SLOW();
+    }
+
+    /* -- match ------------------------------------------------------------ */
+
+    CNOR_VM_OP(switch)
+    {
+        /* A signed integer picks its entry by subtraction, and the entry's
+         * `jmp` runs here too when the budget allows a fused step; anything
+         * else compares like the slow path. */
+        const lh_value_t *const subject = &fp[pc[1]];
+
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(subject) == lh_value_kind_sint))
+        {
+            const lh_ullong_t i = (lh_ullong_t) cnor_vm_fast_sint(subject)
+                                  - (lh_ullong_t) (lh_sllong_t) cnor_vm_fast_s32(pc + 2);
+            const lh_ullong_t count = pc[6];
+
+            pc += 7;
+            if (i >= count)
+            {
+                pc += count * CNOR_OP_SWITCH_ENTRY_SIZE;
+                CNOR_VM_NEXT();
+            }
+            pc += i * CNOR_OP_SWITCH_ENTRY_SIZE;
+            if (CNOR_VM_CAN_FUSE())
+            {
+                ++steps;
+                pc += CNOR_OP_SWITCH_ENTRY_SIZE + cnor_vm_fast_s32(pc + 1);
+            }
+            CNOR_VM_NEXT();
+        }
+        CNOR_VM_SLOW();
+    }
+
     /* -- the rest --------------------------------------------------------- */
 
     CNOR_VM_OP(halt)
@@ -638,16 +941,30 @@ cnor_vm_next:
     }
     CNOR_VM_OP(len)
     {
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_str))
+        {
+            cnor_vm_fast_set_sint(&sp[-1], (lh_sllong_t) cnor_vm_fast_str_size(&sp[-1]));
+            pc += 1;
+            CNOR_VM_NEXT();
+        }
         CNOR_VM_SLOW();
     }
     CNOR_VM_OP(index)
     {
-        /* On failure nothing changed; the slow path reports it. */
-        if (cnor_vm_text_index(&sp[-2], &sp[-1]) == cnor_error_none)
+        /* A signed index inside the text; anything else (unsigned indexes
+         * included, and every failure) is the slow path's. */
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(&sp[-2]) == lh_value_kind_str
+                           && cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_sint))
         {
-            --sp;
-            pc += 1;
-            CNOR_VM_NEXT();
+            const lh_sllong_t at = cnor_vm_fast_sint(&sp[-1]);
+
+            if (at >= 0 && (lh_ullong_t) at < (lh_ullong_t) cnor_vm_fast_str_size(&sp[-2]))
+            {
+                cnor_vm_fast_set_str(&sp[-2], cnor_vm_fast_str_data(&sp[-2]) + at, 1U);
+                --sp;
+                pc += 1;
+                CNOR_VM_NEXT();
+            }
         }
         CNOR_VM_SLOW();
     }

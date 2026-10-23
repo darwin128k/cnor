@@ -1,6 +1,6 @@
 /**
  * @file image.h
- * @brief The `.tbc` image, format v1: header, sections and the owning buffer
+ * @brief The `.tbc` image, format v3: header, sections and the owning buffer
  *        (::cnor_image_t).
  *
  * Every field is a fixed-width little-endian integer written and read byte by
@@ -42,7 +42,7 @@
 #include <lh/numeric/fixed/types.h>
 
 /** @def CNOR_IMAGE_VERSION @brief Format version this build reads and writes. */
-#define CNOR_IMAGE_VERSION 1U
+#define CNOR_IMAGE_VERSION 3U
 
 /** @def CNOR_IMAGE_HEADER_SIZE @brief Bytes of the fixed header. */
 #define CNOR_IMAGE_HEADER_SIZE 68U

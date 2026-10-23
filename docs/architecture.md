@@ -14,7 +14,7 @@ tokens (pulled one at a time)
 AST in an arena  include/cnor/ast.h, arena.h
    |  compiler   include/cnor/compiler.h     src/cnor/compiler/
    v
-image (.tbc v1)  include/cnor/image.h        src/cnor/image/
+image (.tbc v3)  include/cnor/image.h        src/cnor/image/
    |  loader + verifier                      src/cnor/image/view.c, verify.c
    v
 VM               include/cnor/vm.h           src/cnor/vm/
@@ -35,9 +35,9 @@ offset, copied name), with codes in `cnor_error_t` and messages from
 | arena | `arena.h`, `arena.c` | Chunked bump allocator for the AST and copied text |
 | ast | `ast.h`, `ast.c` | Node kinds, a per-kind data union, accessors |
 | parser | `parser.h`, `src/cnor/parser/{parser,token,literal,expr,stmt,control,fn}.c` | Recursive descent with a statement rule table and a binary precedence table |
-| op | `op.h`, `op.c` | The opcode enum, the info table (operands, size, stack effect, flags) and the shared decoder |
+| op | `op.h`, `op.c` | The opcode enum, the info table (operands, size, stack effect, flags), the operand-form mapping and the shared decoder |
 | byte | `src/cnor/byte/{reader,writer}.{h,c}` | Little-endian byte writer over `lh_array_t`, bounds-checked sticky reader |
-| image | `image.h`, `src/cnor/image/{header,view,names,writer,verify}.c` | v1 format: header read, section views, line lookup, writer, verifier |
+| image | `image.h`, `src/cnor/image/{header,view,names,writer,verify}.c` | v3 format: header read, section views, line lookup, writer, verifier |
 | native | `native.h`, `native/*.h`, `native.c` | Host native entries and tables, lookup by name, arity check |
 | compiler | `compiler.h`, `src/cnor/compiler/*.c` | AST to image; see below |
 | vm | `vm.h`, `vm/stack.h`, `vm/str_pool.h`, `src/cnor/vm/**` | Loader, dispatch loop with a handler table, opcode families under `vm/op/` |
@@ -53,11 +53,11 @@ offset, copied name), with codes in `cnor_error_t` and messages from
 | `emit.c` | Byte emission, stack-depth tracking from the op table, labels and jump patch chains, line table |
 | `scope.c` | Functions, natives, imports, globals, block-scoped locals, name resolution; a hash index over the top-level names keeps resolution constant-time in large files |
 | `constant.c` | Constant pool with de-duplication |
-| `expr.c` | Literals, names, unary and binary operators, indexing |
-| `logic.c` | Short-circuit `and` / `or` |
+| `expr.c` | Literals, names, unary and binary operators (choosing the operand form, see below), indexing |
+| `logic.c` | Short-circuit `and` / `or` as values, and conditions (`and` / `or` / `not` in `if` and `while`) as jumps |
 | `call.c` | Script calls, native calls, built-in `len` |
 | `stmt.c` | `let`, assignment, expression statements, `return` |
-| `control_if.c`, `control_loop.c`, `control_match.c` | `if`, `while` / `for` (condition tested at the bottom: one conditional jump per iteration) / `break` / `continue`, `match` |
+| `control_if.c`, `control_loop.c`, `control_match.c` | `if`, `while` (condition tested at the bottom: one conditional jump per iteration), `for` (one `for_loop` per iteration) / `break` / `continue`, `match` (dense integer arms through one `switch` and a table of jumps, other arms test in turn, integer ones with `eq_li`) |
 
 Two passes: the declaration pass registers every function, native and global,
 so calls and globals may appear before their definition; the second pass
@@ -79,13 +79,14 @@ functions and no `halt` is needed.
 | `vm.c` | Lifetime, load/reset/run, queries, failure reporting |
 | `load.c` | View, verify, function table, constants (reals parsed), native binding by name, allocation |
 | `dispatch.c` | **The dispatch loop** (fast paths inline, see below), the handler table by opcode for everything else, the instruction budget |
-| `fast.h` | Inline value access and operand reads for the dispatch loop only |
+| `fast.h` | Inline value access, operand reads and the string primitives (equality, join into the pool) shared by the dispatch loop and the string handlers |
 | `stack.c`, `str_pool.c` | Value stack and string pool |
 | `value.c` | Truthiness, numeric ordering and equality across kinds (mixed signed/unsigned by value, reals IEEE: NaN is unordered) |
 | `op/data.c` | Pushes, locals, globals, `dup` / `swap` / `pop` |
 | `op/arith.c` | `add` (numbers or strings) `sub` `mul` `div` `mod` `neg` |
 | `op/compare.c` | `eq` `ne` `lt` `le` `gt` `ge` `not` |
-| `op/control.c` | Jumps, `call`, `ret`, `halt`, `native` |
+| `op/operand.c` | The operand forms `<op>_ll` / `_li` / `_i`: fetch the operands, then the same value-level code as `op/arith.c` and `op/compare.c` |
+| `op/control.c` | Jumps, `for_loop`, `switch`, `call`, `ret`, `halt`, `native` |
 | `op/text.c` | String join, `len`, `index` |
 
 ## Extension points
@@ -123,19 +124,30 @@ depth.
 
 1. Append it to `cnor_op_t` (`include/cnor/op.h`); never insert in the middle,
    the number is part of the format.
-2. Add its row to `m_ops` (`src/cnor/op.c`): name, operand kinds, size, pops,
-   pushes, flags (`JUMP`, `TERMINATOR`, `POPS_ARGC`). The compiler's depth
-   tracking, the verifier and the decoder all follow from this row.
-3. If an operand indexes a table, teach `cnor_verify_operands`
+2. Add its row to `m_ops` (`src/cnor/op.c`): name, up to three operand kinds,
+   size, pops, pushes, flags (`JUMP`, `TERMINATOR`, `POPS_ARGC`). The
+   compiler's depth tracking, the verifier and the decoder all follow from
+   this row. A local slot is the `slot` kind, which the verifier bounds by the
+   function's slot count on its own; a jump offset must be operand 0.
+3. If another operand indexes a table, teach `cnor_verify_operands`
    (`src/cnor/image/verify.c`) its bound.
-4. Write the handler in `src/cnor/vm/op/<family>.c`, declare it in
+4. A change to what an existing opcode means, or a new one, is a new format:
+   raise `CNOR_IMAGE_VERSION` (`include/cnor/image.h`).
+5. Write the handler in `src/cnor/vm/op/<family>.c`, declare it in
    `src/cnor/vm/internal.h`, and set its slot in `m_handlers`
    (`src/cnor/vm/dispatch.c`).
-5. Give it a label in the dispatch loop: an entry in `m_labels` and a
+6. Give it a label in the dispatch loop: an entry in `m_labels` and a
    `CNOR_VM_OP(name)` block that either runs the common case inline or calls
    `CNOR_VM_SLOW()`, which runs the handler. The `_Static_assert` on
    `cnor_op_count` in `dispatch.c` fails until this is done.
-6. Add an image test in `tests/test_image_vm.c`.
+7. Add an image test in `tests/test_image_vm.c`.
+
+The operand forms are three contiguous families (`_ll`, `_li`, `_i`), each in
+the order of `m_binary_ops` (`src/cnor/op.c`); `cnor_op_get_operand_form` and
+`cnor_op_get_binary_base` map between a form and its plain operator for the
+compiler and the shared slow-path handler, and a `_Static_assert` checks the
+families' ends. The families cannot grow without inserting in the middle, so an
+operator added later gets its forms as a new family appended at the end.
 
 ### Adding an error
 
@@ -171,9 +183,10 @@ place, the handlers under `src/cnor/vm/op/`:
   callee's frame fits, once per call.
 - **Fast paths and the slow path.** Each opcode has a label. The common case
   runs inline: constants, locals, globals, signed-integer arithmetic and
-  comparisons, jumps, `call`, `ret`, `native`, string indexing and equality.
-  Anything else (unsigned and real numbers, string joins, `len`, `halt`,
-  every failure) goes through `CNOR_VM_SLOW()`: the locals are written back,
+  comparisons, jumps, `call`, `ret`, `native`, and on strings indexing, `len`,
+  equality and joins (`add`, `add_ll`). Anything else (unsigned and real
+  numbers, an unsigned index, a full string pool, `halt`, every failure) goes
+  through `CNOR_VM_SLOW()`: the locals are written back,
   the instruction is decoded and its handler from `m_handlers` runs exactly as
   it would without the fast path. A fast path never decides a language rule on
   its own: when its operands are not the kinds it knows, it defers.
@@ -181,9 +194,36 @@ place, the handlers under `src/cnor/vm/op/`:
   usual partner without going back through dispatch: a comparison with the
   conditional jump after it (the boolean is never built), arithmetic with the
   `store_local` after it, two `load_local`s, and `push_i32` with the `add`,
-  `sub` or `lt` after it. The partner is a separate instruction of the image:
-  it is counted against the budget, and taken only when the budget has room.
-  The image format is unchanged.
+  `sub` or `lt` after it, and every operand form with the `store_local` or
+  conditional jump after it; the stack `add` / `sub` / `mul` with a
+  `store_global` after them (`g = g + i`), and `switch` with the table `jmp`
+  it picks. The partner is a separate
+  instruction of the image: it is counted against the budget, and taken only
+  when the budget has room.
+- **Conditions as jumps.** In `if` and `while` only the truth of the
+  condition matters, so `cnor_compile_branch` turns `and`, `or` and `not`
+  into conditional jumps straight to the branch targets instead of building
+  the deciding value with `dup` / `jmp_if_*` / `pop`. Each comparison then
+  fuses with its own jump. Operands are evaluated in the same order and as far
+  as the value would evaluate them.
+- **`switch`.** A `match` with at least four distinct integer arms (and at
+  most a final `_`) spanning at most twice as many values, and at most 255,
+  compiles to `switch slot, first, count` and a table of `count` `jmp`s:
+  a signed subject picks its entry by one subtraction; other kinds compare
+  against each `first + i` by the rule of `==`, as the tests in turn would.
+  Holes jump to the default. The last arm of every `match` falls through to
+  the end instead of jumping there.
+- **Operand forms.** Most instructions in a loop body used to be
+  `load_local` and `push_i32` feeding an operator. `<op>_ll` reads two locals,
+  `<op>_li` a local and an immediate, `<op>_i` the top and an immediate, so
+  with fusion `i = i + 1` or `if x < n` is one dispatch. The fast path handles
+  signed integers (with `eq` / `ne` also comparing any two values in place);
+  anything else, and a `div` / `mod` by 0 or -1, defers to `op/operand.c`,
+  which fetches the operands and runs the plain operator's value-level code.
+- **`for_loop`.** One instruction per `for` step: add one to the variable,
+  compare with the hidden bound slot, jump back. Signed integers run inline;
+  other kinds run `add` and `lt`'s value-level code, so wrapping, mixed kinds
+  and reals behave exactly as the written-out loop would.
 - **Computed goto.** With GCC and Clang the next instruction is reached through
   a table of label addresses, one indirect branch per instruction (15 to 25%
   faster than the switch on this code); `CNOR_VM_COMPUTED_GOTO` (CMake option,
@@ -191,7 +231,43 @@ place, the handlers under `src/cnor/vm/op/`:
   Both are built and tested.
 - **Inline value access.** `src/cnor/vm/fast.h` reads and writes the
   `lh_value_t` fields directly; lh's accessors are out-of-line functions, and a
-  call per field was most of the cost of an instruction before.
+  call per field was most of the cost of an instruction before. Strings follow
+  the same rule: a string value is written in place (`cnor_vm_fast_set_str`)
+  instead of returning a 24-byte value from `lh_value_make_str`; `text[i]`
+  narrows the view it indexes; equality compares lengths, then the view
+  pointers (the same view or two empty ones are equal without reading a byte),
+  then the last 8 bytes, then the rest 8 bytes at a time (words read with
+  `lh_bit_unpack_le64`, so alignment does not matter; the last word overlaps
+  instead of a byte loop over the tail; 4-byte words and single bytes below 8;
+  `lh_memory_std_compare` beyond `CNOR_VM_FAST_LONG_TEXT` bytes), instead of
+  the `lh_value_equals` -> `lh_str_view_equals` -> `lh_str_ptr_equals_by_size`
+  -> `lh_memory_compare` chain; a join takes its bytes straight from the pool
+  and copies them a word at a time the same way.
+  The slow-path handlers (`op/text.c`, `value.c`) use the same primitives, so
+  the two paths cannot drift apart. A join followed by `store_local` stores
+  directly, like integer arithmetic.
+
+  Measured and left out (2026-10-23, `bench/` and string micro-benchmarks):
+  interning runtime strings (a hash and a probe per join made `strbuild` 80%
+  slower and only sped up comparing two equal strings built at run time;
+  constants are already shared by the compiler's constant table, so equal
+  literals already compare by pointer); a cached hash per string (a view into
+  the image, the pool or another string has nowhere to keep it without
+  changing `lh_value_t`, and the length plus the last word already reject
+  almost every unequal pair at once); appending in place to the last pool
+  allocation (4% on `strbuild`, but it changes how much of the pool a program
+  uses, so where `str_pool_full` happens); fusing `push_const` with `eq` / `ne`
+  / `add` and `load_local load_local` with `index` (no gain or slower: the
+  extra checks cost what the saved dispatch did).
+
+  Also measured and left out (2026-10-23, win #4): checking the budget only at
+  back-jumps and calls (removing the check altogether bought 0 to 4%, within
+  noise on most benchmarks, and an exact budget then needs a second dispatch
+  table); checking a native's arity at load instead of per call (0 to 3%, and
+  a bad call that never runs would start failing at load); the
+  `store_global` fusion on the operand forms too (`for` loops on locals got
+  slower by more than globals gained); fusing `load_global` with a following
+  `load_local` (no gain on top of the `store_global` fusion).
 
 ## Bounding a run
 
@@ -209,7 +285,14 @@ Instructions the dispatch loop executes together (see below) are still
 counted one by one, and a pair is only taken together when the budget has room
 for both, so a budget of N stops after exactly N instructions with or without
 those shortcuts (`tests/test_compiler.c`,
-`stops_after_exactly_the_budget_inside_fused_pairs`).
+`stops_after_exactly_the_budget_inside_fused_pairs` and
+`stops_after_exactly_the_budget_inside_for_loops`,
+`stops_after_exactly_the_budget_inside_tables_and_conditions`). Each operand
+form and each `for_loop` is one instruction, so a program now needs fewer
+steps than with image format v1 for the same work; v3 needs fewer again where
+a condition uses `and` / `or` / `not` (no `dup` / `pop`), a `match` dispatches
+through a table (two steps to reach any arm) or a `match` ends (no jump after
+the last arm).
 
 ## Internal building blocks that could move to lh
 

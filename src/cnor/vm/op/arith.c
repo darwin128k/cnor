@@ -24,15 +24,16 @@ cnor_vm_real_mod(lh_real_t a, lh_real_t b)
 }
 
 static lh_bool_t
-cnor_vm_arith_real(cnor_vm_t *vm, const cnor_insn_t *insn, lh_real_t a, lh_real_t b)
+cnor_vm_arith_real(cnor_vm_t *vm, const cnor_insn_t *insn, cnor_op_t op, lh_real_t a, lh_real_t b,
+                   lh_value_t *out)
 {
     lh_real_t value;
 
-    if ((insn->op == cnor_op_div || insn->op == cnor_op_mod) && b == (lh_real_t) 0)
+    if ((op == cnor_op_div || op == cnor_op_mod) && b == (lh_real_t) 0)
     {
         return cnor_vm_fail(vm, insn, cnor_error_div_by_zero);
     }
-    switch (insn->op)
+    switch (op)
     {
     case cnor_op_add:
         value = a + b;
@@ -50,7 +51,7 @@ cnor_vm_arith_real(cnor_vm_t *vm, const cnor_insn_t *insn, lh_real_t a, lh_real_
         value = cnor_vm_real_mod(a, b);
         break;
     }
-    cnor_vm_stack_push(&vm->stack, lh_value_make_real(value));
+    *out = lh_value_make_real(value);
     return lh_bool_true;
 }
 #endif
@@ -58,12 +59,12 @@ cnor_vm_arith_real(cnor_vm_t *vm, const cnor_insn_t *insn, lh_real_t a, lh_real_
 /* -- integers -------------------------------------------------------------- */
 
 /* Two unsigned operands stay unsigned, except a subtraction that goes below zero. */
-static lh_bool_t
-cnor_vm_arith_uint(cnor_vm_t *vm, const cnor_insn_t *insn, lh_ullong_t a, lh_ullong_t b)
+static lh_value_t
+cnor_vm_arith_uint(cnor_op_t op, lh_ullong_t a, lh_ullong_t b)
 {
     lh_ullong_t value;
 
-    switch (insn->op)
+    switch (op)
     {
     case cnor_op_add:
         value = a + b;
@@ -72,8 +73,7 @@ cnor_vm_arith_uint(cnor_vm_t *vm, const cnor_insn_t *insn, lh_ullong_t a, lh_ull
         if (a < b)
         {
             /* Negated through unsigned: b - a may not fit a signed value. */
-            cnor_vm_stack_push(&vm->stack, lh_value_make_sint((lh_sllong_t) (0U - (b - a))));
-            return lh_bool_true;
+            return lh_value_make_sint((lh_sllong_t) (0U - (b - a)));
         }
         value = a - b;
         break;
@@ -87,19 +87,18 @@ cnor_vm_arith_uint(cnor_vm_t *vm, const cnor_insn_t *insn, lh_ullong_t a, lh_ull
         value = a % b;
         break;
     }
-    cnor_vm_stack_push(&vm->stack, lh_value_make_uint(value));
-    return lh_bool_true;
+    return lh_value_make_uint(value);
 }
 
 /* Signed arithmetic wraps through unsigned so overflow is defined. */
-static lh_bool_t
-cnor_vm_arith_sint(cnor_vm_t *vm, const cnor_insn_t *insn, lh_sllong_t a, lh_sllong_t b)
+static lh_value_t
+cnor_vm_arith_sint(cnor_op_t op, lh_sllong_t a, lh_sllong_t b)
 {
     const lh_ullong_t ua = (lh_ullong_t) a;
     const lh_ullong_t ub = (lh_ullong_t) b;
     lh_sllong_t value;
 
-    switch (insn->op)
+    switch (op)
     {
     case cnor_op_add:
         value = (lh_sllong_t) (ua + ub);
@@ -117,35 +116,50 @@ cnor_vm_arith_sint(cnor_vm_t *vm, const cnor_insn_t *insn, lh_sllong_t a, lh_sll
         value = b == -1 ? 0 : a % b;
         break;
     }
-    cnor_vm_stack_push(&vm->stack, lh_value_make_sint(value));
-    return lh_bool_true;
+    return lh_value_make_sint(value);
 }
 
 static lh_bool_t
-cnor_vm_arith_numbers(cnor_vm_t *vm, const cnor_insn_t *insn, const lh_value_t *left,
-                      const lh_value_t *right)
+cnor_vm_arith_numbers(cnor_vm_t *vm, const cnor_insn_t *insn, cnor_op_t op,
+                      const lh_value_t *left, const lh_value_t *right, lh_value_t *out)
 {
 #if LH_REAL_ENABLED
     if (lh_value_get_kind(left) == lh_value_kind_real
         || lh_value_get_kind(right) == lh_value_kind_real)
     {
-        return cnor_vm_arith_real(vm, insn, cnor_vm_value_to_real(left),
-                                  cnor_vm_value_to_real(right));
+        return cnor_vm_arith_real(vm, insn, op, cnor_vm_value_to_real(left),
+                                  cnor_vm_value_to_real(right), out);
     }
 #endif
-    if ((insn->op == cnor_op_div || insn->op == cnor_op_mod)
-        && cnor_vm_value_to_sint(right) == 0)
+    if ((op == cnor_op_div || op == cnor_op_mod) && cnor_vm_value_to_sint(right) == 0)
     {
         return cnor_vm_fail(vm, insn, cnor_error_div_by_zero);
     }
     if (lh_value_get_kind(left) == lh_value_kind_uint
         && lh_value_get_kind(right) == lh_value_kind_uint)
     {
-        return cnor_vm_arith_uint(vm, insn, lh_value_get_data(left)->u,
-                                  lh_value_get_data(right)->u);
+        *out = cnor_vm_arith_uint(op, lh_value_get_data(left)->u, lh_value_get_data(right)->u);
+        return lh_bool_true;
     }
     /* Mixed kinds compute signed: a u32 operand always fits. */
-    return cnor_vm_arith_sint(vm, insn, cnor_vm_value_to_sint(left), cnor_vm_value_to_sint(right));
+    *out = cnor_vm_arith_sint(op, cnor_vm_value_to_sint(left), cnor_vm_value_to_sint(right));
+    return lh_bool_true;
+}
+
+lh_bool_t
+cnor_vm_arith_values(cnor_vm_t *vm, const cnor_insn_t *insn, cnor_op_t op,
+                     const lh_value_t *left, const lh_value_t *right, lh_value_t *out)
+{
+    if (op == cnor_op_add && lh_value_get_kind(left) == lh_value_kind_str
+        && lh_value_get_kind(right) == lh_value_kind_str)
+    {
+        return cnor_vm_text_join(vm, insn, left, right, out);
+    }
+    if (!cnor_vm_value_is_number(left) || !cnor_vm_value_is_number(right))
+    {
+        return cnor_vm_fail(vm, insn, cnor_error_type);
+    }
+    return cnor_vm_arith_numbers(vm, insn, op, left, right, out);
 }
 
 /* -- handlers -------------------------------------------------------------- */
@@ -155,17 +169,14 @@ cnor_vm_op_arith(cnor_vm_t *vm, const cnor_insn_t *insn)
 {
     const lh_value_t right = cnor_vm_stack_pop(&vm->stack);
     const lh_value_t left = cnor_vm_stack_pop(&vm->stack);
+    lh_value_t result;
 
-    if (insn->op == cnor_op_add && lh_value_get_kind(&left) == lh_value_kind_str
-        && lh_value_get_kind(&right) == lh_value_kind_str)
+    if (!cnor_vm_arith_values(vm, insn, insn->op, &left, &right, &result))
     {
-        return cnor_vm_text_join(vm, insn, &left, &right);
+        return lh_bool_false;
     }
-    if (!cnor_vm_value_is_number(&left) || !cnor_vm_value_is_number(&right))
-    {
-        return cnor_vm_fail(vm, insn, cnor_error_type);
-    }
-    return cnor_vm_arith_numbers(vm, insn, &left, &right);
+    cnor_vm_stack_push(&vm->stack, result);
+    return lh_bool_true;
 }
 
 lh_bool_t

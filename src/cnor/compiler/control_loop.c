@@ -63,8 +63,8 @@ cnor_compile_while(cnor_compiler_t *self, const cnor_node_t *node)
     }
     /* The condition is the loop header's, wherever its code ends up. */
     self->emit.line = node->line;
-    return cnor_compile_expr(self, node->data.while_.cond)
-           && cnor_emit_jump(self, cnor_op_jmp_if_true, &body) && cnor_emit_bind(self, &end);
+    return cnor_compile_branch(self, node->data.while_.cond, lh_bool_true, &body)
+           && cnor_emit_bind(self, &end);
 }
 
 /* -- for ------------------------------------------------------------------- */
@@ -83,16 +83,15 @@ cnor_compile_for_slots(cnor_compiler_t *self, const cnor_node_t *node, cnor_slot
 }
 
 /*
- * Tested at the bottom, like `while`:
+ * Tested once on entry, then at the bottom by `for_loop`, which adds one to
+ * the variable, compares it with the bound and jumps back in one instruction:
  *
  *     from -> var; to -> bound
- *     jmp check
+ *     lt_ll var, bound; jmp_if_false end
  *   body:
  *     body                      (continue -> step, break -> end)
  *   step:
- *     var = var + 1
- *   check:
- *     var < bound; jmp_if_true body
+ *     for_loop body, var, bound
  *   end:
  */
 static lh_bool_t
@@ -101,25 +100,22 @@ cnor_compile_for_loop(cnor_compiler_t *self, const cnor_node_t *node, cnor_slot_
 {
     cnor_label_t body;
     cnor_label_t step;
-    cnor_label_t check;
     cnor_label_t end;
 
     cnor_label_init(&body);
     cnor_label_init(&step);
-    cnor_label_init(&check);
     cnor_label_init(&end);
-    if (!cnor_emit_jump(self, cnor_op_jmp, &check) || !cnor_emit_bind(self, &body)
+    self->emit.line = node->line;
+    if (!cnor_emit_insn(self, cnor_op_lt_ll, var, bound)
+        || !cnor_emit_jump(self, cnor_op_jmp_if_false, &end) || !cnor_emit_bind(self, &body)
         || !cnor_loop_body(self, node, node->data.for_.body, &end, &step))
     {
         return lh_bool_false;
     }
     self->emit.line = node->line;
-    return cnor_emit_bind(self, &step) && cnor_emit_insn(self, cnor_op_load_local, var, 0U)
-           && cnor_emit_insn(self, cnor_op_push_i32, 1U, 0U) && cnor_emit_op(self, cnor_op_add)
-           && cnor_emit_insn(self, cnor_op_store_local, var, 0U) && cnor_emit_bind(self, &check)
-           && cnor_emit_insn(self, cnor_op_load_local, var, 0U)
-           && cnor_emit_insn(self, cnor_op_load_local, bound, 0U) && cnor_emit_op(self, cnor_op_lt)
-           && cnor_emit_jump(self, cnor_op_jmp_if_true, &body) && cnor_emit_bind(self, &end);
+    return cnor_emit_bind(self, &step)
+           && cnor_emit_jump_with(self, cnor_op_for_loop, &body, var, bound)
+           && cnor_emit_bind(self, &end);
 }
 
 lh_bool_t

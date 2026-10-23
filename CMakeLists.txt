@@ -78,6 +78,7 @@ set(CNOR_SOURCES
         ${CNOR_SRC_PATH}/cnor/vm/op/compare.c
         ${CNOR_SRC_PATH}/cnor/vm/op/control.c
         ${CNOR_SRC_PATH}/cnor/vm/op/text.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/operand.c
 )
 
 # cnor is a static library only, like lh.

@@ -241,6 +241,9 @@ cnor_code_addr_t
 cnor_emit_get_addr(const cnor_emit_t *self);
 void
 cnor_emit_begin_function(cnor_emit_t *self);
+/** @brief Emit @p op with operands @p a, @p b and @p c; tracks the stack. */
+lh_bool_t
+cnor_emit_insn3(cnor_compiler_t *self, cnor_op_t op, lh_u32_t a, lh_u32_t b, lh_u32_t c);
 /** @brief Emit @p op with operands @p a and @p b; tracks the stack. */
 lh_bool_t
 cnor_emit_insn(cnor_compiler_t *self, cnor_op_t op, lh_u32_t a, lh_u32_t b);
@@ -249,6 +252,13 @@ lh_bool_t
 cnor_emit_op(cnor_compiler_t *self, cnor_op_t op);
 void
 cnor_label_init(cnor_label_t *label);
+/**
+ * @brief Emit a jump-family @p op to @p label, with @p b and @p c as its
+ *        second and third operands (the jump is always the first).
+ */
+lh_bool_t
+cnor_emit_jump_with(cnor_compiler_t *self, cnor_op_t op, cnor_label_t *label, lh_u32_t b,
+                    lh_u32_t c);
 /** @brief Emit a jump-family @p op to @p label. */
 lh_bool_t
 cnor_emit_jump(cnor_compiler_t *self, cnor_op_t op, cnor_label_t *label);
@@ -347,10 +357,25 @@ lh_bool_t
 cnor_compile_binary(cnor_compiler_t *self, const cnor_node_t *node);
 lh_bool_t
 cnor_compile_index(cnor_compiler_t *self, const cnor_node_t *node);
+/** @brief Whether @p node names a local; its slot through @p slot. */
+lh_bool_t
+cnor_compile_local_operand(cnor_compiler_t *self, const cnor_node_t *node, cnor_slot_t *slot);
+/**
+ * @brief Whether @p node is an integer literal (or a negated one) that
+ *        `push_i32` would push; its operand bits through @p bits.
+ */
+lh_bool_t
+cnor_compile_int_operand(const cnor_node_t *node, lh_u32_t *bits);
 
 /* logic.c */
 lh_bool_t
 cnor_compile_logic(cnor_compiler_t *self, const cnor_node_t *node);
+
+/** @brief Compile @p node as a condition: jump to @p target when its truth is
+ *         @p when, fall through otherwise (see logic.c). */
+lh_bool_t
+cnor_compile_branch(cnor_compiler_t *self, const cnor_node_t *node, lh_bool_t when,
+                    cnor_label_t *target);
 
 /* call.c */
 lh_bool_t

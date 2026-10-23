@@ -2,7 +2,7 @@
 #include <lh/null.h>
 
 /*
- *     cond; jmp_if_false else
+ *     cond; jmp_if_false else  (see cnor_compile_branch for and / or / not)
  *     then-block
  *     jmp end                  (only with an else block)
  *   else:
@@ -18,8 +18,7 @@ cnor_compile_if(cnor_compiler_t *self, const cnor_node_t *node)
 
     cnor_label_init(&otherwise);
     cnor_label_init(&end);
-    if (!cnor_compile_expr(self, node->data.if_.cond)
-        || !cnor_emit_jump(self, cnor_op_jmp_if_false, &otherwise)
+    if (!cnor_compile_branch(self, node->data.if_.cond, lh_bool_false, &otherwise)
         || !cnor_compile_block(self, node->data.if_.then_body))
     {
         return lh_bool_false;
