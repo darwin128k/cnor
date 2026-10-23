@@ -36,7 +36,7 @@ offset, copied name or detail, copied file name), with codes in
 | ast | `ast.h`, `ast.c` | Node kinds, a per-kind data union, accessors |
 | parser | `parser.h`, `src/cnor/parser/{parser,token,literal,expr,stmt,control,fn}.c` | Recursive descent with a statement rule table and a binary precedence table |
 | op | `op.h`, `op.c` | The opcode enum, the info table (operands, size, stack effect, flags), the operand-form mapping and the shared decoder |
-| byte | `src/cnor/byte/{reader,writer}.{h,c}` | Little-endian byte writer over `lh_array_t`, bounds-checked sticky reader |
+| byte | `src/cnor/byte/{reader,writer}.{h,c}` | Little-endian byte writer over a doubling runtime-allocator block, bounds-checked sticky reader |
 | image | `image.h`, `src/cnor/image/{header,view,names,writer,verify}.c` | v4 format: header read, section views, line and file lookup, writer, verifier |
 | native | `native.h`, `native/*.h`, `native.c` | Host native entries and tables, lookup by name, arity check |
 | compiler | `compiler.h`, `src/cnor/compiler/*.c` | AST to image; see below |
@@ -385,6 +385,18 @@ place, the handlers under `src/cnor/vm/op/`:
     +0.5 / -3%, `match` -15 / -19%, `calls` -3 / -15%, `globals` -7 / -21%,
     `logic` -18 / -23%, `strbuild` -8 / +2%, `streq` -15 / +1%. Step counts
     are unchanged.
+
+- **Where the loop starts.** With GCC and Clang `dispatch.c` is compiled
+  with `-falign-functions=64` (CMakeLists.txt), so `cnor_vm_dispatch` starts
+  on a 64-byte line whatever is linked before it. Its speed depends on that
+  offset: the faster compiler of 2026-10-23 left the dispatch object byte for
+  byte the same, but the smaller code before it moved the loop from offset 0
+  to offset 32 of a line, and the computed-goto build (`-O2`,
+  `-Wa,-mbranches-within-32B-boundaries`) ran `native` 9%, `globals` 8% and
+  `nested` 7% slower on the same instruction count; padding the link by 16
+  bytes, or the alignment, put it back. Which offset is best is a property of
+  the build, not a rule: in the `-O3` `switch` build offset 32 runs `loop`
+  and `nested` about 10% faster than offset 0 and `match` 10% slower.
 
 ## Bounding a run
 

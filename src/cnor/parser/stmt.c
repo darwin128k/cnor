@@ -221,14 +221,20 @@ static const struct cnor_parser_stmt_rule m_stmt_rules[] = {
 
 #define CNOR_PARSER_STMT_RULE_COUNT (sizeof(m_stmt_rules) / sizeof(m_stmt_rules[0]))
 
+/* The rule of the statement at the current token; most statements (an
+ * assignment, a call) start with a name and need no look at the table. */
 static const struct cnor_parser_stmt_rule *
 cnor_parser_stmt_rule_of(const cnor_parser_t *self)
 {
     lh_uint_t i;
 
+    if (self->token.kind != cnor_token_keyword)
+    {
+        return lh_null;
+    }
     for (i = 0U; i < CNOR_PARSER_STMT_RULE_COUNT; ++i)
     {
-        if (cnor_parser_at_keyword(self, m_stmt_rules[i].keyword))
+        if (self->token.keyword == m_stmt_rules[i].keyword)
         {
             return &m_stmt_rules[i];
         }
@@ -262,11 +268,10 @@ cnor_parser_end_simple(cnor_parser_t *self, lh_bool_t allow_comma)
     return lh_bool_false;
 }
 
-cnor_node_t *
-cnor_parser_simple_statement(cnor_parser_t *self)
+/* A simple statement whose rule (::lh_null for none) is already looked up. */
+static cnor_node_t *
+cnor_parser_simple_by_rule(cnor_parser_t *self, const struct cnor_parser_stmt_rule *rule)
 {
-    const struct cnor_parser_stmt_rule *rule = cnor_parser_stmt_rule_of(self);
-
     if (rule != lh_null && !rule->compound)
     {
         return rule->parse(self);
@@ -279,6 +284,12 @@ cnor_parser_simple_statement(cnor_parser_t *self)
 }
 
 cnor_node_t *
+cnor_parser_simple_statement(cnor_parser_t *self)
+{
+    return cnor_parser_simple_by_rule(self, cnor_parser_stmt_rule_of(self));
+}
+
+cnor_node_t *
 cnor_parser_statement(cnor_parser_t *self)
 {
     const struct cnor_parser_stmt_rule *rule = cnor_parser_stmt_rule_of(self);
@@ -288,7 +299,7 @@ cnor_parser_statement(cnor_parser_t *self)
     {
         return rule->parse(self);
     }
-    node = cnor_parser_simple_statement(self);
+    node = cnor_parser_simple_by_rule(self, rule);
     if (node == lh_null || !cnor_parser_end_simple(self, lh_bool_false))
     {
         return lh_null;

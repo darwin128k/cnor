@@ -58,22 +58,42 @@ cnor_order_use_global(cnor_compiler_t *self, const cnor_node_t *node, lh_u32_t i
     return lh_bool_true;
 }
 
+/*
+ * Calls that can never fail the check are not recorded: from top-level code
+ * once every global is ready, and calls between functions while there are no
+ * globals at all (every function then needs none). A function calling itself
+ * passes nothing on, and a call repeating the edge recorded last adds nothing.
+ */
 void
 cnor_order_call(cnor_compiler_t *self, const cnor_node_t *node, cnor_function_index_t callee)
 {
+    const cnor_count_t global_count = cnor_scope_global_count(&self->scope);
     struct cnor_early_call call;
     struct cnor_call_edge edge;
 
     if (self->top_code)
     {
+        if (self->globals_ready >= global_count)
+        {
+            return;
+        }
         call.callee = callee;
         call.globals_ready = self->globals_ready;
         call.line = node->line;
         call.module = self->module;
         lh_array_push_back(&self->early_calls, &call);
     }
-    else
+    else if (global_count > 0U && callee != self->function)
     {
+        const lh_usize_t count = lh_array_get_size(&self->calls);
+        const struct cnor_call_edge *last =
+            count > 0U ? (const struct cnor_call_edge *) lh_array_get_ptr(&self->calls, count - 1U)
+                       : lh_null;
+
+        if (last != lh_null && last->caller == self->function && last->callee == callee)
+        {
+            return;
+        }
         edge.caller = self->function;
         edge.callee = callee;
         lh_array_push_back(&self->calls, &edge);

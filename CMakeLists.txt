@@ -114,6 +114,15 @@ target_link_libraries(${PROJECT_NAME} PUBLIC lh)
 if (NOT CNOR_VM_COMPUTED_GOTO)
     target_compile_definitions(${PROJECT_NAME} PRIVATE CNOR_VM_COMPUTED_GOTO=0)
 endif ()
+# The dispatch loop runs at a speed that depends on where it starts in a
+# 64-byte line: the same code moved by 32 bytes ran `native`, `nested` and
+# `globals` 7 to 9% slower (docs/architecture.md, "Where the loop starts").
+# Starting it on a line keeps the size of unrelated code linked before it from
+# moving it.
+if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(${CNOR_SRC_PATH}/cnor/vm/dispatch.c PROPERTIES
+            COMPILE_OPTIONS -falign-functions=64)
+endif ()
 
 # Optional optimizations, all OFF by default; bench/README.md has what they
 # measured. Link-time optimization lets the compiler inline across cnor's

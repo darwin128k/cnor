@@ -8,7 +8,8 @@
  * again while its own imports are still being followed closes a cycle. When a
  * file's imports are all done it joins `order`, so every file comes after the
  * files it imports: its globals are declared, and its top-level code runs, in
- * that order.
+ * that order. The main file always finishes last, so it is left out of
+ * `order` (a single file needs no allocation for it).
  */
 
 /* -- table ----------------------------------------------------------------- */
@@ -247,7 +248,10 @@ cnor_module_visit(cnor_compiler_t *self, cnor_module_index_t index, lh_u32_t dep
         }
     }
     cnor_module_at(self, index)->state = cnor_module_loaded;
-    lh_array_push_back(&self->order, &index);
+    if (index != 0U)
+    {
+        lh_array_push_back(&self->order, &index);
+    }
     return lh_bool_true;
 }
 

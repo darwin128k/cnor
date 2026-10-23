@@ -59,7 +59,7 @@ cnor_compile_declare(cnor_compiler_t *self)
         return lh_bool_false;
     }
     /* Imported files first, so globals are numbered in the order their
-     * `let`s run. */
+     * `let`s run; the main file, which `order` leaves out, last. */
     for (i = 0U; i < count; ++i)
     {
         if (!cnor_compile_declare_module(
@@ -68,7 +68,7 @@ cnor_compile_declare(cnor_compiler_t *self)
             return lh_bool_false;
         }
     }
-    return lh_bool_true;
+    return cnor_compile_declare_module(self, 0U);
 }
 
 /* -- returns --------------------------------------------------------------- */
@@ -270,9 +270,8 @@ cnor_compile_module_calls(cnor_compiler_t *self)
         const cnor_module_index_t index =
             *(const cnor_module_index_t *) lh_array_get_ptr(&self->order, i);
 
-        if (index != 0U
-            && (!cnor_emit_insn(self, cnor_op_call, cnor_module_at(self, index)->function, 0U)
-                || !cnor_emit_op(self, cnor_op_pop)))
+        if (!cnor_emit_insn(self, cnor_op_call, cnor_module_at(self, index)->function, 0U)
+            || !cnor_emit_op(self, cnor_op_pop))
         {
             return lh_bool_false;
         }

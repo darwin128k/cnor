@@ -316,7 +316,7 @@ struct cnor_compiler
     lh_u32_t block_depth;           /**< 0 at the top level of a function. */
     cnor_arena_t arena;             /**< Imported trees and resolved paths. */
     lh_array_t modules;             /**< struct cnor_module; 0 is the main file. */
-    lh_array_t order;               /**< cnor_module_index_t, imported files first. */
+    lh_array_t order;               /**< cnor_module_index_t, imported files only, imports first. */
     cnor_module_index_t module;     /**< File being compiled. */
     lh_bool_t top_code;             /**< Compiling a file's top-level code. */
     lh_u32_t globals_ready;         /**< Top-level code: globals whose `let` has run. */
@@ -573,9 +573,11 @@ lh_bool_t
 cnor_compile_binary(cnor_compiler_t *self, const cnor_node_t *node);
 lh_bool_t
 cnor_compile_index(cnor_compiler_t *self, const cnor_node_t *node);
-/** @brief Whether @p node names a local; its slot through @p slot. */
+/** @brief Whether @p node names a local; its slot through @p slot, its type
+ *         through @p type (both left alone when it does not). */
 lh_bool_t
-cnor_compile_local_operand(cnor_compiler_t *self, const cnor_node_t *node, cnor_slot_t *slot);
+cnor_compile_local_operand(cnor_compiler_t *self, const cnor_node_t *node, cnor_slot_t *slot,
+                           cnor_static_type_t *type);
 /**
  * @brief Whether @p node is an integer literal (or a negated one) that
  *        `push_i32` would push; its operand bits through @p bits.

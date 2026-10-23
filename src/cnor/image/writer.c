@@ -94,6 +94,39 @@ cnor_image_put_raw(cnor_byte_writer_t *out, cnor_image_section_t section, const 
     cnor_image_end_section(out, section, begin);
 }
 
+/* -- size ------------------------------------------------------------------ */
+
+/* Bytes a table of @p count names takes, its count included. */
+static lh_u32_t
+cnor_image_names_size(const lh_str_view_t *names, cnor_count_t count)
+{
+    lh_u32_t size = 4U;
+    cnor_count_t i;
+
+    for (i = 0U; i < count; ++i)
+    {
+        size += 2U + (lh_u32_t) names[i].size;
+    }
+    return size;
+}
+
+/* At least the bytes the image takes, so its writer allocates once. A hint
+ * only: the writer still grows if it is short. */
+static lh_u32_t
+cnor_image_size_bound(const cnor_image_parts_t *parts)
+{
+    lh_u32_t size = 20U + 8U * (lh_u32_t) cnor_image_section_count;
+
+    /* Each section: alignment, a count. */
+    size += (lh_u32_t) cnor_image_section_count * (CNOR_IMAGE_ALIGN + 4U);
+    size += cnor_byte_writer_get_size(parts->code) + cnor_byte_writer_get_size(parts->consts);
+    size += parts->function_count * 14U;
+    size += cnor_image_names_size(parts->natives, parts->native_count);
+    size += parts->lines != lh_null ? cnor_byte_writer_get_size(parts->lines) : 0U;
+    size += cnor_image_names_size(parts->files, parts->file_count);
+    return size;
+}
+
 /* -- header ---------------------------------------------------------------- */
 
 static void
@@ -120,6 +153,7 @@ cnor_image_write(const cnor_image_parts_t *parts, cnor_image_t *out)
     cnor_byte_writer_t writer;
 
     cnor_byte_writer_init(&writer);
+    cnor_byte_writer_reserve(&writer, cnor_image_size_bound(parts));
     cnor_image_put_header(&writer, parts, flags);
     cnor_image_put_raw(&writer, cnor_image_section_code, cnor_byte_writer_get_data(parts->code),
                        cnor_byte_writer_get_size(parts->code));

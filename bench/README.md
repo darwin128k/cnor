@@ -119,6 +119,40 @@ workload compiles 2.3% slower, and the small workloads, which compile in about
 4 us, take 0.1 to 0.5 us more (+3 to +12%), mostly a few more allocations per
 compile. Loading a v4 image is level (-7% to +5%, within the spread).
 
+The compiler was then made faster than before the types (2026-10-23, same
+image bytes for every workload and test program). Callgrind showed where the
+types and imports had added work: every local operand of a binary operator was
+looked up twice (once for its slot, once for its type), a host native was
+hashed twice per lookup (its own file, then the host), the statement table got
+one more entry (and was scanned twice for every statement), and a small
+compile made six more allocations (the module table and order, the file table,
+the call graph). The fixes: one lookup per operand, one hash per name, a
+length test before comparing names, the statement rule looked up once and only
+for a keyword, the main file left out of the module order, calls that cannot
+fail the initialization check not recorded, no file table for an unnamed
+single file. The largest gain had been there before the types: the byte writer
+(code, constants, lines, the image) grew an `lh_array_t` from one byte and
+went through it for every byte; it now writes into a block of its own,
+doubling from 64 bytes, and the image writer allocates its size once.
+`cnor_bench` compile medians (median of 5 processes x 15 iterations, Release,
+one pinned CPU), before the types / with them / now:
+
+| Workload | before types us | v4 us | now us | now vs before types |
+|---|---|---|---|---|
+| fib | 3.6 | 3.6 | 2.7 | -24% |
+| loop | 4.0 | 4.1 | 3.1 | -21% |
+| nested | 4.7 | 4.9 | 3.5 | -25% |
+| text | 8.1 | 8.5 | 7.0 | -14% |
+| native | 3.7 | 4.1 | 3.1 | -16% |
+| match | 7.7 | 7.9 | 6.0 | -22% |
+| compile | 5556 | 5849 | 5147 | -7% |
+
+Instructions per compile (callgrind): `fib` 38.0k before the types, 41.9k
+with them, 31.5k now; `compile` 70.4M, 74.2M, 64.9M. The dispatch object is
+unchanged, but the smaller compiler moved it within a cache line, which cost
+up to 9% on some run workloads until `dispatch.c` was aligned (see
+docs/architecture.md, "Where the loop starts").
+
 ## Optional optimizations
 
 Measured 2026-10-23 on the same machine against a plain `-O2` build of the

@@ -155,21 +155,36 @@ cnor_compiler_relocate(cnor_compiler_t *self)
     return lh_bool_true;
 }
 
+/* How many names the image's file table gets: none for a single unnamed file,
+ * as before imports existed. */
+static cnor_count_t
+cnor_compiler_file_count(cnor_compiler_t *self)
+{
+    const cnor_count_t module_count = cnor_module_count(self);
+
+    if (module_count == 1U && lh_str_view_get_size(&cnor_module_at(self, 0U)->name) == 0U)
+    {
+        return 0U;
+    }
+    return module_count;
+}
+
 static lh_bool_t
 cnor_compiler_write_image(cnor_compiler_t *self, cnor_image_t *out)
 {
     const cnor_count_t function_count = cnor_scope_function_count(&self->scope);
-    const cnor_count_t module_count = cnor_module_count(self);
+    const cnor_count_t file_count = cnor_compiler_file_count(self);
     cnor_image_function_t *functions = (cnor_image_function_t *) lh_runtime_allocator_alloc(
         function_count * sizeof(cnor_image_function_t));
     lh_str_view_t *files =
-        (lh_str_view_t *) lh_runtime_allocator_alloc(module_count * sizeof(lh_str_view_t));
-    cnor_count_t file_count = module_count;
+        file_count > 0U
+            ? (lh_str_view_t *) lh_runtime_allocator_alloc(file_count * sizeof(lh_str_view_t))
+            : lh_null;
     cnor_image_parts_t parts;
     cnor_count_t i;
     lh_bool_t ok;
 
-    if (functions == lh_null || files == lh_null)
+    if (functions == lh_null || (file_count > 0U && files == lh_null))
     {
         lh_runtime_allocator_free(functions);
         lh_runtime_allocator_free(files);
@@ -179,14 +194,9 @@ cnor_compiler_write_image(cnor_compiler_t *self, cnor_image_t *out)
     {
         functions[i] = cnor_scope_function_at(&self->scope, (cnor_function_index_t) i)->image;
     }
-    for (i = 0U; i < module_count; ++i)
+    for (i = 0U; i < file_count; ++i)
     {
         files[i] = cnor_module_at(self, (cnor_module_index_t) i)->name;
-    }
-    if (module_count == 1U && lh_str_view_get_size(&files[0]) == 0U)
-    {
-        /* A single unnamed file: no table, as before imports existed. */
-        file_count = 0U;
     }
     parts.code = &self->emit.code;
     parts.consts = &self->constants.records;
@@ -203,7 +213,10 @@ cnor_compiler_write_image(cnor_compiler_t *self, cnor_image_t *out)
     parts.stack_slots = cnor_compiler_stack_slots(self);
     ok = cnor_image_write(&parts, out);
     lh_runtime_allocator_free(functions);
-    lh_runtime_allocator_free(files);
+    if (files != lh_null)
+    {
+        lh_runtime_allocator_free(files);
+    }
     return ok ? lh_bool_true : cnor_diag_set(self->diag, cnor_error_no_memory, 0U, 0U);
 }
 

@@ -1,11 +1,14 @@
 /**
  * @file writer.h
  * @brief Library-private: a growable little-endian byte writer
- *        (::cnor_byte_writer_t) over an ::lh_array_t of bytes.
+ *        (::cnor_byte_writer_t) over a runtime-allocator block.
  *
  * Used for the code section, the constant pool and the final image. Fields are
  * written byte by byte with lh_bit_pack_le*, never by copying a struct, so the
- * result does not depend on the host's layout or endianness.
+ * result does not depend on the host's layout or endianness. Every write is
+ * one capacity test and a few stores; the block grows by doubling, from
+ * ::CNOR_BYTE_WRITER_MIN_CAPACITY, so the compiler does not reallocate for
+ * each of the first few dozen bytes of a section.
  *
  * @note Candidate lh brick (`lh_byte_writer_t`).
  */
@@ -13,10 +16,12 @@
 #ifndef CNOR_SRC_BYTE_WRITER_H
 #define CNOR_SRC_BYTE_WRITER_H
 
-#include <lh/array.h>
 #include <lh/bool.h>
 #include <lh/byte.h>
 #include <lh/numeric/fixed/types.h>
+
+/** @brief Bytes the block gets when the first byte is written. */
+#define CNOR_BYTE_WRITER_MIN_CAPACITY 64U
 
 /**
  * @struct cnor_byte_writer
@@ -24,7 +29,9 @@
  */
 struct cnor_byte_writer
 {
-    lh_array_t bytes; /**< Element size 1. */
+    lh_byte_t *data;   /**< `capacity` bytes, or ::lh_null before the first write. */
+    lh_u32_t size;     /**< Bytes written. */
+    lh_u32_t capacity; /**< Bytes the block holds. */
 };
 /** @copybrief cnor_byte_writer */
 typedef struct cnor_byte_writer cnor_byte_writer_t;
@@ -45,7 +52,12 @@ cnor_byte_writer_get_size(const cnor_byte_writer_t *self);
 lh_byte_t *
 cnor_byte_writer_get_data(const cnor_byte_writer_t *self);
 
-/** @brief Append @p size bytes from @p data. */
+/** @brief Grow the block to hold at least @p capacity bytes (a hint: nothing
+ *         changes when it cannot). */
+void
+cnor_byte_writer_reserve(cnor_byte_writer_t *self, lh_u32_t capacity);
+
+/** @brief Append @p size bytes from @p data; nothing when the block cannot grow. */
 void
 cnor_byte_writer_put_bytes(cnor_byte_writer_t *self, const lh_byte_t *data, lh_u32_t size);
 
@@ -70,7 +82,8 @@ void
 cnor_byte_writer_patch_u32(cnor_byte_writer_t *self, lh_u32_t at, lh_u32_t value);
 
 /**
- * @brief Move the bytes into a fresh runtime-allocator block owned by the caller.
+ * @brief Hand the bytes over in a runtime-allocator block, cut to their size,
+ *        owned by the caller.
  *
  * The writer is empty afterwards.
  *

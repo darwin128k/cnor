@@ -26,14 +26,25 @@ cnor_name_index_deinit(struct cnor_name_index *self)
     cnor_name_index_init(self);
 }
 
-/* The name's hash, mixed with its file: one name may be declared once per file. */
+/* The hash of a name alone; a lookup in several files computes it once. */
+static lh_u32_t
+cnor_name_index_hash_name(lh_str_view_t name)
+{
+    return lh_hash_fnv1a_32(lh_str_view_get_data(&name), lh_str_view_get_size(&name));
+}
+
+/* A name's hash (::cnor_name_index_hash_name) mixed with its file: one name
+ * may be declared once per file. */
+static lh_u32_t
+cnor_name_index_mix(lh_u32_t name_hash, cnor_module_index_t module)
+{
+    return name_hash ^ ((lh_u32_t) module * 0x9E3779B1U);
+}
+
 static lh_u32_t
 cnor_name_index_hash(lh_str_view_t name, cnor_module_index_t module)
 {
-    const lh_u32_t hash =
-        lh_hash_fnv1a_32(lh_str_view_get_data(&name), lh_str_view_get_size(&name));
-
-    return hash ^ ((lh_u32_t) module * 0x9E3779B1U);
+    return cnor_name_index_mix(cnor_name_index_hash_name(name), module);
 }
 
 /* The entry holding @p name of @p module, or the free entry where it would go. */
@@ -152,30 +163,32 @@ cnor_scope_deinit(cnor_scope_t *self)
 
 /* -- lookups --------------------------------------------------------------- */
 
+/* Sizes first: most names that differ differ in length, and that test needs
+ * no call. */
 static lh_bool_t
 cnor_scope_name_is(const lh_str_view_t *a, const lh_str_view_t *b)
 {
-    return (a->size > 0U && lh_str_view_equals(a, b, lh_bool_false)) ? lh_bool_true
-                                                                     : lh_bool_false;
+    return (a->size > 0U && a->size == b->size && lh_str_view_equals(a, b, lh_bool_false))
+               ? lh_bool_true
+               : lh_bool_false;
 }
 
-/* Index of the local named @p name, from the innermost. */
-static lh_u16_t
+/* The local named @p name, from the innermost, or ::lh_null. */
+static const struct cnor_local_decl *
 cnor_scope_find_local(const lh_array_t *locals, lh_str_view_t name)
 {
-    lh_usize_t i = lh_array_get_size(locals);
+    const struct cnor_local_decl *first =
+        (const struct cnor_local_decl *) lh_array_get_begin(locals);
+    const struct cnor_local_decl *local = first + lh_array_get_size(locals);
 
-    while (i > 0U)
+    while (local != first)
     {
-        const struct cnor_local_decl *local =
-            (const struct cnor_local_decl *) lh_array_get_ptr(locals, --i);
-
-        if (cnor_scope_name_is(&local->name, &name))
+        if (cnor_scope_name_is(&(--local)->name, &name))
         {
-            return (lh_u16_t) i;
+            return local;
         }
     }
-    return CNOR_INDEX_NONE;
+    return lh_null;
 }
 
 /* Index of the declaration keyed (@p name, @p module) in a table whose entries
@@ -231,11 +244,12 @@ cnor_scope_global_count(const cnor_scope_t *self)
 /*
  * The function, native or global named @p name in file @p module: through the
  * index, or by scanning the tables when the index ran out of memory.
+ * @p name_hash is ::cnor_name_index_hash_name of @p name.
  * @return ::cnor_binding_none when there is none.
  */
 static cnor_binding_kind_t
-cnor_scope_find_top(const cnor_scope_t *self, lh_str_view_t name, cnor_module_index_t module,
-                    lh_u16_t *index)
+cnor_scope_find_top_hashed(const cnor_scope_t *self, lh_str_view_t name, lh_u32_t name_hash,
+                           cnor_module_index_t module, lh_u16_t *index)
 {
     if (self->top.usable)
     {
@@ -246,7 +260,7 @@ cnor_scope_find_top(const cnor_scope_t *self, lh_str_view_t name, cnor_module_in
             return cnor_binding_none;
         }
         entry = cnor_name_index_slot(&self->top, name, module,
-                                     cnor_name_index_hash(name, module));
+                                     cnor_name_index_mix(name_hash, module));
         if (lh_str_view_get_size(&entry->name) == 0U)
         {
             return cnor_binding_none;
@@ -267,6 +281,13 @@ cnor_scope_find_top(const cnor_scope_t *self, lh_str_view_t name, cnor_module_in
         return cnor_binding_native;
     }
     return cnor_binding_none;
+}
+
+static cnor_binding_kind_t
+cnor_scope_find_top(const cnor_scope_t *self, lh_str_view_t name, cnor_module_index_t module,
+                    lh_u16_t *index)
+{
+    return cnor_scope_find_top_hashed(self, name, cnor_name_index_hash_name(name), module, index);
 }
 
 static lh_bool_t
@@ -430,15 +451,17 @@ cnor_scope_add_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view
 
 /* -- resolution ------------------------------------------------------------ */
 
-/* The host's native @p name, declared on first use under ::CNOR_MODULE_HOST. */
+/* The host's native @p name (hashed: @p name_hash), declared on first use
+ * under ::CNOR_MODULE_HOST. */
 static lh_u16_t
-cnor_scope_find_host_native(cnor_compiler_t *self, lh_str_view_t name)
+cnor_scope_find_host_native(cnor_compiler_t *self, lh_str_view_t name, lh_u32_t name_hash)
 {
     const cnor_native_t *host;
     struct cnor_native_decl decl;
     lh_u16_t index = CNOR_INDEX_NONE;
 
-    if (cnor_scope_find_top(&self->scope, name, CNOR_MODULE_HOST, &index) == cnor_binding_native)
+    if (cnor_scope_find_top_hashed(&self->scope, name, name_hash, CNOR_MODULE_HOST, &index)
+        == cnor_binding_native)
     {
         return index;
     }
@@ -475,25 +498,35 @@ cnor_binding_make(cnor_binding_kind_t kind, lh_u16_t index, lh_bool_t is_mutable
  * make it ambiguous. Imports are not passed on: what a file imports is not
  * visible to the files importing it. */
 static cnor_binding_kind_t
-cnor_scope_find_visible(cnor_compiler_t *self, lh_str_view_t name, lh_u16_t *index)
+cnor_scope_find_visible(cnor_compiler_t *self, lh_str_view_t name, lh_u32_t name_hash,
+                        lh_u16_t *index)
 {
-    const struct cnor_module *module = cnor_module_at(self, self->module);
-    const cnor_module_index_t *imports =
-        (const cnor_module_index_t *) lh_array_get_begin(&module->imports);
-    const lh_usize_t count = lh_array_get_size(&module->imports);
-    cnor_binding_kind_t found = cnor_scope_find_top(&self->scope, name, self->module, index);
+    const cnor_binding_kind_t own =
+        cnor_scope_find_top_hashed(&self->scope, name, name_hash, self->module, index);
+    const struct cnor_module *module;
+    const cnor_module_index_t *imports;
+    cnor_binding_kind_t found = cnor_binding_none;
+    lh_usize_t count;
     lh_usize_t i;
 
+    if (own != cnor_binding_none)
+    {
+        return own;
+    }
+    module = cnor_module_at(self, self->module);
+    imports = (const cnor_module_index_t *) lh_array_get_begin(&module->imports);
+    count = lh_array_get_size(&module->imports);
     for (i = 0U; found == cnor_binding_none && i < count; ++i)
     {
         lh_usize_t j;
 
-        found = cnor_scope_find_top(&self->scope, name, imports[i], index);
+        found = cnor_scope_find_top_hashed(&self->scope, name, name_hash, imports[i], index);
         for (j = i + 1U; found != cnor_binding_none && j < count; ++j)
         {
             lh_u16_t other = CNOR_INDEX_NONE;
 
-            if (cnor_scope_find_top(&self->scope, name, imports[j], &other) != cnor_binding_none)
+            if (cnor_scope_find_top_hashed(&self->scope, name, name_hash, imports[j], &other)
+                != cnor_binding_none)
             {
                 return cnor_binding_ambiguous;
             }
@@ -506,17 +539,17 @@ cnor_binding_t
 cnor_scope_resolve(cnor_compiler_t *self, lh_str_view_t name)
 {
     cnor_scope_t *scope = &self->scope;
-    lh_u16_t index = cnor_scope_find_local(&scope->locals, name);
+    const struct cnor_local_decl *local = cnor_scope_find_local(&scope->locals, name);
+    lh_u16_t index = CNOR_INDEX_NONE;
+    lh_u32_t name_hash;
     cnor_binding_kind_t kind;
 
-    if (index != CNOR_INDEX_NONE)
+    if (local != lh_null)
     {
-        const struct cnor_local_decl *local =
-            (const struct cnor_local_decl *) lh_array_get_ptr(&scope->locals, index);
-
         return cnor_binding_make(cnor_binding_local, local->slot, local->is_mutable, local->type);
     }
-    kind = cnor_scope_find_visible(self, name, &index);
+    name_hash = cnor_name_index_hash_name(name);
+    kind = cnor_scope_find_visible(self, name, name_hash, &index);
     if (kind == cnor_binding_global)
     {
         const struct cnor_global_decl *global = cnor_scope_global_at(scope, index);
@@ -525,7 +558,7 @@ cnor_scope_resolve(cnor_compiler_t *self, lh_str_view_t name)
     }
     if (kind == cnor_binding_none)
     {
-        index = cnor_scope_find_host_native(self, name);
+        index = cnor_scope_find_host_native(self, name, name_hash);
         kind = index != CNOR_INDEX_NONE ? cnor_binding_native : cnor_binding_none;
     }
     return cnor_binding_make(kind, index, lh_bool_false, cnor_static_any);

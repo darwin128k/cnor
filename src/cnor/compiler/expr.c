@@ -110,7 +110,8 @@ static const cnor_op_t m_binary_ops[cnor_binary_count] = {
 /* -- operand forms --------------------------------------------------------- */
 
 lh_bool_t
-cnor_compile_local_operand(cnor_compiler_t *self, const cnor_node_t *node, cnor_slot_t *slot)
+cnor_compile_local_operand(cnor_compiler_t *self, const cnor_node_t *node, cnor_slot_t *slot,
+                           cnor_static_type_t *type)
 {
     cnor_binding_t binding;
 
@@ -124,6 +125,7 @@ cnor_compile_local_operand(cnor_compiler_t *self, const cnor_node_t *node, cnor_
         return lh_bool_false;
     }
     *slot = binding.index;
+    *type = binding.type;
     return lh_bool_true;
 }
 
@@ -144,13 +146,6 @@ cnor_compile_int_operand(const cnor_node_t *node, lh_u32_t *bits)
         return lh_bool_true;
     }
     return lh_bool_false;
-}
-
-/* Type of a local named by @p node (known to be one). */
-static cnor_static_type_t
-cnor_compile_local_type(cnor_compiler_t *self, const cnor_node_t *node)
-{
-    return cnor_scope_resolve(self, node->name).type;
 }
 
 /* Compile @p node onto the stack; its type through @p type. */
@@ -182,12 +177,10 @@ cnor_compile_binary_form(cnor_compiler_t *self, const cnor_node_t *node, cnor_op
     cnor_slot_t b;
     lh_u32_t k;
 
-    if (cnor_compile_local_operand(self, left, &a))
+    if (cnor_compile_local_operand(self, left, &a, left_type))
     {
-        *left_type = cnor_compile_local_type(self, left);
-        if (cnor_compile_local_operand(self, right, &b))
+        if (cnor_compile_local_operand(self, right, &b, right_type))
         {
-            *right_type = cnor_compile_local_type(self, right);
             return cnor_emit_insn(
                 self, cnor_op_get_operand_form(op, cnor_operand_form_local_local), a, b);
         }
