@@ -89,6 +89,27 @@ cnor_vm_fast_set_sint(lh_value_t *value, lh_sllong_t number)
     value->data.i = number;
 }
 
+/**
+ * @brief Copy @p from into @p to, field by field: the kind, the first word of
+ *        the storage, and for a string its length, the only storage beyond
+ *        8 bytes. A value is usually read back right after an instruction
+ *        wrote it the same way (a kind, an 8-byte number); loads no wider than
+ *        those stores are forwarded from them, while the 16-byte block loads
+ *        of a struct copy wait for the stores to retire.
+ */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE void
+cnor_vm_fast_move(lh_value_t *to, const lh_value_t *from)
+{
+    const lh_value_kind_t kind = from->kind;
+
+    to->kind = kind;
+    to->data.u = from->data.u;
+    if (kind == lh_value_kind_str)
+    {
+        to->data.s.size = from->data.s.size;
+    }
+}
+
 /** @brief Overwrite @p value with an unsigned integer. */
 LH_COMPILER_ATTRIBUTE_FORCE_INLINE void
 cnor_vm_fast_set_uint(lh_value_t *value, lh_ullong_t number)
@@ -316,7 +337,10 @@ cnor_vm_fast_s32(const lh_byte_t *at)
 {
     const lh_u32_t bits = cnor_vm_fast_u32(at);
 
-    return bits >= 0x80000000U ? -(lh_sllong_t) (0xFFFFFFFFU - bits) - 1 : (lh_sllong_t) bits;
+    /* Flipping the sign bit maps -2^31 .. 2^31 - 1 onto 0 .. 2^32 - 1 in
+     * order, and one subtraction maps it back: two additions after the load,
+     * where a test for the sign took a compare and a conditional move. */
+    return (lh_sllong_t) (bits ^ 0x80000000U) - (lh_sllong_t) 0x80000000U;
 }
 
 #endif /* CNOR_VM_FAST_H */

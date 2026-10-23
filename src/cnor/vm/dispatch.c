@@ -29,6 +29,7 @@
 #include <cnor/vm/fast.h>
 #include <cnor/vm/internal.h>
 #include <lh/compiler/type.h>
+#include <lh/compiler/unreachable.h>
 
 #ifndef CNOR_VM_COMPUTED_GOTO
 #    if (LH_COMPILER_TYPE_IS_GCC_LIKE)
@@ -134,7 +135,8 @@ cnor_vm_slow(cnor_vm_t *vm)
         vm->ip = (cnor_code_addr_t) (pc - code);                                                   \
         vm->stack.sp = (cnor_stack_slots_t) (sp - values);                                         \
         vm->fp = (cnor_stack_slots_t) (fp - values);                                               \
-        vm->steps = steps;                                                                         \
+        vm->steps = limit - budget;                                                                \
+        vm->depth = (cnor_call_depth_t) (frame_top - vm->frames);                                  \
     } while (0)
 
 #define CNOR_VM_RESTORE()                                                                          \
@@ -143,20 +145,24 @@ cnor_vm_slow(cnor_vm_t *vm)
         pc = code + vm->ip;                                                                        \
         sp = values + vm->stack.sp;                                                                \
         fp = values + vm->fp;                                                                      \
+        frame_top = vm->frames + vm->depth;                                                        \
     } while (0)
 
 /* The budget is checked before an instruction runs, so a stopped run reports
- * the instruction it did not execute. `steps` only ever grows by one, so
- * reaching the limit is equality; with no limit (0) the test is only true at
- * the start and after the counter wraps, and falls through. */
+ * the instruction it did not execute. `budget` counts down the steps left, so
+ * the count is `limit - budget` and reaching the limit is `budget` at 0. The
+ * hot test is `budget` alone: whether a limit is set is only asked at 0, in
+ * cnor_vm_budget_spent, so the test is one compare and branch, never a
+ * computed truth value. With no limit (0) the count is `-budget`: at 0 it
+ * wraps, as the count itself does. */
 #define CNOR_VM_STEP()                                                                             \
     do                                                                                             \
     {                                                                                              \
-        if (CNOR_VM_UNLIKELY(steps == limit) && limit != 0U)                                       \
+        if (CNOR_VM_UNLIKELY(budget == 0U))                                                        \
         {                                                                                          \
-            goto out_of_steps;                                                                     \
+            goto cnor_vm_budget_spent;                                                             \
         }                                                                                          \
-        ++steps;                                                                                   \
+        --budget;                                                                                  \
     } while (0)
 
 #if CNOR_VM_COMPUTED_GOTO
@@ -196,12 +202,13 @@ cnor_vm_slow(cnor_vm_t *vm)
  * Fusion: a few instructions look at the opcode after them and, when it is
  * the usual partner, execute it too without going back through dispatch. The
  * partner is still a separate instruction of the image: it is counted against
- * the budget (and not taken when the budget is spent, so the stop lands where
- * it would without fusion), and the verifier proved it decodes right there,
- * because an instruction that is not a terminator is always followed by
- * another one.
+ * the budget (and not taken when the budget is at 0, so the stop lands where
+ * it would without fusion; with no limit that is once in 2^32 steps, and the
+ * partner then goes through dispatch and counts the same), and the verifier
+ * proved it decodes right there, because an instruction that is not a
+ * terminator is always followed by another one.
  */
-#define CNOR_VM_CAN_FUSE() CNOR_VM_LIKELY(steps != limit || limit == 0U)
+#define CNOR_VM_CAN_FUSE() CNOR_VM_LIKELY(budget != 0U)
 
 /*
  * Tails shared by binary operators on signed integers. `pc` is at the operator,
@@ -221,7 +228,7 @@ cnor_vm_slow(cnor_vm_t *vm)
         {                                                                                          \
             const int taken = truth == (pc[n] == cnor_op_jmp_if_true);                             \
                                                                                                    \
-            ++steps;                                                                               \
+            --budget;                                                                              \
             --sp;                                                                                  \
             pc += taken ? (n) + 5 + cnor_vm_fast_s32(pc + (n) + 1) : (n) + 5;                      \
             CNOR_VM_NEXT();                                                                        \
@@ -238,7 +245,7 @@ cnor_vm_slow(cnor_vm_t *vm)
                                                                                                    \
         if (pc[n] == cnor_op_store_local && CNOR_VM_CAN_FUSE())                                    \
         {                                                                                          \
-            ++steps;                                                                               \
+            --budget;                                                                              \
             --sp;                                                                                  \
             cnor_vm_fast_set_sint(&fp[pc[(n) + 1]], result);                                       \
             pc += (n) + 2;                                                                         \
@@ -259,7 +266,7 @@ cnor_vm_slow(cnor_vm_t *vm)
                                                                                                    \
         if (pc[n] == cnor_op_store_global && CNOR_VM_CAN_FUSE())                                   \
         {                                                                                          \
-            ++steps;                                                                               \
+            --budget;                                                                              \
             --sp;                                                                                  \
             cnor_vm_fast_set_sint(&values[cnor_vm_fast_u16(pc + (n) + 1)], result_any);            \
             pc += (n) + 3;                                                                         \
@@ -293,8 +300,8 @@ cnor_vm_slow(cnor_vm_t *vm)
     {                                                                                              \
         if (pc[n] == cnor_op_store_local && CNOR_VM_CAN_FUSE())                                    \
         {                                                                                          \
-            ++steps;                                                                               \
-            fp[pc[(n) + 1]] = *--sp;                                                               \
+            --budget;                                                                              \
+            cnor_vm_fast_move(&fp[pc[(n) + 1]], --sp);                                             \
             pc += (n) + 2;                                                                         \
             CNOR_VM_NEXT();                                                                        \
         }                                                                                          \
@@ -498,10 +505,13 @@ cnor_vm_dispatch(cnor_vm_t *vm)
     lh_value_t *const values = vm->stack.values;
     const lh_value_t *const constants = vm->constants;
     const cnor_step_count_t limit = vm->config.max_steps;
-    cnor_step_count_t steps = vm->steps;
+    /* Steps left: see CNOR_VM_STEP. */
+    cnor_step_count_t budget = limit - vm->steps;
     const lh_byte_t *pc = code + vm->ip;
     lh_value_t *sp = values + vm->stack.sp;
     lh_value_t *fp = values + vm->fp;
+    /* The call stack: the next free frame, kept here like `sp`. */
+    cnor_vm_frame_t *frame_top = vm->frames + vm->depth;
 
     if (!vm->running)
     {
@@ -512,6 +522,7 @@ cnor_vm_dispatch(cnor_vm_t *vm)
 #else
 cnor_vm_next:
     CNOR_VM_STEP();
+cnor_vm_switch:
     switch ((cnor_op_t) *pc)
     {
 #endif
@@ -549,7 +560,7 @@ cnor_vm_next:
         {
             const lh_sllong_t a = sp[-1].data.i;
 
-            ++steps;
+            --budget;
             if (pc[5] == cnor_op_add)
             {
                 pc += 5;
@@ -584,11 +595,11 @@ cnor_vm_next:
 
     CNOR_VM_OP(load_local)
     {
-        *sp++ = fp[pc[1]];
+        cnor_vm_fast_move(sp++, &fp[pc[1]]);
         if (pc[2] == cnor_op_load_local && CNOR_VM_CAN_FUSE())
         {
-            ++steps;
-            *sp++ = fp[pc[3]];
+            --budget;
+            cnor_vm_fast_move(sp++, &fp[pc[3]]);
             pc += 4;
             CNOR_VM_NEXT();
         }
@@ -597,19 +608,19 @@ cnor_vm_next:
     }
     CNOR_VM_OP(store_local)
     {
-        fp[pc[1]] = *--sp;
+        cnor_vm_fast_move(&fp[pc[1]], --sp);
         pc += 2;
         CNOR_VM_NEXT();
     }
     CNOR_VM_OP(load_global)
     {
-        *sp++ = values[cnor_vm_fast_u16(pc + 1)];
+        cnor_vm_fast_move(sp++, &values[cnor_vm_fast_u16(pc + 1)]);
         pc += 3;
         CNOR_VM_NEXT();
     }
     CNOR_VM_OP(store_global)
     {
-        values[cnor_vm_fast_u16(pc + 1)] = *--sp;
+        cnor_vm_fast_move(&values[cnor_vm_fast_u16(pc + 1)], --sp);
         pc += 3;
         CNOR_VM_NEXT();
     }
@@ -618,17 +629,18 @@ cnor_vm_next:
 
     CNOR_VM_OP(dup)
     {
-        sp[0] = sp[-1];
+        cnor_vm_fast_move(&sp[0], &sp[-1]);
         ++sp;
         pc += 1;
         CNOR_VM_NEXT();
     }
     CNOR_VM_OP(swap)
     {
-        const lh_value_t held = sp[-1];
+        lh_value_t held;
 
-        sp[-1] = sp[-2];
-        sp[-2] = held;
+        cnor_vm_fast_move(&held, &sp[-1]);
+        cnor_vm_fast_move(&sp[-1], &sp[-2]);
+        cnor_vm_fast_move(&sp[-2], &held);
         pc += 1;
         CNOR_VM_NEXT();
     }
@@ -781,16 +793,19 @@ cnor_vm_next:
         const cnor_image_function_t *callee = &vm->functions[index];
         const cnor_stack_slots_t reserve =
             (cnor_stack_slots_t) (callee->slot_count - callee->param_count);
-        const cnor_stack_slots_t used = (cnor_stack_slots_t) (sp - values);
         cnor_stack_slots_t left = reserve;
         cnor_vm_frame_t *frame;
 
-        if (vm->depth >= vm->config.max_depth
-            || vm->stack.capacity - used < reserve + callee->max_stack)
+        /* One check per call for the frame and every slot the callee can use.
+         * The limits are read here, not kept in locals: with the switch
+         * dispatch, more locals across the loop cost more than these loads. */
+        if (frame_top == vm->frames + vm->config.max_depth
+            || (lh_usize_t) (values + vm->stack.capacity - sp)
+                   < (lh_usize_t) reserve + callee->max_stack)
         {
             CNOR_VM_SLOW();
         }
-        frame = &vm->frames[vm->depth++];
+        frame = frame_top++;
         frame->return_addr = (cnor_code_addr_t) (pc + 4 - code);
         frame->fp = (cnor_stack_slots_t) (fp - values);
         frame->function = vm->function;
@@ -805,22 +820,24 @@ cnor_vm_next:
     }
     CNOR_VM_OP(ret)
     {
-        const lh_value_t value = sp[-1];
+        const lh_value_t *const top = &sp[-1];
         const cnor_vm_frame_t *frame;
 
-        sp = fp;
-        if (vm->depth == 0U)
+        if (frame_top == vm->frames)
         {
-            vm->result = value;
+            vm->result = *top;
             vm->running = lh_bool_false;
+            sp = fp;
             CNOR_VM_SAVE();
             return lh_bool_true;
         }
-        frame = &vm->frames[--vm->depth];
+        /* The value takes the place of the frame's first slot. */
+        cnor_vm_fast_move(fp, top);
+        sp = fp + 1;
+        frame = --frame_top;
         pc = code + frame->return_addr;
         fp = values + frame->fp;
         vm->function = frame->function;
-        *sp++ = value;
         CNOR_VM_NEXT();
     }
     CNOR_VM_OP(native)
@@ -842,7 +859,7 @@ cnor_vm_next:
             return cnor_vm_fail_at(vm, vm->ip, error);
         }
         sp -= argc;
-        *sp++ = result;
+        cnor_vm_fast_move(sp++, &result);
         pc += 4;
         CNOR_VM_NEXT();
     }
@@ -851,15 +868,20 @@ cnor_vm_next:
 
     CNOR_VM_OP(add_ll)
     {
-        /* Two strings join here; the pool running out is the slow path's. */
         const lh_value_t *const text_left = &fp[pc[1]];
         const lh_value_t *const text_right = &fp[pc[2]];
 
-        if (cnor_vm_fast_both_str(text_left, text_right)
-            && cnor_vm_fast_join(&vm->str_pool, sp, text_left, text_right))
+        /* Integers first, as `add` tests them: two strings join here; the
+         * pool running out is the slow path's. */
+        if (!cnor_vm_fast_both_sint(text_left, text_right))
         {
-            ++sp;
-            CNOR_VM_STORE_OR_KEEP(3U);
+            if (cnor_vm_fast_both_str(text_left, text_right)
+                && cnor_vm_fast_join(&vm->str_pool, sp, text_left, text_right))
+            {
+                ++sp;
+                CNOR_VM_STORE_OR_KEEP(3U);
+            }
+            CNOR_VM_SLOW();
         }
         CNOR_VM_FORM_LL(CNOR_VM_STORE_OR_SET, 1, CNOR_VM_WRAP(a, +, b));
     }
@@ -895,7 +917,14 @@ cnor_vm_next:
             const lh_sllong_t next = CNOR_VM_WRAP(var->data.i, +, 1);
 
             var->data.i = next;
-            pc += next < bound->data.i ? 7 + cnor_vm_fast_s32(pc + 1) : 7;
+            /* The jump back has its own dispatch: its target is always the
+             * loop's first instruction, so it predicts on its own. */
+            if (CNOR_VM_LIKELY(next < bound->data.i))
+            {
+                pc += 7 + cnor_vm_fast_s32(pc + 1);
+                CNOR_VM_NEXT();
+            }
+            pc += 7;
             CNOR_VM_NEXT();
         }
         CNOR_VM_SLOW();
@@ -925,7 +954,7 @@ cnor_vm_next:
             pc += i * CNOR_OP_SWITCH_ENTRY_SIZE;
             if (CNOR_VM_CAN_FUSE())
             {
-                ++steps;
+                --budget;
                 pc += CNOR_OP_SWITCH_ENTRY_SIZE + cnor_vm_fast_s32(pc + 1);
             }
             CNOR_VM_NEXT();
@@ -971,11 +1000,24 @@ cnor_vm_next:
 
 #if !CNOR_VM_COMPUTED_GOTO
     default:
-        CNOR_VM_SLOW();
+        /* The verifier proved every executed byte is an opcode, so the
+         * switch needs no range check. */
+        lh_compiler_unreachable();
     }
 #endif
 
-out_of_steps:
+cnor_vm_budget_spent:
+    /* With no limit, `budget` at 0 is the count wrapping, and the instruction
+     * runs; otherwise it is the stop. */
+    if (limit == 0U)
+    {
+        --budget;
+#if CNOR_VM_COMPUTED_GOTO
+        goto *m_labels[*pc];
+#else
+        goto cnor_vm_switch;
+#endif
+    }
     CNOR_VM_SAVE();
     return cnor_vm_fail_at(vm, vm->ip, cnor_error_step_limit);
 }

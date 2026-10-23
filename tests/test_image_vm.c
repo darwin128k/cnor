@@ -10,6 +10,7 @@
 #include <cnor/native/initializer.h>
 #include <cnor/op.h>
 #include <cnor/vm.h>
+#include <cnor/vm/internal.h>
 #include <lh/null.h>
 
 /* -- image builder --------------------------------------------------------- */
@@ -956,6 +957,163 @@ CNOR_TEST(runs_a_counted_loop_one_step_per_pass)
     p_deinit(&p);
 }
 
+/* for_loop leaves through its own dispatch whether it jumps back or falls
+ * through; a budget that ends on either side stops right there. */
+CNOR_TEST(stops_on_both_sides_of_a_for_loop)
+{
+    program_t p;
+    cnor_step_count_t steps = 0U;
+    cnor_step_count_t budget;
+    lh_s32_t to;
+
+    for (to = -1; to <= 2; ++to)
+    {
+        const cnor_step_count_t passes = to > 1 ? (cnor_step_count_t) to : 1U;
+        const cnor_step_count_t total = 6U + passes * 5U + 2U;
+        long long sum = 0;
+
+        build_counted_loop(&p, to);
+        CHECK_EQ(run_counted(&p, 0U, &steps, &sum), cnor_error_none);
+        CHECK_EQ(steps, total);
+        CHECK_EQ(sum, to > 1 ? (long long) to * (to - 1) / 2 : 0);
+        CHECK_EQ(run_counted(&p, total, &steps, lh_null), cnor_error_none);
+        CHECK_EQ(steps, total);
+        for (budget = 1U; budget < total; ++budget)
+        {
+            CHECK_EQ(run_counted(&p, budget, &steps, lh_null), cnor_error_step_limit);
+            CHECK_EQ(steps, budget);
+        }
+        p_deinit(&p);
+    }
+}
+
+/* The steps left are counted down; with no limit the count is still exact
+ * modulo 2^32. Entered by hand as cnor_vm_run would, a few steps short of the
+ * wrap, the loop must run through it and report the count past it. */
+CNOR_TEST(counts_unlimited_steps_across_the_wrap)
+{
+    program_t p;
+    cnor_vm_t vm;
+    cnor_vm_config_t config = cnor_vm_config_initializer();
+    cnor_step_count_t start;
+
+    build_counted_loop(&p, 4);
+    config.max_steps = 0U;
+    cnor_vm_init(&vm, &config);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    for (start = 0xFFFFFFFFU - 30U; start != 3U; ++start)
+    {
+        lh_value_t result;
+
+        vm.stack.sp = 0U;
+        vm.depth = 0U;
+        vm.fp = 0U;
+        vm.function = 0U;
+        vm.ip = 0U;
+        cnor_vm_stack_push_none(&vm.stack, 3U);
+        vm.steps = start;
+        vm.running = lh_bool_true;
+        CHECK(cnor_vm_dispatch(&vm));
+        CHECK_EQ(cnor_vm_get_steps(&vm), (cnor_step_count_t) (start + 28U));
+        result = cnor_vm_get_result(&vm);
+        CHECK_EQ(sint_of(&result), 0 + 1 + 2 + 3);
+    }
+    cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
+/* What @p k reads back as from a push, the top-of-stack form, the local form
+ * and a push fused with the `sub` after it; -1 when one of them differs from
+ * the others or fails. */
+static long long
+s32_read_back(lh_s32_t k)
+{
+    program_t p;
+    lh_value_t result;
+    long long seen[4];
+    int i;
+
+    p_init(&p);
+    op_u32(&p, cnor_op_push_i32, (lh_u32_t) k);
+    op(&p, cnor_op_halt);
+    build(&p, 1U);
+    if (load_and_run(&p, &result) != cnor_error_none)
+    {
+        p_deinit(&p);
+        return -1;
+    }
+    seen[0] = sint_of(&result);
+    p_deinit(&p);
+
+    p_init(&p);
+    op_u32(&p, cnor_op_push_i32, 0U);
+    op_u32(&p, cnor_op_add_i, (lh_u32_t) k);
+    op(&p, cnor_op_halt);
+    build(&p, 1U);
+    if (load_and_run(&p, &result) != cnor_error_none)
+    {
+        p_deinit(&p);
+        return -1;
+    }
+    seen[1] = sint_of(&result);
+    p_deinit(&p);
+
+    p_init(&p);
+    op_u32(&p, cnor_op_push_i32, 0U);
+    op_slot(&p, cnor_op_store_local, 0U);
+    op_slot_s32(&p, cnor_op_add_li, 0U, k);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 1U, 1U);
+    build(&p, 1U);
+    if (load_and_run(&p, &result) != cnor_error_none)
+    {
+        p_deinit(&p);
+        return -1;
+    }
+    seen[2] = sint_of(&result);
+    p_deinit(&p);
+
+    /* 0 - (0 - k): the push of `0 - k` is a plain push, the second one fuses. */
+    p_init(&p);
+    op_u32(&p, cnor_op_push_i32, 0U);
+    op_u32(&p, cnor_op_push_i32, (lh_u32_t) k);
+    op(&p, cnor_op_sub);
+    op_u32(&p, cnor_op_push_i32, 0U);
+    op(&p, cnor_op_swap);
+    op(&p, cnor_op_sub);
+    op(&p, cnor_op_halt);
+    build(&p, 2U);
+    if (load_and_run(&p, &result) != cnor_error_none)
+    {
+        p_deinit(&p);
+        return -1;
+    }
+    seen[3] = sint_of(&result);
+    p_deinit(&p);
+
+    for (i = 1; i < 4; ++i)
+    {
+        if (seen[i] != seen[0])
+        {
+            return -1;
+        }
+    }
+    return seen[0];
+}
+
+/* Immediates are two's complement s32 in the code, decoded without
+ * implementation-defined conversions; both ends and the values next to 0. */
+CNOR_TEST(decodes_signed_immediates_at_both_ends)
+{
+    CHECK_EQ(s32_read_back((lh_s32_t) (-2147483647 - 1)), -2147483648LL);
+    CHECK_EQ(s32_read_back((lh_s32_t) -2147483647), -2147483647LL);
+    CHECK_EQ(s32_read_back((lh_s32_t) -65536), -65536LL);
+    CHECK_EQ(s32_read_back((lh_s32_t) -1), -1LL);
+    CHECK_EQ(s32_read_back((lh_s32_t) 0), 0LL);
+    CHECK_EQ(s32_read_back((lh_s32_t) 1), 1LL);
+    CHECK_EQ(s32_read_back((lh_s32_t) 2147483647), 2147483647LL);
+}
+
 /* A non-number in the loop variable fails like `add` does, at the for_loop. */
 CNOR_TEST(fails_a_for_loop_over_text_like_its_add)
 {
@@ -1251,6 +1409,37 @@ CNOR_TEST(rejects_a_switch_without_its_table)
     p_deinit(&p);
 }
 
+/* `swap` and `dup` move whole values: a string keeps its length next to an
+ * integer, whichever way round they are. */
+CNOR_TEST(swaps_and_duplicates_whole_values)
+{
+    program_t p;
+    lh_value_t result;
+
+    p_init(&p);
+    add_const(&p, "abc");
+    add_const(&p, "hello");
+    op(&p, cnor_op_push_const);
+    cnor_byte_writer_put_u16(&p.code, 0U);
+    op_u32(&p, cnor_op_push_i32, 7U);
+    op(&p, cnor_op_swap);
+    op(&p, cnor_op_len);
+    op(&p, cnor_op_add);
+    op(&p, cnor_op_push_const);
+    cnor_byte_writer_put_u16(&p.code, 1U);
+    op(&p, cnor_op_dup);
+    op(&p, cnor_op_len);
+    op(&p, cnor_op_swap);
+    op(&p, cnor_op_len);
+    op(&p, cnor_op_add);
+    op(&p, cnor_op_add);
+    op(&p, cnor_op_halt);
+    build(&p, 3U);
+    CHECK_EQ(load_and_run(&p, &result), cnor_error_none);
+    CHECK_EQ(sint_of(&result), 7 + 3 + 5 + 5);
+    p_deinit(&p);
+}
+
 static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(refuses_a_buffer_shorter_than_a_header),
     CNOR_TEST_CASE(refuses_a_buffer_without_the_signature),
@@ -1286,6 +1475,9 @@ static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(rejects_functions_that_do_not_tile_the_code),
     CNOR_TEST_CASE(describes_every_operand_form_in_the_op_table),
     CNOR_TEST_CASE(runs_a_counted_loop_one_step_per_pass),
+    CNOR_TEST_CASE(stops_on_both_sides_of_a_for_loop),
+    CNOR_TEST_CASE(counts_unlimited_steps_across_the_wrap),
+    CNOR_TEST_CASE(decodes_signed_immediates_at_both_ends),
     CNOR_TEST_CASE(fails_a_for_loop_over_text_like_its_add),
     CNOR_TEST_CASE(runs_operand_forms_on_other_kinds),
     CNOR_TEST_CASE(rejects_slot_operands_outside_the_frame),
@@ -1293,6 +1485,7 @@ static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(rejects_a_stack_form_without_its_operand),
     CNOR_TEST_CASE(switches_on_an_integer_by_its_value),
     CNOR_TEST_CASE(rejects_a_switch_without_its_table),
+    CNOR_TEST_CASE(swaps_and_duplicates_whole_values),
 };
 
 int

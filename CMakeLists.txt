@@ -12,6 +12,12 @@ option(CNOR_BUILD_BENCH "Build the benchmark runner (bench/)" OFF)
 option(CNOR_VM_COMPUTED_GOTO
         "Dispatch VM instructions through a label table where the compiler supports it (GCC, Clang); OFF forces the portable switch"
         ON)
+option(CNOR_IPO "Build cnor with link-time optimization where the toolchain supports it" OFF)
+set(CNOR_PGO OFF CACHE STRING
+        "Profile-guided optimization (GCC, Clang): OFF, GENERATE (instrument) or USE (the profile)")
+set_property(CACHE CNOR_PGO PROPERTY STRINGS OFF GENERATE USE)
+set(CNOR_PGO_DIR "${CMAKE_BINARY_DIR}/pgo" CACHE PATH
+        "Where CNOR_PGO=GENERATE writes the profile and USE reads it")
 
 # -- lh -----------------------------------------------------------------------
 
@@ -95,6 +101,43 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 target_link_libraries(${PROJECT_NAME} PUBLIC lh)
 if (NOT CNOR_VM_COMPUTED_GOTO)
     target_compile_definitions(${PROJECT_NAME} PRIVATE CNOR_VM_COMPUTED_GOTO=0)
+endif ()
+
+# Optional optimizations, all OFF by default; bench/README.md has what they
+# measured. Link-time optimization lets the compiler inline across cnor's
+# sources and lh's (lh builds that way in Release on its own).
+if (CNOR_IPO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT cnor_ipo_supported OUTPUT cnor_ipo_output LANGUAGES C)
+    if (cnor_ipo_supported)
+        set_property(TARGET ${PROJECT_NAME} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    else ()
+        message(WARNING "CNOR_IPO: not supported here: ${cnor_ipo_output}")
+    endif ()
+endif ()
+
+# Profile-guided optimization: configure with GENERATE, build, run a workload
+# (bench/cnor_bench does), then configure the same build directory with USE and
+# build again. GCC names the profile after the object files, so both builds
+# must share the build directory; Clang reads CNOR_PGO_DIR/default.profdata,
+# merged from the raw profiles with llvm-profdata.
+if (NOT CNOR_PGO STREQUAL "OFF")
+    if (NOT CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        message(FATAL_ERROR "CNOR_PGO needs GCC or Clang")
+    endif ()
+    if (CNOR_PGO STREQUAL "GENERATE")
+        target_compile_options(${PROJECT_NAME} PRIVATE "-fprofile-generate=${CNOR_PGO_DIR}")
+        # Whatever links cnor links the profiling runtime too.
+        target_link_libraries(${PROJECT_NAME} PUBLIC "-fprofile-generate=${CNOR_PGO_DIR}")
+    elseif (CNOR_PGO STREQUAL "USE")
+        target_compile_options(${PROJECT_NAME} PRIVATE "-fprofile-use=${CNOR_PGO_DIR}")
+        if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
+            target_compile_options(${PROJECT_NAME} PRIVATE
+                    -fprofile-correction -Wno-missing-profile)
+        endif ()
+    else ()
+        message(FATAL_ERROR "CNOR_PGO must be OFF, GENERATE or USE, not ${CNOR_PGO}")
+    endif ()
 endif ()
 
 if (CNOR_BUILD_TESTS)

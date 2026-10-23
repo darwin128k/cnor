@@ -463,7 +463,7 @@ and the machine) and, when the failure is about a name, a copy of that name.
 
 ## 14. Status
 
-Done and covered by tests (`tests/`, 169 cases):
+Done and covered by tests (`tests/`, 175 cases):
 
 - [x] lexer: tokens, keywords, indentation as `indent` / `dedent`, newline
   tokens, bracket continuations, `#` comments, integers in three bases, reals,
@@ -481,7 +481,8 @@ Done and covered by tests (`tests/`, 169 cases):
   loops tested at the bottom, operand forms on locals and immediates, a
   one-instruction `for` step, inline string indexing, `len`, equality and
   joins, conditions compiled to jumps, jump tables for dense integer
-  `match`, in-place global updates, a benchmark suite (`bench/`).
+  `match`, in-place global updates, value moves the store buffer can
+  forward, a benchmark suite (`bench/`).
 
 Not done, in a sensible order:
 

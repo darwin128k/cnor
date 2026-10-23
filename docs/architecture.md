@@ -79,7 +79,7 @@ functions and no `halt` is needed.
 | `vm.c` | Lifetime, load/reset/run, queries, failure reporting |
 | `load.c` | View, verify, function table, constants (reals parsed), native binding by name, allocation |
 | `dispatch.c` | **The dispatch loop** (fast paths inline, see below), the handler table by opcode for everything else, the instruction budget |
-| `fast.h` | Inline value access, operand reads and the string primitives (equality, join into the pool) shared by the dispatch loop and the string handlers |
+| `fast.h` | Inline value access and moves, operand reads and the string primitives (equality, join into the pool) shared by the dispatch loop and the string handlers |
 | `stack.c`, `str_pool.c` | Value stack and string pool |
 | `value.c` | Truthiness, numeric ordering and equality across kinds (mixed signed/unsigned by value, reals IEEE: NaN is unordered) |
 | `op/data.c` | Pushes, locals, globals, `dup` / `swap` / `pop` |
@@ -171,16 +171,21 @@ Add the code to `cnor_error_t` in its stage's group and its message to
 time, so it is written for speed while every rule of the language stays in one
 place, the handlers under `src/cnor/vm/op/`:
 
-- **Locals, not fields.** The instruction pointer, the stack top and the frame
-  base live in locals for the whole run and are written back to the machine
-  only around a slow-path call and at exit.
+- **Locals, not fields.** The instruction pointer, the stack top, the frame
+  base and the top of the call stack live in locals for the whole run and are
+  written back to the machine only around a slow-path call and at exit. The
+  call depth and stack limits are read from the machine in `call` instead:
+  two more locals across the loop made the `switch` build 10 to 20% slower on
+  `calls`, `globals` and `streq`.
 - **No per-instruction decode or bounds checks.** Operands are read straight
   from the code. The verifier proved at load that every instruction decodes
   inside its function, every jump lands on an instruction start, every index
   operand is in range and the operand stack never under- or overflows its
   function's declared depth (section 8.1 of the spec), so the loop does not
   check any of it again. A call still checks the call depth and that the
-  callee's frame fits, once per call.
+  callee's frame fits, once per call. With `switch` dispatch the `default`
+  is `lh_compiler_unreachable()`, so the jump table needs no range check
+  either.
 - **Fast paths and the slow path.** Each opcode has a label. The common case
   runs inline: constants, locals, globals, signed-integer arithmetic and
   comparisons, jumps, `call`, `ret`, `native`, and on strings indexing, `len`,
@@ -229,6 +234,20 @@ place, the handlers under `src/cnor/vm/op/`:
   faster than the switch on this code); `CNOR_VM_COMPUTED_GOTO` (CMake option,
   ON by default) set to OFF, or any other compiler, uses a portable `switch`.
   Both are built and tested.
+- **Immediates.** A signed 32-bit operand is decoded as
+  `(bits ^ 0x80000000) - 0x80000000` in 64 bits: two additions, no
+  implementation-defined conversion, where the earlier sign test took a
+  compare and a conditional move.
+- **`for_loop`'s jump back** is marked likely and has its own dispatch, apart
+  from the fall-through: its target is always the loop's first instruction,
+  so with computed goto that indirect jump predicts on its own, and GCC keeps
+  it on the straight path (`stops_on_both_sides_of_a_for_loop`).
+- **Step budget.** `budget` counts down the steps left (`limit - steps`), so
+  the per-instruction check is a test for 0 and a decrement; whether a limit
+  is set at all is only asked at 0, out of line (`cnor_vm_budget_spent`), and
+  a fused partner only checks `budget != 0`. With no limit the count is
+  `-budget` modulo 2^32, which wraps exactly like the old counter
+  (`counts_unlimited_steps_across_the_wrap`).
 - **Inline value access.** `src/cnor/vm/fast.h` reads and writes the
   `lh_value_t` fields directly; lh's accessors are out-of-line functions, and a
   call per field was most of the cost of an instruction before. Strings follow
@@ -246,6 +265,17 @@ place, the handlers under `src/cnor/vm/op/`:
   The slow-path handlers (`op/text.c`, `value.c`) use the same primitives, so
   the two paths cannot drift apart. A join followed by `store_local` stores
   directly, like integer arithmetic.
+- **Moving values.** `cnor_vm_fast_move` copies a value field by field: the
+  kind, the first 8-byte word, and for a string its length. A struct copy of
+  the 24-byte `lh_value_t` reads 16 bytes at once, and a load that wide
+  cannot be forwarded from the narrower stores that wrote the value an
+  instruction earlier (`cnor_vm_fast_set_sint` writes a kind and a word), so
+  every `load_local` of a fresh result waited for those stores to retire.
+  Copying both words unconditionally did not help: GCC merges the two loads
+  back into one 16-byte load. `load_local`, `store_local`, globals, `dup`,
+  `swap`, the fused stores, a native's result and `ret` all move values this
+  way; `ret` moves the result straight into the slot of the returning
+  frame's first local, which is where the caller's stack continues.
 
   Measured and left out (2026-10-23, `bench/` and string micro-benchmarks):
   interning runtime strings (a hash and a probe per join made `strbuild` 80%
@@ -269,12 +299,74 @@ place, the handlers under `src/cnor/vm/op/`:
   slower by more than globals gained); fusing `load_global` with a following
   `load_local` (no gain on top of the `store_global` fusion).
 
+  Calls (2026-10-23, win #5): field-by-field moves and the call stack top in
+  a local took `calls` from 20.1 to 11.1 ms, `fib` 2.6 to 2.1, `native` 15.3
+  to 8.4, `globals` 7.2 to 4.5, `nested` 7.6 to 6.4, `text` 9.3 to 8.0 and
+  `strbuild` 6.2 to 5.2 (computed goto; the step counts are unchanged).
+  Measured and left out: fusing `ret` with the stack `add` / `sub` / `mul`
+  before it (`calls` 11 to 14 ms: the shared return path cost more than the
+  saved dispatch, so `ret_local` and fused `load_local ... call` forms were
+  not pursued); not tracking the running function in the loop (no gain);
+  keeping the function table, the depth limit and the stack end in locals
+  (noise with computed goto, slower with `switch`). Tail calls were not tried:
+  they would change which programs hit `call_depth` and the frames an error
+  reports.
+
+  Win #6 (2026-10-23): the cheaper immediates (instructions executed down 3
+  to 14% on every workload; `match` -15%, `logic` -20% alone), the step
+  budget counted down (`switch`: `fib` -20%, `loop` -16%, `nested`, `text`,
+  `calls` and `strbuild` 6 to 9% on top of the immediates; computed goto: up
+  to 2% fewer instructions), `add_ll` testing integers before strings (2%
+  fewer instructions on `loop`) and the unchecked `switch` (5 to 7% fewer
+  instructions in that build). Together, computed goto: `logic` -18%, `match`
+  -14%, `text` -12%, `loop`, `fib` and `streq` -7%; `switch`: `match` -17%,
+  `logic` -8%, `text` and `nested` -6%, `calls` -6%. Step counts
+  are unchanged. Measured and left out: a 32-bit division when both operands
+  fit (no gain: 64-bit division is fast on this core); a mask for a
+  remainder by a power of two (`match` -22%, but the test made `logic` 6%
+  slower, and doing it at compile time needs a new opcode); reciprocals of
+  recent divisors cached in the loop (slower everywhere); fusing arithmetic
+  with a following `eq_i` / `ne_i` (40% fewer dispatches on `logic`, no
+  time gained, more instructions elsewhere); a `ret` followed by
+  `store_local` storing straight into the caller's slot (`calls` -2 to -7%,
+  `fib` +2% instructions); a masked, branch-free `for_loop` jump (gave back
+  the whole `match` / `logic` gain). Not attempted: a 16-byte internal value
+  (it needs its own value type across every handler and a conversion at each
+  native call, for one address computation per operand) and register or
+  accumulator operands (a new instruction set).
+
+  Win #6 regressions, found and fixed (2026-10-23; medians of 15 interleaved
+  rounds against win #5, with callgrind counts and per-line `perf` samples
+  to tell cost from layout):
+  - `native` +12 to 17% with computed goto (first reported as 9%): every
+    variant of the immediate decode, a plain `movslq` included, moved
+    `for_loop`'s jump back out of line, behind a taken branch, and merged it
+    with the exit into one indirect jump; the samples piled up on that jump.
+    Marking the jump back likely and giving it its own dispatch: `native`
+    level with win #5, `globals` -7% (was +3 to 6%, the same jump).
+  - `switch` `fib` +3%, `strbuild` +9%: `budget == 0 && limit != 0` was
+    computed as a truth value (`sete`, `and`) in every handler before the
+    shared dispatch, 5 to 9% more instructions than win #5. Testing
+    `budget` alone and asking about the limit out of line takes 9 to 15% of
+    the instructions off the `switch` build and about 1% off computed goto;
+    `fib` is now -15%, `strbuild` +2% (noise level).
+  - Tried and dropped: the decrement as the test (`budget-- == 0`, GCC then
+    kept two copies of the budget alive and reloaded the label table:
+    instructions +3 to 5% with computed goto); `-fno-gcse` (`native` +14%);
+    `-falign-labels=16` and `-falign-jumps=32` as a default (the first only
+    hid the `for_loop` layout, the second made `globals` 13% slower).
+  - After the fixes, against win #5 (computed goto / `switch`): `fib` -10 /
+    -15%, `loop` -15 / -19%, `nested` -12 / -10%, `text` -12 / -2%, `native`
+    +0.5 / -3%, `match` -15 / -19%, `calls` -3 / -15%, `globals` -7 / -21%,
+    `logic` -18 / -23%, `strbuild` -8 / +2%, `streq` -15 / +1%. Step counts
+    are unchanged.
+
 ## Bounding a run
 
 Memory is bounded at load (stack slots, call depth, string pool) and time is
 bounded per run: `cnor_vm_config_t.max_steps` caps the instructions one
 `cnor_vm_run` executes (default `CNOR_VM_DEFAULT_MAX_STEPS`, one million; 0
-means unlimited). The check is one compare per instruction in
+means unlimited). The check is a decrement and a test per instruction in
 `cnor_vm_dispatch`, made before the instruction runs; an exhausted budget
 fails with `cnor_error_step_limit` at that instruction's address and unwinds
 like any other failure, so the machine can run again (with a fresh budget) or

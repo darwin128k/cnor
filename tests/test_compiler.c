@@ -32,11 +32,22 @@ touch(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, cnor_error_t *error)
     return lh_value_make_bool(lh_bool_true);
 }
 
+/* Gives its argument back, of whatever kind. */
+static lh_value_t
+echo(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, cnor_error_t *error)
+{
+    (void) argc;
+    (void) ctx;
+    (void) error;
+    return args[0];
+}
+
 static const cnor_native_t m_natives[] = {
     cnor_native_initializer("double_it", double_it, 1U, 1U),
     cnor_native_initializer("touch", touch, 0U, 0U),
+    cnor_native_initializer("echo", echo, 1U, 1U),
 };
-static const cnor_native_table_t m_table = cnor_native_table_initializer(m_natives, 2U);
+static const cnor_native_table_t m_table = cnor_native_table_initializer(m_natives, 3U);
 static int m_touched;
 
 static lh_str_view_t
@@ -1884,6 +1895,209 @@ CNOR_TEST(stops_after_exactly_the_budget_inside_tables_and_conditions)
     CHECK_EQ(steps, needed);
 }
 
+/* -- calls and value moves --------------------------------------------------- */
+
+/* Every kind of value keeps its kind and contents through what moves values
+ * around: parameters, locals, a global, `or`'s dup, a native, a nested
+ * return and the final one. */
+CNOR_TEST(moves_every_kind_through_calls_and_slots)
+{
+    static const char *const fn = "let mut g = 0\n"
+                                  "fn id(x: i32) -> i32:\n"
+                                  "    return x\n"
+                                  "fn pass(x: i32) -> i32:\n"
+                                  "    let y = x\n"
+                                  "    g = y\n"
+                                  "    let z = g\n"
+                                  "    let w = z or z\n"
+                                  "    return id(echo(id(w)))\n"
+                                  "pass(%s)\n";
+    static const struct
+    {
+        const char *value;
+        lh_value_kind_t kind;
+        long long number;
+    } cases[] = {
+        {"none", lh_value_kind_none, 0},
+        {"true", lh_value_kind_bool, 1},
+        {"false", lh_value_kind_bool, 0},
+        {"0", lh_value_kind_sint, 0},
+        {"-5", lh_value_kind_sint, -5},
+        {"0x40000000 * 0x40000000 * 8 - 1", lh_value_kind_sint, 9223372036854775807LL},
+        {"0xFFFFFFFF", lh_value_kind_uint, 0xFFFFFFFFLL},
+    };
+    static const char *const texts[][2] = {
+        {"\"\"", ""},
+        {"\"x\"", "x"},
+        {"\"a longer text than one word of storage\"", "a longer text than one word of storage"},
+        {"\"ab\" + \"cd\"", "abcd"},
+    };
+    char buffer[1024];
+    size_t k;
+
+    for (k = 0U; k < sizeof(cases) / sizeof(cases[0]); ++k)
+    {
+        lh_value_t result;
+
+        (void) snprintf(buffer, sizeof(buffer), fn, cases[k].value);
+        REQUIRE(run(buffer, &result));
+        CHECK_EQ(lh_value_get_kind(&result), cases[k].kind);
+        if (cases[k].kind == lh_value_kind_bool)
+        {
+            CHECK_EQ(lh_value_get_data(&result)->b ? 1 : 0, cases[k].number);
+        }
+        else if (cases[k].kind != lh_value_kind_none)
+        {
+            CHECK_EQ(lh_value_get_data(&result)->i, cases[k].number);
+        }
+    }
+    for (k = 0U; k < sizeof(texts) / sizeof(texts[0]); ++k)
+    {
+        (void) snprintf(buffer, sizeof(buffer), fn, texts[k][0]);
+        CHECK(run_text_is(buffer, texts[k][1]));
+    }
+#if LH_REAL_ENABLED
+    {
+        lh_value_t result;
+
+        (void) snprintf(buffer, sizeof(buffer), fn, "-2.5");
+        REQUIRE(run(buffer, &result));
+        REQUIRE(lh_value_get_kind(&result) == lh_value_kind_real);
+        CHECK(lh_value_get_data(&result)->r == -2.5);
+    }
+#endif
+    /* A string next to numbers keeps its length when the values around it
+     * move (the length is the one field past the first word). */
+    CHECK(run_text_is("fn f(a: i32, b: i32, c: i32) -> i32:\n    let t = b\n"
+                      "    let n = a + c\n    if n == 3:\n        return echo(t)\n"
+                      "    return \"no\"\nf(1, \"middle\", 2)\n",
+                      "middle"));
+}
+
+/* Compile @p source and run it twice on one machine with a call depth of
+ * @p depth and @p slots stack slots; both runs must end alike, with the error
+ * through the return value and its line through @p line. */
+static cnor_error_t
+run_limited(const char *source, cnor_call_depth_t depth, cnor_stack_slots_t slots,
+            cnor_line_t *line, long long *result)
+{
+    built_t b;
+    cnor_vm_t vm;
+    cnor_vm_config_t config = cnor_vm_config_initializer();
+    cnor_error_t first = cnor_error_count;
+    int run_index;
+
+    compile(&b, source);
+    if (!b.ok)
+    {
+        return cnor_error_count;
+    }
+    config.natives = &m_table;
+    config.ctx = &m_touched;
+    config.max_depth = depth;
+    config.stack_slots = slots;
+    cnor_vm_init(&vm, &config);
+    if (!cnor_vm_load(&vm, b.image.data, b.image.size))
+    {
+        first = cnor_diag_get_code(cnor_vm_get_diag(&vm));
+    }
+    else
+    {
+        for (run_index = 0; run_index < 2; ++run_index)
+        {
+            const lh_bool_t ok = cnor_vm_run(&vm);
+            const cnor_error_t code = ok ? cnor_error_none
+                                         : cnor_diag_get_code(cnor_vm_get_diag(&vm));
+
+            if (run_index == 0)
+            {
+                first = code;
+                if (line != lh_null)
+                {
+                    *line = cnor_diag_get_line(cnor_vm_get_diag(&vm));
+                }
+                if (ok && result != lh_null)
+                {
+                    const lh_value_t value = cnor_vm_get_result(&vm);
+
+                    *result = lh_value_get_kind(&value) == lh_value_kind_sint
+                                  ? (long long) lh_value_get_data(&value)->i
+                                  : -999999;
+                }
+            }
+            else if (code != first)
+            {
+                first = cnor_error_count;
+            }
+            cnor_vm_reset(&vm);
+        }
+    }
+    cnor_vm_deinit(&vm);
+    cnor_image_deinit(&b.image);
+    return first;
+}
+
+/* The depth limit counts calls exactly: with a limit of N, N nested calls
+ * run and one more fails on the line of the call, and the machine runs again
+ * afterwards. A stack too small for the frames fails the same way. */
+CNOR_TEST(limits_calls_by_depth_and_stack_exactly)
+{
+    static const char *const fn = "fn f(n: i32) -> i32:\n"
+                                  "    if n == 0:\n"
+                                  "        return 0\n"
+                                  "    return 1 + f(n - 1)\n"
+                                  "f(%d)\n";
+    static const char *const wide = "fn f(n: i32, a: i32, b: i32, c: i32) -> i32:\n"
+                                    "    let x = a + b\n"
+                                    "    let y = x + c\n"
+                                    "    if n == 0:\n"
+                                    "        return y\n"
+                                    "    return f(n - 1, a, b, c) + 1\n"
+                                    "f(%d, 1, 2, 3)\n";
+    char buffer[512];
+    cnor_line_t line = 0U;
+    long long result = 0;
+    int k;
+    int deepest = -1;
+
+    for (k = 0; k < 12; ++k)
+    {
+        (void) snprintf(buffer, sizeof(buffer), fn, k);
+        result = 0;
+        if (k < 8)
+        {
+            CHECK_EQ(run_limited(buffer, 8U, 4096U, lh_null, &result), cnor_error_none);
+            CHECK_EQ(result, k);
+        }
+        else
+        {
+            CHECK_EQ(run_limited(buffer, 8U, 4096U, &line, lh_null), cnor_error_call_depth);
+            CHECK_EQ(line, 4U);
+        }
+    }
+    /* f(n) needs n + 1 frames of 6 slots and up to 4 operands; find the last
+     * n that fits and check that every n beyond overflows on the call line. */
+    for (k = 0; k < 40; ++k)
+    {
+        cnor_error_t code;
+
+        (void) snprintf(buffer, sizeof(buffer), wide, k);
+        code = run_limited(buffer, 1000U, 128U, &line, &result);
+        if (code == cnor_error_none)
+        {
+            CHECK_EQ(result, 6 + k);
+            CHECK_EQ(deepest, k - 1);
+            deepest = k;
+        }
+        else
+        {
+            CHECK_EQ(code, cnor_error_stack_overflow);
+            CHECK(line == 6U || line == 7U);
+        }
+    }
+    CHECK(deepest > 5 && deepest < 30);
+}
+
 static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(runs_a_program_that_is_one_expression),
     CNOR_TEST_CASE(calls_a_function_defined_earlier),
@@ -1955,6 +2169,8 @@ static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(takes_a_table_only_where_it_is_the_same),
     CNOR_TEST_CASE(updates_globals_in_place),
     CNOR_TEST_CASE(stops_after_exactly_the_budget_inside_tables_and_conditions),
+    CNOR_TEST_CASE(moves_every_kind_through_calls_and_slots),
+    CNOR_TEST_CASE(limits_calls_by_depth_and_stack_exactly),
 };
 
 int
