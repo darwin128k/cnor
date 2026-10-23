@@ -12,7 +12,8 @@
  * @def cnor_diag_initializer(code, line, offset)
  * @brief Initializer for a failure without a name.
  */
-#define cnor_diag_initializer(code, line, offset) lh_initializer(code, line, offset, 0U, {0})
+#define cnor_diag_initializer(code, line, offset)                                                  \
+    lh_initializer(code, line, offset, 0U, 0U, {0}, {0})
 
 /**
  * @def cnor_diag_ok_initializer()

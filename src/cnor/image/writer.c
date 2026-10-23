@@ -57,28 +57,31 @@ cnor_image_put_functions(cnor_byte_writer_t *out, const cnor_image_parts_t *part
         cnor_byte_writer_put_u8(out, function->param_count);
         cnor_byte_writer_put_u8(out, function->slot_count);
         cnor_byte_writer_put_u16(out, function->max_stack);
+        cnor_byte_writer_put_u16(out, function->file);
     }
     cnor_image_end_section(out, cnor_image_section_functions, begin);
 }
 
+/* A table of names: count, then a u16 length and the bytes of each. */
 static void
-cnor_image_put_natives(cnor_byte_writer_t *out, const cnor_image_parts_t *parts)
+cnor_image_put_names(cnor_byte_writer_t *out, cnor_image_section_t section,
+                     const lh_str_view_t *names, cnor_count_t count)
 {
     const lh_u32_t begin = cnor_image_begin_section(out);
     cnor_count_t i;
 
-    if (parts->native_count > 0U)
+    if (count > 0U)
     {
-        cnor_byte_writer_put_u32(out, parts->native_count);
+        cnor_byte_writer_put_u32(out, count);
     }
-    for (i = 0U; i < parts->native_count; ++i)
+    for (i = 0U; i < count; ++i)
     {
-        const lh_str_view_t *name = &parts->natives[i];
+        const lh_str_view_t *name = &names[i];
 
         cnor_byte_writer_put_u16(out, (lh_u16_t) name->size);
         cnor_byte_writer_put_bytes(out, (const lh_byte_t *) name->begin, (lh_u32_t) name->size);
     }
-    cnor_image_end_section(out, cnor_image_section_natives, begin);
+    cnor_image_end_section(out, section, begin);
 }
 
 static void
@@ -122,13 +125,12 @@ cnor_image_write(const cnor_image_parts_t *parts, cnor_image_t *out)
                        cnor_byte_writer_get_size(parts->code));
     cnor_image_put_table(&writer, cnor_image_section_consts, parts->const_count, parts->consts);
     cnor_image_put_functions(&writer, parts);
-    cnor_image_put_natives(&writer, parts);
+    cnor_image_put_names(&writer, cnor_image_section_natives, parts->natives, parts->native_count);
     if (parts->lines != lh_null)
     {
         cnor_image_put_table(&writer, cnor_image_section_lines, parts->line_count, parts->lines);
     }
-    cnor_image_put_raw(&writer, cnor_image_section_file, (const lh_byte_t *) parts->file.begin,
-                       (lh_u32_t) parts->file.size);
+    cnor_image_put_names(&writer, cnor_image_section_files, parts->files, parts->file_count);
     cnor_byte_writer_patch_u32(&writer, CNOR_IMAGE_AT_SIZE, cnor_byte_writer_get_size(&writer));
     out->data = cnor_byte_writer_release(&writer, &out->size);
     cnor_byte_writer_deinit(&writer);

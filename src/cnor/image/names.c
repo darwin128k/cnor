@@ -41,18 +41,47 @@ cnor_image_view_line_at(const cnor_image_view_t *self, cnor_code_addr_t addr)
     return lh_bit_unpack_le32(cnor_image_line_entry(self, low) + 4);
 }
 
-/* -- file name ------------------------------------------------------------- */
+/* -- files ----------------------------------------------------------------- */
 
 lh_str_view_t
-cnor_image_view_file(const cnor_image_view_t *self)
+cnor_image_view_file(const cnor_image_view_t *self, cnor_file_index_t index)
 {
-    const cnor_image_range_t *range = &self->header.sections[cnor_image_section_file];
-    lh_str_view_t view = lh_str_view_empty();
+    lh_str_view_t name = lh_str_view_empty();
+    cnor_byte_reader_t reader;
+    cnor_count_t i;
 
-    if (range->size > 0U)
+    if (index >= self->file_count)
     {
-        view.begin = self->data + range->offset;
-        view.size = range->size;
+        return lh_str_view_empty();
     }
-    return view;
+    /* Checked at load; only a failure report walks the table. */
+    cnor_image_view_records(self, cnor_image_section_files, &reader);
+    for (i = 0U; i <= index; ++i)
+    {
+        (void) cnor_image_file_read(&reader, &name);
+    }
+    return name;
+}
+
+cnor_function_index_t
+cnor_image_view_function_of(const cnor_image_view_t *self, cnor_code_addr_t addr)
+{
+    /* The last function whose entry is <= addr, as for the line table. */
+    cnor_count_t low = 0U;
+    cnor_count_t high = self->function_count;
+
+    while (high - low > 1U)
+    {
+        const cnor_count_t middle = low + (high - low) / 2U;
+
+        if (cnor_image_view_function_at(self, (cnor_function_index_t) middle).entry <= addr)
+        {
+            low = middle;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+    return (cnor_function_index_t) low;
 }

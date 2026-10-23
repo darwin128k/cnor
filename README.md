@@ -56,6 +56,7 @@ cnor run - < script.cn             # the source from the standard input
 cnor run script.cn --max-steps 100000 --stack 1024 --depth 64 --pool 65536
 cnor compile script.cn -o script.tbc   # write the image (default: script.tbc)
 cnor compile script.cn --no-lines      # without the line table
+cnor run app.cn -I lib -I vendor   # look for imported files in lib/ and vendor/ too
 cnor exec script.tbc               # load and run an image
 cnor --version
 cnor --help
@@ -68,6 +69,15 @@ cnor --help
 | `--depth N` | 4096 | nested calls |
 | `--pool N` | 16777216 | string pool, in bytes |
 
+| Option (`run`, `compile`) | |
+|---|---|
+| `-I DIR`, `--import-path DIR` | look for imported files in `DIR` after the importing file's directory; repeatable, up to 16 |
+
+`import "path"` lines at the top of a script name other files: they are read
+from the file system relative to the importing file, then in each `-I`
+directory, and compiled into the same image (`compile` writes one `.tbc` that
+needs none of the sources).
+
 Scripts get four natives, without declaring them: `print(...)` and
 `println(...)` write their arguments to the standard output separated by one
 space (`println` ends the line), `eprint(...)` and `eprintln(...)` do the
@@ -76,8 +86,10 @@ decimal integers, reals in their shortest exact form (`0.1`, `2.0`), and
 strings as their bytes.
 
 Errors go to the standard error as `file:line: message`, for example
-`script.cn:3: unknown name: missing` or `script.cn:12: division by zero`; an
-image keeps the source name and line table, so `exec` reports the same.
+`script.cn:3: unknown name: missing`, `script.cn:4: type mismatch: expected
+i32, found str` or `lib/math.cn:12: division by zero`, naming the file the
+failing code is in; an image keeps the source names and line table, so `exec`
+reports the same.
 Exit status: 0 done, 1 runtime error (including `--max-steps`), 2 bad command
 line, 3 compile error or bad image, 4 file error. File names are UTF-8 on every
 system; a leading UTF-8 byte order mark in a source file is skipped.
@@ -94,6 +106,12 @@ fib(20) = 6765
 ```
 
 ## Use
+
+Types are checked at compile time, globals are initialized in source order and
+files are combined with `import`: see sections 6.3 to 6.5 of the
+[language specification](docs/lang-spec.md). A host that compiles scripts with
+imports gives the compiler a loader (`cnor_compiler_config_t.load` and
+`release`, plus `search_paths`): the library never reads files itself.
 
 ```c
 #include <cnor/compiler.h>

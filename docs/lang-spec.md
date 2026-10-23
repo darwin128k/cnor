@@ -33,9 +33,10 @@ text are marked **[cnor]**; the reasons are collected in
 - A JIT. Possibly a later stage; not part of the first version.
 - A garbage collector. Memory management is explicit and deterministic.
 - Dynamic typing at run time. Types are meant to be known at compile time.
-  **[cnor]** Type annotations are parsed and validated as names, but not yet
-  checked; values carry their kind at run time (`lh_value_t`) and operators
-  check kinds when they execute.
+  **[cnor]** The compiler checks types statically (section 6.3). Values still
+  carry their kind at run time (`lh_value_t`) and operators still check kinds
+  when they execute, for the values whose type the compiler cannot know (a
+  host native's result).
 
 ## 3. Implementation rules
 
@@ -136,7 +137,8 @@ ambiguity Python has.
 ### 6.1 Grammar
 
 ```
-program     := { top_level }
+program     := { import } { top_level }
+import      := "import" STRING end
 top_level   := fn_decl | native_decl | statement
 fn_decl     := "fn" IDENT "(" [ params ] ")" [ "->" type ] ":" block
 native_decl := "native" "fn" IDENT "(" [ params ] ")" [ "->" type ] end
@@ -182,6 +184,7 @@ are false; everything else is true.
 - A `let` directly at the top level of the file declares a **global**; every
   function sees it, wherever in the file it is declared. A `let` anywhere else
   is a **local** of the enclosing function, visible until the end of its block.
+  When a global's value may be read is section 6.4.
 - Without `mut`, a binding is immutable. Parameters and the `for` variable are
   immutable.
 - Assigning a name that was never declared is an error; there are no implicit
@@ -196,31 +199,183 @@ are false; everything else is true.
 - The value of the last top-level expression statement is the program's
   result.
 - Built-in: `len(s)` is the length of a string.
+- The names a file sees across files are section 6.5.
+
+### 6.3 Types
+
+**[cnor]** The compiler checks types statically, from the annotations and
+from the types of literals and expressions. The rules are the conservative
+ones: an error only where the program is certainly wrong, and nothing at run
+time that was not there before (no casts, no extra instructions).
+
+Every expression has a static type: one of `i32`, `u32`, `f32`, `bool`,
+`str`, the type of the `none` literal, or **`any`** when the compiler cannot
+know (a host native's result, an unannotated function's result, a variable
+that started as `none`). `any` is accepted wherever a type is required, and a
+value of type `any` is accepted where anything is; such values are checked by
+the machine when an operator executes, as before.
+
+- **Accepts.** A place that requires type `T` accepts `T` and `any`. `i32` and
+  `u32` are one family and accept each other (literals above `0x7FFFFFFF` are
+  `u32`, and mixed arithmetic is defined, section 4). `f32` is not an integer:
+  an `i32` parameter refuses `1.5`, an `f32` one refuses `1`. `none` is
+  accepted only where no type is declared.
+- **Variables.** `let x: T = e` requires `e` to be a `T`; `let x: T` without
+  a value is refused (it would hold `none`). Without an annotation the
+  variable takes the type of its initializer, and `let x` or `let x = none`
+  gives `any`. Every later assignment must fit that type: `let mut n = 0` then
+  `n = "a"` is an error. Parameters have their annotated types; the `for`
+  variable has the type of the first bound.
+- **Calls.** The argument count must be one the callee accepts. Each argument
+  must fit its parameter's type: for script functions, and for natives that a
+  `native fn` declaration describes. The result of a call is the declared
+  return type, or `any` without one (host natives without a declaration
+  included). `len(s)` requires a `str` and gives an `i32`.
+- **Returns.** In a function with `-> T`, every `return e` must give a `T`, a
+  bare `return` is refused (it returns `none`), and the end of the body must
+  be unreachable, decided by the rule a reader applies: some statement of the
+  body returns, where an `if` returns when it has an `else` and every branch
+  returns, a `match` when it has a `_` and every arm returns, and
+  `while true` returns when its body has no `break` of its own (it never ends
+  otherwise). `for` and other `while` loops may finish. A function without
+  `->` may return anything, or fall off its end with `none`.
+- **Operators** fail only where the machine always would: arithmetic
+  (`- * / %`) and ordering (`< <= > >=`) need numbers (or `any`); `+` takes
+  two numbers or two strings; unary `-` needs a number; `s[i]` needs a `str`
+  and an integer index. `==` and `!=` are refused between two types that can
+  never be equal (a `str` and a number, a `bool` and a `str`...), because
+  the answer is known before the program runs; `none` and `any` compare with
+  everything. `and`, `or` and `not` take any type: they test truthiness.
+- **Conditions** of `if` and `while` take any type: every kind has a truth
+  (section 6.1), and testing a number or a string is idiomatic.
+- **`match`.** Each pattern must be able to equal the subject (the rule of
+  `==`): a `str` subject cannot have an `1 =>` arm.
+- **`for`.** Both bounds must be numbers (or `any`).
+
+The errors are `type_mismatch` ("expected `T`, found `U`"),
+`operand_type` (with the types and the operator), `missing_return` and
+`wrong_arg_count`, each at the line of the offending expression or statement.
+
+Rationale: the annotations were in the grammar from the start (section 2:
+types are meant to be known at compile time); checking them finds mistakes
+before a script reaches a device, without changing what any well-typed
+program does. `any` keeps the host boundary open: natives return values of
+any kind, and a script that tests them at run time still compiles. Code
+generation does not use the types (the operand forms already specialise the
+hot paths), so an image is the same with or without the checks.
+
+### 6.4 Global initialization
+
+**[cnor]** A global is initialized by its `let`, which runs with the rest of
+the file's top-level statements, in source order, every run (section 10). Any
+expression may initialize a global: arithmetic, other globals, calls to
+functions defined anywhere in the file, natives.
+
+- **Use before `let`.** Top-level code may read or assign a global only after
+  its `let` (in source order; a `let` inside a top-level block counts from
+  where it is). Anything else is the compile error `not_initialized`, naming
+  the global, at the line of the use: `let b = a` before `let a = 1`, and also
+  `let g = g + 1` at the top level, where the `g` on the right is the global
+  being declared. (Inside a function, `let x = x + 1` reads an outer `x`, as
+  before.)
+- **Functions.** A function may name any global of its file, wherever it is
+  declared. A function cannot know when it runs, so the check is made at the
+  calls from top-level code: a call is refused (`not_initialized`, at the
+  call) when the function, or any function it may call, names a global whose
+  `let` comes after the call. The rule is conservative: a global named on a
+  path that never runs counts too; moving the call below the `let`, or the
+  `let` above the call, fixes it.
+- **Imported files** are initialized before the files that import them
+  (section 6.5), so their globals are always ready in the importer.
+- **Reset.** `cnor_vm_reset` sets every global to `none`; the next run
+  initializes them again. Without a reset a run also re-runs every `let`: the
+  initializers are ordinary code at the top of the entry function.
+
+Rationale: the rules keep the one model the machine already had (globals are
+slots the entry function assigns), so nothing changes at run time; the errors
+catch exactly the cases where a global would be read as `none`. Initial values
+stored in the image (the former "not done" item) are not needed: they would
+save one store per global per run and need a constant evaluator in the
+compiler.
+
+### 6.5 Imports
+
+**[cnor]**
+
+```
+import "lib/math.cn"
+import "../shared/config.cn"
+```
+
+- `import` takes a string literal and must come before every other item of a
+  file, at the top level (`misplaced_import` otherwise).
+- **Resolution.** The path is resolved by text alone: relative to the
+  directory of the importing file, then relative to each of the host's
+  **search paths** in order (`cnor_compiler_config_t.search_paths`; the
+  command line's `-I`). An absolute path (`/x`, `\x`, `C:...`) is used as it
+  is. `/` and `\` both separate segments, `.` and `..` are folded, and the
+  result is spelt with `/`, so one file has one spelling: `lib/../a.cn` and
+  `a.cn` are the same file. The first candidate the host's loader accepts
+  wins; none gives `no_such_module`, a file that cannot be read gives
+  `bad_module`.
+- **Loader.** The compiler never touches a file system (goal 2). The host
+  supplies `load` / `release` callbacks and a context in
+  `cnor_compiler_config_t`; an embedded host can serve sources from flash or
+  memory. Without a loader every import is `no_such_module`.
+- **Once.** Each file is loaded, parsed and compiled once, however many files
+  import it. A file that imports itself, directly or through others, is the
+  error `import_cycle` at the `import` that closes the cycle. Chains deeper
+  than 64 files are `imports_too_deep`.
+- **Order.** Files are initialized depth first, each after the files it
+  imports, in the order of the `import` lines: every file's top-level code
+  runs once per run, before the code of the file importing it, and the main
+  file's code runs last.
+- **Names.** Each file has its own namespace. A file sees its own top-level
+  names (functions, globals, `native fn` declarations) and those of the files
+  it imports **directly**; imports are not transitive. Its own names shadow
+  imported ones. A name defined by two files it imports is an error
+  (`ambiguous_name`) only where it is used. Mutability and types come along: an
+  imported immutable global cannot be assigned. Host natives are seen by every
+  file; two files declaring the same `native fn` share one import.
+- **Linking.** The result is a single image: every file's functions in one
+  table, each imported file's top-level code as a function of its own that
+  the entry function calls first. The image's file table names each source
+  file (section 7), so a runtime error points at the file and line of the
+  code that failed.
+
+Rationale: textual resolution and a host loader keep the compiler free of any
+OS dependency; per-file namespaces without transitive imports keep a file's
+names determined by what it says it imports, and refusing a duplicate only at
+use lets two unrelated libraries be imported together. Running each file's
+code once, imported files first, extends the global-initialization rule of
+section 6.4 across files unchanged.
 
 Not in the language: `&`, `*`, lifetimes, `trait`, `impl`, inheritance,
 closures, a preprocessor, metatables, arrays.
 
 ---
 
-## 7. The `.tbc` image format, v3
+## 7. The `.tbc` image format, v4
 
 **[cnor]** v1 replaced the original header (whose layout used `sizeof` and
 was not portable) and its names section. Every field is a fixed-width
 little-endian integer; nothing depends on the compiler's struct layout. v2
 keeps the v1 layout and adds opcodes (the operand forms and `for_loop`,
-section 8); v3 adds `switch`. An image of another version is refused.
+section 8); v3 adds `switch`; v4 gives each function its source file and
+turns the file name into a file table, for `import`. An image of another
+version is refused: v3 images must be compiled again.
 
 ### 7.1 Header (68 bytes)
 
 | Offset | Field | Type | Meaning |
 |---|---|---|---|
 | 0 | `magic` | 4 bytes | `"cnor"` |
-| 4 | `version` | u16 | format version, currently 2 |
+| 4 | `version` | u16 | format version, currently 4 |
 | 6 | `flags` | u16 | bit 0: the image carries a line table |
 | 8 | `image_size` | u32 | size of the whole image |
 | 12 | `stack_slots` | u32 | largest frame (slots + operands), **computed by the compiler** |
 | 16 | `globals_count` | u32 | number of globals |
-| 20 | `sections[6]` | two u32 each | offset and size of: code, consts, functions, natives, lines, file |
+| 20 | `sections[6]` | two u32 each | offset and size of: code, consts, functions, natives, lines, files |
 
 Sections are 4-byte aligned. An absent section has offset 0 and size 0.
 
@@ -228,13 +383,17 @@ Sections are 4-byte aligned. An absent section has offset 0 and size 0.
 - **consts**: u32 count, then per entry: u8 kind (0 string, 1 real), u16
   length, the bytes. A real is stored as its decimal text and parsed at load,
   so the image does not depend on the float format.
-- **functions**: u32 count, then 12 bytes per function: u32 entry, u32 size,
+- **functions**: u32 count, then 14 bytes per function: u32 entry, u32 size,
   u8 parameter count, u8 slot count (parameters included), u16 max operand
-  stack. Function 0 is the entry point (the top-level statements).
+  stack, u16 file (an index into the file table; 0 without one). Function 0
+  is the entry point (the main file's top-level statements, after calls to
+  each imported file's top-level code).
 - **natives**: u32 count, then per import: u16 length, the name.
 - **lines**: u32 count, then (u32 code address, u32 line) pairs in ascending
   address order.
-- **file**: the source file name, raw bytes.
+- **files**: u32 count, then per file: u16 length, the name (possibly
+  empty). File 0 is the main file. Absent when the program is one unnamed
+  file. A function naming a file the table does not have is refused at load.
 
 The format version is strict: the machine refuses an image with an unknown
 version, and an image produced by a newer version is rejected rather than
@@ -248,7 +407,7 @@ true false none and or not import native
 ```
 
 **[cnor]** `in` (for `for`) and `none` (the literal) were missing from the
-original list. `import` is reserved but not implemented.
+original list. `import` is section 6.5.
 
 ### 7.3 Addressing
 
@@ -411,6 +570,9 @@ would look like an integer; `nan`, `inf`, `-inf`), a string as its bytes
 unquoted. A failed write is `native_fail`. A script function of the same name
 takes precedence, as for any native.
 
+The command line also loads imported files (section 6.5) from the file system,
+relative to the importing file, then in each `-I DIR` given.
+
 ## 10. Runtime
 
 `cnor_vm_t` (`include/cnor/vm.h`) holds:
@@ -450,7 +612,10 @@ Consistent with `lh`: no exceptions, no `longjmp`. Codes are the
 `cnor_error_t` enum in `include/cnor/error.h`, with `cnor_error_get_message()`
 for logs. Every stage reports through one type, `cnor_diag_t`: a code, a line,
 an offset (a source offset for the front end, a code address for the verifier
-and the machine) and, when the failure is about a name, a copy of that name.
+and the machine), when the failure is about a name, a copy of that name (or a
+detail such as "expected i32, found str"), and the file it happened in (the
+compiler's file, or for the machine the source file of the failing code;
+`cnor_vm_get_file_at` answers it for any code address).
 
 - `cnor_vm_load` and `cnor_vm_run` return `lh_bool_t`; the reason is in
   `cnor_vm_get_diag()`, the line comes from the line table (0 without one).
@@ -478,12 +643,13 @@ and the machine) and, when the failure is about a name, a copy of that name.
 | Exceptions | Determinism matters more than convenience in embedded code |
 | Overloading, generics | They grow both compile time and bytecode size |
 | `f32` without `LH_REAL_ENABLED` | The type is not available on an STM32 by default; a real literal is then a compile error (`no_reals`) |
-| Modules via `import` | One file first; loading through `lh_io_stream_t` later |
+| Module objects, qualified names (`math.f`), selective imports | A file's names are what it imports directly (section 6.5); one level of names is enough for scripts |
+| A file-system loader in the library | Goal 2: the host supplies sources (`cnor_compiler_config_t.load`); the command line has one |
 
 ## 14. Status
 
-Done and covered by tests (`tests/`, 175 cases, and 33 runs of the command
-line in `tests/cli/`, 34 on Windows):
+Done and covered by tests (`tests/`, 196 cases, and 49 runs of the command
+line in `tests/cli/`, 50 on Windows):
 
 - [x] lexer: tokens, keywords, indentation as `indent` / `dedent`, newline
   tokens, bracket continuations, `#` comments, integers in three bases, reals,
@@ -493,12 +659,18 @@ line in `tests/cli/`, 34 on Windows):
   with literal patterns and `_`;
 - [x] compiler: every construct above, two passes (declarations, then bodies),
   computed frame sizes and stack depths, optional line table;
-- [x] image format v3: writer, reader, load-time verifier;
+- [x] static type checking (section 6.3);
+- [x] global initializers in source order, with use-before-`let` errors
+  (section 6.4);
+- [x] `import`: textual resolution, search paths, a host loader, cycles,
+  per-file namespaces, one linked image with a file table (section 6.5);
+- [x] image format v4: writer, reader, load-time verifier;
 - [x] machine: arithmetic, comparisons, jumps, calls, natives bound by name at
   load, strings, globals, line mapping for errors, a per-run instruction
   budget;
 - [x] command line: `cnor run`, `compile`, `exec`, natives `print`,
-  `println`, `eprint`, `eprintln` (section 9.1), tested through CTest;
+  `println`, `eprint`, `eprintln` (section 9.1), imports from the file
+  system with `-I` search paths, tested through CTest;
 - [x] performance: a dispatch loop with inline fast paths and computed goto,
   loops tested at the bottom, operand forms on locals and immediates, a
   one-instruction `for` step, inline string indexing, `len`, equality and
@@ -506,13 +678,12 @@ line in `tests/cli/`, 34 on Windows):
   `match`, in-place global updates, value moves the store buffer can
   forward, a benchmark suite (`bench/`).
 
-Not done, in a sensible order:
+Not done:
 
-1. Type checking of annotations (section 2).
-2. Initial values of globals in the image (today they start as `none` and the
-   entry function assigns them).
-3. `import`.
-4. A VM-only build of the library.
+1. A VM-only build of the library.
+
+Initial values of globals stored in the image, formerly on this list, were
+decided against: section 6.4.
 
 ## 15. Decisions that differ from the original draft
 
@@ -532,3 +703,6 @@ Not done, in a sensible order:
 | Run time | unbounded | instruction budget per run | An endless loop must not hang the host |
 | NaN | not specified | IEEE: unordered | A comparison must not claim NaN equals a number |
 | Indexing, `len` | not in the spec | `s[i]`, `len(s)` | Already in the original machine |
+| Type annotations | parsed | checked at compile time, with `any` for values of unknown type | Section 2 wants types known at compile time; `any` keeps natives usable |
+| Global initializers | entry assigns, no rules | source order, use before `let` is a compile error, no image-stored values | One model, no run-time change (section 6.4) |
+| `import` | reserved | host loader, per-file names, one linked image (format v4) | No OS dependency in the library (goal 2) |

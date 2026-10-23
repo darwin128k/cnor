@@ -6,6 +6,7 @@ set(CNOR_TEST_SUITES
         parser
         compiler
         image_vm
+        language
 )
 
 foreach (suite ${CNOR_TEST_SUITES})

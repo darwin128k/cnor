@@ -1,0 +1,4 @@
+# Initialized before every file that imports it.
+let app_name = "shared"
+let mut count = 0
+println("shared ready")

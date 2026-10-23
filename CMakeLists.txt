@@ -81,6 +81,10 @@ set(CNOR_SOURCES
         ${CNOR_SRC_PATH}/cnor/compiler/control_loop.c
         ${CNOR_SRC_PATH}/cnor/compiler/control_match.c
         ${CNOR_SRC_PATH}/cnor/compiler/function.c
+        ${CNOR_SRC_PATH}/cnor/compiler/path.c
+        ${CNOR_SRC_PATH}/cnor/compiler/module.c
+        ${CNOR_SRC_PATH}/cnor/compiler/type.c
+        ${CNOR_SRC_PATH}/cnor/compiler/order.c
         ${CNOR_SRC_PATH}/cnor/vm/vm.c
         ${CNOR_SRC_PATH}/cnor/vm/load.c
         ${CNOR_SRC_PATH}/cnor/vm/dispatch.c

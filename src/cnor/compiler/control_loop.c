@@ -69,16 +69,36 @@ cnor_compile_while(cnor_compiler_t *self, const cnor_node_t *node)
 
 /* -- for ------------------------------------------------------------------- */
 
-/* The variable and the evaluated end bound live in two slots of their own. */
+/* A bound of a range: a number, since each step adds one and compares. */
+static lh_bool_t
+cnor_compile_for_bound(cnor_compiler_t *self, const cnor_node_t *bound, cnor_static_type_t *type)
+{
+    if (!cnor_compile_expr(self, bound))
+    {
+        return lh_bool_false;
+    }
+    *type = self->type;
+    if (*type == cnor_static_any || *type == cnor_static_f32)
+    {
+        return lh_bool_true;
+    }
+    return cnor_type_require(self, bound, cnor_static_i32, *type);
+}
+
+/* The variable and the evaluated end bound live in two slots of their own;
+ * the variable has the type of the first value. */
 static lh_bool_t
 cnor_compile_for_slots(cnor_compiler_t *self, const cnor_node_t *node, cnor_slot_t *var,
                        cnor_slot_t *bound)
 {
-    return cnor_compile_expr(self, node->data.for_.from)
-           && cnor_compile_expr(self, node->data.for_.to)
-           && cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false, bound)
+    cnor_static_type_t from = cnor_static_any;
+    cnor_static_type_t to = cnor_static_any;
+
+    return cnor_compile_for_bound(self, node->data.for_.from, &from)
+           && cnor_compile_for_bound(self, node->data.for_.to, &to)
+           && cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false, to, bound)
            && cnor_emit_insn(self, cnor_op_store_local, *bound, 0U)
-           && cnor_scope_add_local(self, node, node->name, lh_bool_false, var)
+           && cnor_scope_add_local(self, node, node->name, lh_bool_false, from, var)
            && cnor_emit_insn(self, cnor_op_store_local, *var, 0U);
 }
 

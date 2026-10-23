@@ -8,6 +8,7 @@ add_executable(cnor_cli
         options.c
         command.c
         file.c
+        loader.c
         natives.c
         text.c
 )

@@ -28,6 +28,7 @@ enum cnor_node_kind
     /* declarations */
     cnor_node_fn = 0,     /**< `fn name(params) -> type:` + body. */
     cnor_node_native_fn,  /**< `native fn name(params) -> type`. */
+    cnor_node_import,     /**< `import "path"`; the unescaped path is in `name`. */
     cnor_node_param,      /**< One parameter: `name: type`. */
     /* statements */
     cnor_node_let,        /**< `let [mut] name [: type] [= init]`. */

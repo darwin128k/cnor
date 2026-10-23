@@ -1,0 +1,7 @@
+# Two imports; shared.cn is imported again by lib/greet.cn and runs once.
+import "lib/greet.cn"
+import "shared.cn"
+
+println(greet("cnor"), "from", app_name)
+let calls: i32 = count
+calls

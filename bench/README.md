@@ -105,6 +105,20 @@ jump back out of line, behind a taken branch, and merged it with the exit
 into one indirect jump. Marking the jump back likely and giving it its own
 dispatch fixed it (see docs/architecture.md, win #6).
 
+Static types, global initializers and `import` (image format v4, 2026-10-23)
+change no run-time code: every workload compiles to the same code section
+byte for byte, and the run takes the same instruction count (callgrind, e.g.
+`loop` 930.27M before and 930.28M after, `nested` run 121.13M both). Timed
+over 12 heap layouts (`GLIBC_TUNABLES=glibc.malloc.top_pad`, 9 rounds each,
+one pinned CPU), both builds assembled with
+`-Wa,-mbranches-within-32B-boundaries`, the run medians move by -5.6%
+(`nested`) to +2.1% (`match`); without that flag `loop` read +5% on the same
+instruction count, a layout effect as described above. Compiling does more
+work (types, module table, initialization order): the 1000-function `compile`
+workload compiles 2.3% slower, and the small workloads, which compile in about
+4 us, take 0.1 to 0.5 us more (+3 to +12%), mostly a few more allocations per
+compile. Loading a v4 image is level (-7% to +5%, within the spread).
+
 ## Optional optimizations
 
 Measured 2026-10-23 on the same machine against a plain `-O2` build of the

@@ -32,6 +32,8 @@ typedef struct program
     lh_u32_t globals;
     cnor_stack_slots_t stack_slots;
     lh_str_view_t file;
+    const lh_str_view_t *files; /**< When set, the file table instead of `file`. */
+    cnor_count_t file_count;
     cnor_image_t image;
 } program_t;
 
@@ -142,7 +144,10 @@ build(program_t *p, lh_u16_t max_stack)
     parts.native_count = p->native_count;
     parts.lines = p->line_count > 0U ? &p->lines : lh_null;
     parts.line_count = p->line_count;
-    parts.file = p->file;
+    parts.files = p->files != lh_null ? p->files : &p->file;
+    parts.file_count = p->files != lh_null                      ? p->file_count
+                       : lh_str_view_get_size(&p->file) > 0U ? 1U
+                                                              : 0U;
     parts.globals_count = p->globals;
     parts.stack_slots = p->stack_slots;
     (void) cnor_image_write(&parts, &p->image);
@@ -690,6 +695,88 @@ load_error(program_t *p)
     code = cnor_vm_load(&vm, p->image.data, p->image.size) ? cnor_error_none : vm_code(&vm);
     cnor_vm_deinit(&vm);
     return code;
+}
+
+/* Each function names its source file; a failure points at the file of the
+ * code that failed. */
+static void
+two_file_program(program_t *p, cnor_file_index_t second_file)
+{
+    cnor_code_addr_t entry;
+
+    /* f0 (main.cn): call f1; ret.  f1 (lib.cn): 1 / 0. */
+    op_u16_u8(p, cnor_op_call, 1U, 0U);
+    op(p, cnor_op_ret);
+    end_function(p, 0U, 0U, 0U, 1U);
+    entry = here(p);
+    op_u32(p, cnor_op_push_i32, 1U);
+    op_u32(p, cnor_op_push_i32, 0U);
+    op(p, cnor_op_div);
+    op(p, cnor_op_ret);
+    end_function(p, entry, 0U, 0U, 2U);
+    p->functions[1].file = second_file;
+    add_line(p, 0U, 4U);
+    add_line(p, entry, 2U);
+    build(p, 0U);
+}
+
+CNOR_TEST(maps_a_failure_back_to_its_file)
+{
+    static lh_str_view_t files[2];
+    program_t p;
+    cnor_vm_t vm;
+    lh_str_view_t file;
+
+    files[0] = view_of("main.cn");
+    files[1] = view_of("lib/x.cn");
+    p_init(&p);
+    p.files = files;
+    p.file_count = 2U;
+    two_file_program(&p, 1U);
+    vm_open(&vm);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    file = cnor_vm_get_file(&vm);
+    CHECK(lh_str_view_get_size(&file) == 7U
+          && memcmp(lh_str_view_get_data(&file), "main.cn", 7U) == 0);
+    file = cnor_vm_get_file_at(&vm, 0U);
+    CHECK(lh_str_view_get_size(&file) == 7U);
+    file = cnor_vm_get_file_at(&vm, 6U);
+    CHECK(lh_str_view_get_size(&file) == 8U
+          && memcmp(lh_str_view_get_data(&file), "lib/x.cn", 8U) == 0);
+    file = cnor_vm_get_file_at(&vm, 1000U);
+    CHECK_EQ(lh_str_view_get_size(&file), 0U);
+    CHECK(!cnor_vm_run(&vm));
+    CHECK_EQ(vm_code(&vm), cnor_error_div_by_zero);
+    CHECK_EQ(cnor_diag_get_line(cnor_vm_get_diag(&vm)), 2U);
+    file = cnor_diag_get_file(cnor_vm_get_diag(&vm));
+    CHECK(lh_str_view_get_size(&file) == 8U
+          && memcmp(lh_str_view_get_data(&file), "lib/x.cn", 8U) == 0);
+    cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
+CNOR_TEST(rejects_a_function_of_a_file_the_image_does_not_have)
+{
+    static lh_str_view_t files[2];
+    program_t p;
+
+    files[0] = view_of("main.cn");
+    files[1] = view_of("lib/x.cn");
+    p_init(&p);
+    p.files = files;
+    p.file_count = 2U;
+    two_file_program(&p, 2U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_header);
+    p_deinit(&p);
+    /* Without a file table, every function is in the one unnamed file. */
+    p_init(&p);
+    two_file_program(&p, 1U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_header);
+    p_deinit(&p);
+    p_init(&p);
+    two_file_program(&p, 0U);
+    CHECK_EQ(load_error(&p), cnor_error_none);
+    p_deinit(&p);
 }
 
 CNOR_TEST(rejects_a_jump_into_the_middle_of_an_instruction)
@@ -1460,6 +1547,8 @@ static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(refuses_a_call_with_the_wrong_arity),
     CNOR_TEST_CASE(keeps_globals_across_runs_until_a_reset),
     CNOR_TEST_CASE(maps_a_failure_back_to_the_source_line),
+    CNOR_TEST_CASE(maps_a_failure_back_to_its_file),
+    CNOR_TEST_CASE(rejects_a_function_of_a_file_the_image_does_not_have),
     CNOR_TEST_CASE(answers_no_line_for_a_program_built_without_them),
     CNOR_TEST_CASE(refuses_to_run_before_anything_is_loaded),
     CNOR_TEST_CASE(reuses_one_machine_for_two_programs),

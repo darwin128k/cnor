@@ -21,6 +21,8 @@
 #define CNOR_CLI_DEFAULT_STR_POOL_SIZE (16U * 1024U * 1024U)
 /** @brief Instruction budget; 0 is unlimited (`--max-steps`). */
 #define CNOR_CLI_DEFAULT_MAX_STEPS 0U
+/** @brief Most `-I` directories one command line takes. */
+#define CNOR_CLI_MAX_IMPORT_PATHS 16U
 
 /**
  * @enum cnor_cli_exit
@@ -66,6 +68,9 @@ struct cnor_cli_options
     cnor_stack_slots_t stack_slots; /**< `--stack`. */
     cnor_call_depth_t max_depth;    /**< `--depth`. */
     lh_u32_t str_pool_size;         /**< `--pool`. */
+    /** `-I`: where imports are looked for after the importing file's directory. */
+    const lh_char_t *import_paths[CNOR_CLI_MAX_IMPORT_PATHS];
+    lh_u32_t import_path_count; /**< How many. */
 };
 /** @copybrief cnor_cli_options */
 typedef struct cnor_cli_options cnor_cli_options_t;

@@ -1,6 +1,6 @@
 /**
  * @file image.h
- * @brief The `.tbc` image, format v3: header, sections and the owning buffer
+ * @brief The `.tbc` image, format v4: header, sections and the owning buffer
  *        (::cnor_image_t).
  *
  * Every field is a fixed-width little-endian integer written and read byte by
@@ -23,13 +23,16 @@
  *   bytes. Strings are the final bytes; reals are their decimal text, parsed at
  *   load, so float and double builds read the same file.
  * - **functions**: u32 count, then per entry u32 entry address, u32 code size,
- *   u8 parameters, u8 slots (parameters included), u16 operand stack depth.
- *   Function 0 is the entry point.
+ *   u8 parameters, u8 slots (parameters included), u16 operand stack depth,
+ *   u16 file (index into the file table, 0 without one). Function 0 is the
+ *   entry point.
  * - **natives**: u32 count, then per entry u16 length and the name. Bound by
  *   name against the host table when the image is loaded.
  * - **lines**: optional (::CNOR_IMAGE_FLAG_LINES): u32 count, then ascending
  *   (u32 code address, u32 line) pairs.
- * - **file**: optional source file name, raw bytes.
+ * - **files**: optional: u32 count, then per entry u16 length and the name
+ *   (which may be empty). File 0 is the main file; the others are the files it
+ *   imports, so every function names the file its code came from.
  */
 
 #ifndef CNOR_IMAGE_H
@@ -42,7 +45,7 @@
 #include <lh/numeric/fixed/types.h>
 
 /** @def CNOR_IMAGE_VERSION @brief Format version this build reads and writes. */
-#define CNOR_IMAGE_VERSION 3U
+#define CNOR_IMAGE_VERSION 4U
 
 /** @def CNOR_IMAGE_HEADER_SIZE @brief Bytes of the fixed header. */
 #define CNOR_IMAGE_HEADER_SIZE 68U
@@ -54,7 +57,7 @@
 #define CNOR_IMAGE_FLAG_LINES 0x0001U
 
 /** @def CNOR_IMAGE_FUNCTION_SIZE @brief Bytes of one function table entry. */
-#define CNOR_IMAGE_FUNCTION_SIZE 12U
+#define CNOR_IMAGE_FUNCTION_SIZE 14U
 
 /**
  * @enum cnor_image_section
@@ -67,7 +70,7 @@ enum cnor_image_section
     cnor_image_section_functions, /**< Function table. */
     cnor_image_section_natives,   /**< Native imports. */
     cnor_image_section_lines,     /**< Line table (optional). */
-    cnor_image_section_file,      /**< Source file name (optional). */
+    cnor_image_section_files,     /**< Source file names (optional). */
     cnor_image_section_count
 };
 /** @copybrief cnor_image_section */
@@ -125,6 +128,7 @@ struct cnor_image_function
     cnor_argc_t param_count;   /**< Parameters, the first slots. */
     lh_u8_t slot_count;        /**< Frame slots, parameters included. */
     lh_u16_t max_stack;        /**< Operand stack depth above the slots. */
+    cnor_file_index_t file;    /**< Source file of its code. */
 };
 /** @copybrief cnor_image_function */
 typedef struct cnor_image_function cnor_image_function_t;

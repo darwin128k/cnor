@@ -110,29 +110,43 @@ cnor_cli_file_is_std(const lh_char_t *path)
     return path[0] == '-' && path[1] == '\0' ? lh_bool_true : lh_bool_false;
 }
 
+cnor_cli_file_status_t
+cnor_cli_file_load(const lh_char_t *path, cnor_cli_buffer_t *out)
+{
+    cnor_cli_file_status_t status = cnor_cli_file_ok;
+    lh_os_fs_file_t file;
+
+    out->data = lh_null;
+    out->size = 0U;
+    lh_os_fs_file_init(&file);
+    if (!lh_os_fs_file_open_cstr(&file, path, lh_fs_file_mode_read))
+    {
+        status = cnor_cli_file_cannot_open;
+    }
+    else if (!cnor_cli_file_read_all(out, cnor_cli_file_read_file, &file))
+    {
+        status = cnor_cli_file_cannot_read;
+        cnor_cli_buffer_deinit(out);
+    }
+    lh_os_fs_file_deinit(&file);
+    return status;
+}
+
 lh_bool_t
 cnor_cli_file_read(const lh_char_t *path, cnor_cli_buffer_t *out)
 {
     lh_bool_t ok;
 
+    if (!cnor_cli_file_is_std(path))
+    {
+        return cnor_cli_file_load(path, out) == cnor_cli_file_ok ? lh_bool_true : lh_bool_false;
+    }
     out->data = lh_null;
     out->size = 0U;
-    if (cnor_cli_file_is_std(path))
-    {
 #if defined(_WIN32)
-        (void) _setmode(_fileno(stdin), _O_BINARY);
+    (void) _setmode(_fileno(stdin), _O_BINARY);
 #endif
-        ok = cnor_cli_file_read_all(out, cnor_cli_file_read_stdin, stdin);
-    }
-    else
-    {
-        lh_os_fs_file_t file;
-
-        lh_os_fs_file_init(&file);
-        ok = lh_os_fs_file_open_cstr(&file, path, lh_fs_file_mode_read)
-             && cnor_cli_file_read_all(out, cnor_cli_file_read_file, &file);
-        lh_os_fs_file_deinit(&file);
-    }
+    ok = cnor_cli_file_read_all(out, cnor_cli_file_read_stdin, stdin);
     if (!ok)
     {
         cnor_cli_buffer_deinit(out);

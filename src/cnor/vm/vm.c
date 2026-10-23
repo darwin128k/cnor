@@ -35,6 +35,7 @@ cnor_vm_unload(cnor_vm_t *self)
     self->natives = lh_null;
     self->native_count = 0U;
     self->line_count = 0U;
+    self->file_count = 0U;
     self->frames = lh_null;
     self->depth = 0U;
     self->fp = 0U;
@@ -195,6 +196,7 @@ cnor_vm_view(const cnor_vm_t *self)
     view.function_count = self->function_count;
     view.native_count = self->native_count;
     view.line_count = self->line_count;
+    view.file_count = self->file_count;
     return view;
 }
 
@@ -208,7 +210,21 @@ cnor_vm_get_file(const cnor_vm_t *self)
         return lh_str_view_empty();
     }
     view = cnor_vm_view(self);
-    return cnor_image_view_file(&view);
+    return cnor_image_view_file(&view, 0U);
+}
+
+lh_str_view_t
+cnor_vm_get_file_at(const cnor_vm_t *self, cnor_code_addr_t addr)
+{
+    cnor_image_view_t view;
+
+    if (self->image == lh_null || addr >= self->code_size)
+    {
+        return lh_str_view_empty();
+    }
+    view = cnor_vm_view(self);
+    return cnor_image_view_file(
+        &view, self->functions[cnor_image_view_function_of(&view, addr)].file);
 }
 
 cnor_line_t
@@ -230,5 +246,7 @@ lh_bool_t
 cnor_vm_fail(cnor_vm_t *vm, const cnor_insn_t *insn, cnor_error_t code)
 {
     vm->running = lh_bool_false;
-    return cnor_diag_set(&vm->diag, code, cnor_vm_get_line_at(vm, insn->at), insn->at);
+    (void) cnor_diag_set(&vm->diag, code, cnor_vm_get_line_at(vm, insn->at), insn->at);
+    cnor_diag_set_file(&vm->diag, cnor_vm_get_file_at(vm, insn->at));
+    return lh_bool_false;
 }

@@ -814,13 +814,13 @@ CNOR_TEST(reports_a_bottom_tested_condition_on_the_loop_line)
                        "while i < 3:\n"
                        "    i = i + 1\n"
                        "    let x = 2\n"
-                       "while i < \"a\":\n"
+                       "while i < echo(\"a\"):\n"
                        "    i = i + 1\n",
                        &line),
              cnor_error_type);
     CHECK_EQ(line, 5U);
     CHECK_EQ(run_error("let mut s = 0\n"
-                       "for k in 0..\"a\":\n"
+                       "for k in 0..echo(\"a\"):\n"
                        "    s = s + k\n",
                        &line),
              cnor_error_type);
@@ -878,7 +878,7 @@ operand_forms_disagree(const char *left, const char *right, const char *const *o
     size_t k;
 
     used += (size_t) snprintf(src + used, sizeof(src) - used,
-                              "let ga = %s\nlet gb = %s\nlet g7 = 7\nlet gm = -3\n"
+                              "let ga = echo(%s)\nlet gb = echo(%s)\nlet g7 = 7\nlet gm = -3\n"
                               "fn f(a: i32, b: i32) -> i32:\n    let mut bad = 0\n",
                               left, right);
     for (k = 0U; k < op_count; ++k)
@@ -947,7 +947,7 @@ CNOR_TEST(computes_operand_forms_as_the_stack_does)
     CHECK_EQ(operand_forms_disagree("\"ab\"", "\"cd\"", text, 3U, lh_bool_false), 0);
     CHECK_EQ(operand_forms_disagree("\"ab\"", "\"ab\"", text, 3U, lh_bool_false), 0);
     CHECK_EQ(operand_forms_disagree("\"ab\"", "7", text + 1, 2U, lh_bool_false), 0);
-    CHECK(run_text_is("fn f(a: i32, b: i32) -> i32:\n    return a + b\nf(\"x\", \"y\")\n", "xy"));
+    CHECK(run_text_is("fn f(a: str, b: str) -> str:\n    return a + b\nf(\"x\", \"y\")\n", "xy"));
 }
 
 CNOR_TEST(fails_operand_forms_the_way_the_stack_does)
@@ -963,14 +963,16 @@ CNOR_TEST(fails_operand_forms_the_way_the_stack_does)
     CHECK_EQ(run_error("fn f(a: i32) -> i32:\n    return (a + 1) / 0\nf(1)\n", &line),
              cnor_error_div_by_zero);
     CHECK_EQ(line, 2U);
-    CHECK_EQ(run_error("fn f() -> i32:\n    let s = \"x\"\n    return s < 3\nf()\n", &line),
+    CHECK_EQ(run_error("fn f() -> bool:\n    let s = echo(\"x\")\n    return s < 3\nf()\n", &line),
              cnor_error_type);
     CHECK_EQ(line, 3U);
-    CHECK_EQ(run_error("fn f() -> i32:\n    let s = \"x\"\n    let n = 1\n    return n - s\nf()\n",
+    CHECK_EQ(run_error("fn f() -> i32:\n    let s = echo(\"x\")\n    let n = 1\n"
+                       "    return n - s\nf()\n",
                        &line),
              cnor_error_type);
     CHECK_EQ(line, 4U);
-    CHECK_EQ(run_error("fn f() -> i32:\n    let s = \"x\"\n    return (s + s) * 2\nf()\n", &line),
+    CHECK_EQ(run_error("fn f() -> i32:\n    let s = echo(\"x\")\n    return (s + s) * 2\nf()\n",
+                       &line),
              cnor_error_type);
     CHECK_EQ(line, 3U);
     /* The smallest i32 is an immediate too; it divides and wraps like the rest. */
@@ -989,7 +991,7 @@ CNOR_TEST(matches_integer_arms_by_value)
                       "        0 => return 3\n"
                       "        2147483647 => return 4\n"
                       "        _ => return 5\n"
-                      "pick(%s)\n";
+                      "pick(echo(%s))\n";
     static const struct
     {
         const char *subject;
@@ -1049,7 +1051,7 @@ CNOR_TEST(counts_ranges_at_their_edges)
 
     for (k = 0U; k < sizeof(cases) / sizeof(cases[0]); ++k)
     {
-        (void) snprintf(buffer, sizeof(buffer), "%scount(%s, %s)\n", fn, cases[k].a,
+        (void) snprintf(buffer, sizeof(buffer), "%scount(echo(%s), echo(%s))\n", fn, cases[k].a,
                         cases[k].b);
         if (run_sint(buffer) != cases[k].n)
         {
@@ -1213,8 +1215,8 @@ text_equality(const char *left, const char *right)
     char src[1024];
 
     (void) snprintf(src, sizeof(src),
-                    "let ga = %s\nlet gb = %s\n"
-                    "fn f(a: i32, b: i32) -> i32:\n"
+                    "let ga = echo(%s)\nlet gb = echo(%s)\n"
+                    "fn f(a: str, b: str) -> i32:\n"
                     "    let mut r = 0\n"
                     "    if a == b:\n        r = r + 1\n"
                     "    if ga == gb:\n        r = r + 2\n"
@@ -1280,10 +1282,10 @@ CNOR_TEST(compares_text_by_its_bytes)
         CHECK_EQ(r, cases[k].equal ? 3 : 12);
     }
     /* A value equals itself; integer arms never match text. */
-    CHECK_EQ(run_sint("fn f(a: i32) -> i32:\n    if a == a:\n        return 1\n    return 0\n"
+    CHECK_EQ(run_sint("fn f(a: str) -> i32:\n    if a == a:\n        return 1\n    return 0\n"
                       "f(\"\") + f(\"x\")\n"),
              2);
-    CHECK_EQ(run_sint("fn f(a: i32) -> i32:\n    match a:\n        1 => return 1\n"
+    CHECK_EQ(run_sint("fn f(a: str) -> i32:\n    match echo(a):\n        1 => return 1\n"
                       "        \"1\" => return 2\n        _ => return 3\nf(\"1\")\n"),
              2);
 }
@@ -1292,11 +1294,11 @@ CNOR_TEST(compares_text_by_its_bytes)
  * strings, empty and long ones included. */
 CNOR_TEST(joins_text_on_locals_and_the_stack)
 {
-    static const char *const fn = "fn f(a: i32, b: i32) -> i32:\n"
+    static const char *const fn = "fn f(a: str, b: str) -> str:\n"
                                   "    let c = a + b\n"
                                   "    let d = (a + \"\") + b\n"
                                   "    if c != d:\n"
-                                  "        return -1\n"
+                                  "        return \"(differ)\"\n"
                                   "    return c\n";
     char src[1024];
 
@@ -1317,12 +1319,12 @@ CNOR_TEST(joins_text_on_locals_and_the_stack)
     CHECK(run_text_is(src, "0123456789012345678901234567890123456789"
                            "abcdefghijabcdefghijabcdefghijabcdefghij"));
     /* Embedded NUL bytes are copied and counted. */
-    CHECK_EQ(run_sint("fn f(a: i32, b: i32) -> i32:\n    let c = a + b\n"
+    CHECK_EQ(run_sint("fn f(a: str, b: str) -> i32:\n    let c = a + b\n"
                       "    if c[1] == \"\\0\" and c[3] == \"\\0\":\n        return len(c)\n"
                       "    return -1\nf(\"a\\0\", \"b\\0\")\n"),
              4);
     /* A join is a new string; the operands are unchanged. */
-    CHECK(run_text_is("fn f(a: i32) -> i32:\n    let b = a + a\n    let c = b + a\n"
+    CHECK(run_text_is("fn f(a: str) -> str:\n    let b = a + a\n    let c = b + a\n"
                       "    return a + \"|\" + b + \"|\" + c\nf(\"x\")\n",
                       "x|xx|xxx"));
 }
@@ -1331,23 +1333,35 @@ CNOR_TEST(refuses_to_join_text_with_anything_else)
 {
     cnor_line_t line = 0U;
 
-    CHECK_EQ(run_error("let x = \"a\"\nlet y = 1\nx + y\n", &line), cnor_error_type);
+    CHECK_EQ(run_error("let x = echo(\"a\")\nlet y = 1\nx + y\n", &line), cnor_error_type);
     CHECK_EQ(line, 3U);
-    CHECK_EQ(run_error("fn f(a: i32, b: i32) -> i32:\n    return a + b\nf(\"a\", 1)\n", &line),
+    CHECK_EQ(run_error("fn f(a: i32, b: i32) -> i32:\n    return a + b\nf(echo(\"a\"), 1)\n",
+                       &line),
              cnor_error_type);
     CHECK_EQ(line, 2U);
-    CHECK_EQ(run_error("fn f(a: i32, b: i32) -> i32:\n    return b + a\nf(\"a\", 1)\n", &line),
+    CHECK_EQ(run_error("fn f(a: i32, b: i32) -> i32:\n    return b + a\nf(echo(\"a\"), 1)\n",
+                       &line),
              cnor_error_type);
     CHECK_EQ(line, 2U);
-    CHECK_EQ(run_error("fn f(a: i32) -> i32:\n    let x = 0\n    return a + 1\nf(\"a\")\n",
+    CHECK_EQ(run_error("fn f(a: i32) -> i32:\n    let x = 0\n    return a + 1\nf(echo(\"a\"))\n",
                        &line),
              cnor_error_type);
     CHECK_EQ(line, 3U);
-    CHECK_EQ(run_error("fn f(a: i32) -> i32:\n    return 1 + a\nf(\"a\")\n", &line),
+    CHECK_EQ(run_error("fn f(a: i32) -> i32:\n    return 1 + a\nf(echo(\"a\"))\n", &line),
              cnor_error_type);
     CHECK_EQ(line, 2U);
-    CHECK_EQ(run_error("\"a\" + none\n", &line), cnor_error_type);
-    CHECK_EQ(run_error("\"a\" - \"b\"\n", &line), cnor_error_type);
+    CHECK_EQ(run_error("echo(\"a\") + echo(none)\n", &line), cnor_error_type);
+    CHECK_EQ(run_error("echo(\"a\") - echo(\"b\")\n", &line), cnor_error_type);
+    /* With the types known, each of these is refused before it runs. */
+    CHECK_EQ(compile_error("let x = \"a\"\nlet y = 1\nx + y\n", &line, lh_null),
+             cnor_error_operand_type);
+    CHECK_EQ(line, 3U);
+    CHECK_EQ(compile_error("fn f(a: i32, b: i32) -> i32:\n    return a + b\nf(\"a\", 1)\n", &line,
+                           lh_null),
+             cnor_error_type_mismatch);
+    CHECK_EQ(line, 3U);
+    CHECK_EQ(compile_error("\"a\" + none\n", &line, lh_null), cnor_error_operand_type);
+    CHECK_EQ(compile_error("\"a\" - \"b\"\n", &line, lh_null), cnor_error_operand_type);
 }
 
 /* A join that does not fit the pool fails on its line, on locals and on the
@@ -1355,7 +1369,7 @@ CNOR_TEST(refuses_to_join_text_with_anything_else)
  * room at all. */
 CNOR_TEST(stops_a_join_at_the_end_of_the_pool)
 {
-    const char *locals = "fn f(a: i32, b: i32) -> i32:\n"
+    const char *locals = "fn f(a: str, b: str) -> i32:\n"
                          "    let c = a + b\n"
                          "    return len(c)\n"
                          "f(\"abcd\", \"efgh\")\n";
@@ -1378,7 +1392,7 @@ CNOR_TEST(stops_a_join_at_the_end_of_the_pool)
              cnor_error_str_pool_full);
     CHECK_EQ(line, 2U);
     /* Pieces of 4 bytes into 10: the third join is the one that fails. */
-    CHECK_EQ(run_with_pool("fn f(a: i32) -> i32:\n    let mut n = 0\n    for i in 0..3:\n"
+    CHECK_EQ(run_with_pool("fn f(a: str) -> i32:\n    let mut n = 0\n    for i in 0..3:\n"
                            "        let c = a + a\n        n = n + len(c)\n    return n\n"
                            "f(\"ab\")\n",
                            10U, &line, lh_null),
@@ -1393,10 +1407,10 @@ CNOR_TEST(indexes_and_measures_text_at_its_edges)
     CHECK_EQ(run_sint("len(\"\")"), 0);
     CHECK_EQ(run_sint("len(\"h\xc3\xa9\")"), 3);
     CHECK_EQ(run_sint("len(\"a\\0b\")"), 3);
-    CHECK_EQ(run_sint("fn f(s: i32) -> i32:\n    return len(s[0]) + len(s[len(s) - 1])\n"
+    CHECK_EQ(run_sint("fn f(s: str) -> i32:\n    return len(s[0]) + len(s[len(s) - 1])\n"
                       "f(\"abc\")\n"),
              2);
-    CHECK(run_text_is("fn f(s: i32) -> i32:\n    return s[0] + s[len(s) - 1]\nf(\"xyz\")\n",
+    CHECK(run_text_is("fn f(s: str) -> str:\n    return s[0] + s[len(s) - 1]\nf(\"xyz\")\n",
                       "xz"));
     /* Bytes, not characters. */
     CHECK_EQ(run_sint("let s = \"h\xc3\xa9\"\nlet mut r = 0\n"
@@ -1413,16 +1427,26 @@ CNOR_TEST(indexes_and_measures_text_at_its_edges)
     CHECK_EQ(line, 2U);
     CHECK_EQ(run_error("let s = \"\"\ns[0]\n", &line), cnor_error_index);
     CHECK_EQ(run_error("\"abc\"[4000000000]\n", &line), cnor_error_index);
-    CHECK_EQ(run_error("let n = 5\nn[0]\n", &line), cnor_error_type);
+    CHECK_EQ(run_error("let n = echo(5)\nn[0]\n", &line), cnor_error_type);
     CHECK_EQ(line, 2U);
-    CHECK_EQ(run_error("\"abc\"[\"a\"]\n", &line), cnor_error_type);
-    CHECK_EQ(run_error("\"abc\"[true]\n", &line), cnor_error_type);
-    CHECK_EQ(run_error("let x = 1\nlet y = len(x)\n", &line), cnor_error_type);
+    CHECK_EQ(run_error("\"abc\"[echo(\"a\")]\n", &line), cnor_error_type);
+    CHECK_EQ(run_error("\"abc\"[echo(true)]\n", &line), cnor_error_type);
+    CHECK_EQ(run_error("let x = echo(1)\nlet y = len(x)\n", &line), cnor_error_type);
     CHECK_EQ(line, 2U);
-    CHECK_EQ(run_error("len(none)\n", &line), cnor_error_type);
+    CHECK_EQ(run_error("len(echo(none))\n", &line), cnor_error_type);
 #if LH_REAL_ENABLED
-    CHECK_EQ(run_error("\"abc\"[1.0]\n", &line), cnor_error_type);
+    CHECK_EQ(run_error("\"abc\"[echo(1.0)]\n", &line), cnor_error_type);
+    CHECK_EQ(compile_error("\"abc\"[1.0]\n", &line, lh_null), cnor_error_type_mismatch);
 #endif
+    /* With the types known, each of these is refused before it runs. */
+    CHECK_EQ(compile_error("let n = 5\nn[0]\n", &line, lh_null), cnor_error_type_mismatch);
+    CHECK_EQ(line, 2U);
+    CHECK_EQ(compile_error("\"abc\"[\"a\"]\n", &line, lh_null), cnor_error_type_mismatch);
+    CHECK_EQ(compile_error("\"abc\"[true]\n", &line, lh_null), cnor_error_type_mismatch);
+    CHECK_EQ(compile_error("let x = 1\nlet y = len(x)\n", &line, lh_null),
+             cnor_error_type_mismatch);
+    CHECK_EQ(line, 2U);
+    CHECK_EQ(compile_error("len(none)\n", &line, lh_null), cnor_error_type_mismatch);
 }
 
 /* The string fast paths (joins stored directly, indexing, `len`, equality)
@@ -1430,7 +1454,7 @@ CNOR_TEST(indexes_and_measures_text_at_its_edges)
  * stops after exactly that many. */
 CNOR_TEST(stops_after_exactly_the_budget_inside_string_work)
 {
-    const char *src = "fn g(t: i32, n: i32) -> i32:\n"
+    const char *src = "fn g(t: str, n: i32) -> i32:\n"
                       "    let mut total = 0\n"
                       "    for i in 0..n:\n"
                       "        let p = t[i % len(t)] + t[(i + 1) % len(t)]\n"
@@ -1460,12 +1484,12 @@ CNOR_TEST(stops_after_exactly_the_budget_inside_string_work)
  * storage must compare equal, one byte apart at any position unequal, and
  * every joined byte must land where it belongs. `make(n, p)` is n bytes of "a"
  * with a "b" at p. */
-static const char m_sized_text[] = "fn fill(n: i32, c: i32) -> i32:\n"
+static const char m_sized_text[] = "fn fill(n: i32, c: str) -> str:\n"
                                    "    let mut s = \"\"\n"
                                    "    for i in 0..n:\n"
                                    "        s = s + c\n"
                                    "    return s\n"
-                                   "fn make(n: i32, p: i32) -> i32:\n"
+                                   "fn make(n: i32, p: i32) -> str:\n"
                                    "    return fill(p, \"a\") + \"b\" + fill(n - p - 1, \"a\")\n"
                                    "fn check(n: i32) -> i32:\n"
                                    "    let base = fill(n, \"a\")\n"
@@ -1608,7 +1632,9 @@ CNOR_TEST(branches_on_logic_like_its_value)
                     (unsigned) k, (unsigned) k, (unsigned) k, (unsigned) k);
             }
             (void) snprintf(src + used, sizeof(src) - used,
-                            "    return bad\nf(%s, %s, %s) * 100 + f(%s, %s, %s)\n", values[a],
+                            "    return bad\nf(echo(%s), echo(%s), echo(%s)) * 100"
+                            " + f(echo(%s), echo(%s), echo(%s))\n",
+                            values[a],
                             values[b], values[(a + b) % 8U], values[b], values[a],
                             values[(a + 3U) % 8U]);
             if (run_sint(src) != 0)
@@ -1625,10 +1651,10 @@ CNOR_TEST(branches_on_logic_like_its_value)
 CNOR_TEST(short_circuits_a_condition_like_its_value)
 {
     const char *src = "let mut log = 0\n"
-                      "fn t(k: i32, v: i32) -> i32:\n"
+                      "fn t(k: i32, v: bool) -> bool:\n"
                       "    log = log * 10 + k\n"
                       "    return v\n"
-                      "fn bit(m: i32, k: i32) -> i32:\n"
+                      "fn bit(m: i32, k: i32) -> bool:\n"
                       "    let mut x = m\n"
                       "    for i in 0..k:\n"
                       "        x = x / 2\n"
@@ -1688,10 +1714,10 @@ CNOR_TEST(runs_a_condition_as_jumps)
     CHECK_EQ(large - small, 15U * 4U + 5U * 3U + 1U * 2U);
     CHECK_EQ(run_sint(buffer), 2);
     CHECK_EQ(run_error("let s = \"x\"\nlet n = 1\nif n == 1 and\\\n", &line), cnor_error_count);
-    CHECK_EQ(run_error("let s = \"x\"\nlet n = 1\nif n == 1 and s < 3:\n    n\n", &line),
+    CHECK_EQ(run_error("let s = echo(\"x\")\nlet n = 1\nif n == 1 and s < 3:\n    n\n", &line),
              cnor_error_type);
     CHECK_EQ(line, 3U);
-    CHECK_EQ(run_error("let s = \"x\"\nlet mut n = 1\nwhile not (n > 3 or s > 3):\n"
+    CHECK_EQ(run_error("let s = echo(\"x\")\nlet mut n = 1\nwhile not (n > 3 or s > 3):\n"
                        "    n = n + 1\n",
                        &line),
              cnor_error_type);
@@ -1735,7 +1761,7 @@ CNOR_TEST(matches_dense_arms_like_tests_in_turn)
 
                 used += (size_t) snprintf(src + used, sizeof(src) - used,
                                           "fn f%u(x: i32) -> i32:\n    let mut r = 0\n"
-                                          "    match x:\n",
+                                          "    match echo(x):\n",
                                           (unsigned) form);
                 if (form == 1U)
                 {
@@ -1768,7 +1794,8 @@ CNOR_TEST(matches_dense_arms_like_tests_in_turn)
                 for (k = 0U; k < sizeof(subjects) / sizeof(subjects[0]); ++k)
                 {
                     used += (size_t) snprintf(src + used, sizeof(src) - used,
-                                              "if f0(%s) != f1(%s):\n    bad = bad + 1\n",
+                                              "if f0(echo(%s)) != f1(echo(%s)):\n"
+                                              "    bad = bad + 1\n",
                                               subjects[k], subjects[k]);
                 }
             }
@@ -1796,7 +1823,7 @@ CNOR_TEST(takes_a_table_only_where_it_is_the_same)
                         "        3 => r = 4\n"
                         "        _ => r = 5\n"
                         "    return r\n"
-                        "f(%s)\n";
+                        "f(echo(%s))\n";
     char buffer[512];
     cnor_step_count_t first = 0U;
     cnor_step_count_t steps = 0U;
@@ -1848,7 +1875,7 @@ CNOR_TEST(updates_globals_in_place)
     CHECK_EQ(run_sint("let mut g = 0x40000000 * 0x40000000 * 8 - 1\nlet k = 1\n"
                       "g = g + k\ng\n"),
              (long long) (-9223372036854775807LL - 1LL));
-    CHECK(run_text_is("let mut g = \"a\"\nfn f() -> i32:\n    let b = \"b\"\n"
+    CHECK(run_text_is("let mut g = \"a\"\nfn f() -> str:\n    let b = \"b\"\n"
                       "    for i in 0..3:\n        g = g + b\n    return g\nf()\n",
                       "abbb"));
     CHECK_EQ(run_sint("let mut g = 10\nfn f(x: i32) -> i32:\n    g = g / x\n    g = g % 7\n"
@@ -1911,7 +1938,7 @@ CNOR_TEST(moves_every_kind_through_calls_and_slots)
                                   "    let z = g\n"
                                   "    let w = z or z\n"
                                   "    return id(echo(id(w)))\n"
-                                  "pass(%s)\n";
+                                  "pass(echo(%s))\n";
     static const struct
     {
         const char *value;
@@ -1968,7 +1995,7 @@ CNOR_TEST(moves_every_kind_through_calls_and_slots)
 #endif
     /* A string next to numbers keeps its length when the values around it
      * move (the length is the one field past the first word). */
-    CHECK(run_text_is("fn f(a: i32, b: i32, c: i32) -> i32:\n    let t = b\n"
+    CHECK(run_text_is("fn f(a: i32, b: str, c: i32) -> str:\n    let t = b\n"
                       "    let n = a + c\n    if n == 3:\n        return echo(t)\n"
                       "    return \"no\"\nf(1, \"middle\", 2)\n",
                       "middle"));

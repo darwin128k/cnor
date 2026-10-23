@@ -1,0 +1,4 @@
+# Divides; fails on line 4 for a zero divisor.
+fn divide(a: i32, b: i32) -> i32:
+    let q = a
+    return q / b

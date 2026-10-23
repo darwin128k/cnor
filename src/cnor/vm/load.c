@@ -163,6 +163,7 @@ cnor_vm_load_image(cnor_vm_t *vm, lh_u32_t size)
     vm->code = view.code;
     vm->code_size = view.code_size;
     vm->line_count = view.line_count;
+    vm->file_count = view.file_count;
     return cnor_vm_load_functions(vm, &view) && cnor_vm_load_constants(vm, &view)
            && cnor_vm_bind_natives(vm, &view) && cnor_vm_allocate(vm);
 }

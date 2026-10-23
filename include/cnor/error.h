@@ -38,6 +38,7 @@ enum cnor_error
     cnor_error_bad_escape,        /**< An unknown escape sequence in a string. */
     cnor_error_not_an_expression, /**< A value was required and none was there. */
     cnor_error_no_reals,          /**< A real literal in a build without ::LH_REAL_ENABLED. */
+    cnor_error_misplaced_import,  /**< An `import` after other items, or inside a block. */
 
     /* -- compiler -------------------------------------------------------- */
     cnor_error_unknown_name,       /**< A name that is not bound anywhere. */
@@ -52,6 +53,16 @@ enum cnor_error
     cnor_error_too_many_args,      /**< A call with more than ::CNOR_ARGC_MAX arguments. */
     cnor_error_wrong_arg_count,    /**< A call whose argument count the callee rejects. */
     cnor_error_unknown_construct,  /**< A node kind no compiler module handles. */
+    cnor_error_type_mismatch,      /**< A value whose type is not the one required there. */
+    cnor_error_operand_type,       /**< An operator given types it always fails on. */
+    cnor_error_missing_return,     /**< A function with a return type can end without one. */
+    cnor_error_not_initialized,    /**< A global used before its `let` has run. */
+    cnor_error_ambiguous_name,     /**< A name two imported files both define. */
+    cnor_error_no_such_module,     /**< An imported file the loader cannot find. */
+    cnor_error_bad_module,         /**< An imported file the loader found but cannot read. */
+    cnor_error_import_cycle,       /**< Files that import each other. */
+    cnor_error_imports_too_deep,   /**< Imports nested past ::CNOR_COMPILER_MAX_IMPORT_DEPTH. */
+    cnor_error_too_many_files,     /**< More files than a 16-bit index can name. */
 
     /* -- image ----------------------------------------------------------- */
     cnor_error_too_small,     /**< The buffer is shorter than a header. */

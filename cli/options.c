@@ -19,6 +19,10 @@ cnor_cli_options_print_help(void)
           "\n"
           "A file named `-` is the standard input (`-o -`: the standard output).\n"
           "\n"
+          "options of run and compile:\n"
+          "  -I, --import-path DIR  look for imported files in DIR too, after the\n"
+          "                         importing file's directory (repeatable, up to 16)\n"
+          "\n"
           "options of run and exec:\n"
           "  --max-steps N   stop after N instructions; 0 is unlimited (default 0)\n"
           "  --stack N       value stack, in values (default 65536)\n"
@@ -101,6 +105,35 @@ cnor_cli_options_value(const cnor_cli_args_t *args, int *i, lh_u32_t *out, lh_bo
     return cnor_cli_exit_ok;
 }
 
+/* `-I DIR` at args[*i]; moves past DIR. */
+static cnor_cli_exit_t
+cnor_cli_options_import_path(cnor_cli_options_t *out, const cnor_cli_args_t *args, int *i)
+{
+    const lh_char_t *name = args->values[*i];
+
+    if (*i + 1 >= args->count)
+    {
+        return cnor_cli_options_fail("missing value for", name);
+    }
+    if (out->import_path_count == CNOR_CLI_MAX_IMPORT_PATHS)
+    {
+        return cnor_cli_options_fail("too many import paths", args->values[*i + 1]);
+    }
+    ++*i;
+    out->import_paths[out->import_path_count++] = args->values[*i];
+    return cnor_cli_exit_ok;
+}
+
+/* Whether @p arg is `-I`, which run and compile take. */
+static lh_bool_t
+cnor_cli_options_is_import_path(const cnor_cli_options_t *out, const lh_char_t *arg)
+{
+    return out->command != cnor_cli_command_exec
+                   && (cnor_cli_options_is(arg, "-I") || cnor_cli_options_is(arg, "--import-path"))
+               ? lh_bool_true
+               : lh_bool_false;
+}
+
 /* One option of run / exec at args[*i]. */
 static cnor_cli_exit_t
 cnor_cli_options_run_option(cnor_cli_options_t *out, const cnor_cli_args_t *args, int *i)
@@ -170,9 +203,16 @@ cnor_cli_options_parse_rest(cnor_cli_options_t *out, const cnor_cli_args_t *args
             out->input = arg;
             continue;
         }
-        code = out->command == cnor_cli_command_compile
-                   ? cnor_cli_options_compile_option(out, args, &i)
-                   : cnor_cli_options_run_option(out, args, &i);
+        if (cnor_cli_options_is_import_path(out, arg))
+        {
+            code = cnor_cli_options_import_path(out, args, &i);
+        }
+        else
+        {
+            code = out->command == cnor_cli_command_compile
+                       ? cnor_cli_options_compile_option(out, args, &i)
+                       : cnor_cli_options_run_option(out, args, &i);
+        }
         if (code != cnor_cli_exit_ok)
         {
             return code;
@@ -196,6 +236,7 @@ cnor_cli_options_init(cnor_cli_options_t *self)
     self->stack_slots = CNOR_CLI_DEFAULT_STACK_SLOTS;
     self->max_depth = CNOR_CLI_DEFAULT_MAX_DEPTH;
     self->str_pool_size = CNOR_CLI_DEFAULT_STR_POOL_SIZE;
+    self->import_path_count = 0U;
 }
 
 cnor_cli_exit_t

@@ -3,17 +3,23 @@
 
 /* -- helpers --------------------------------------------------------------- */
 
-/* Whether statements are being compiled directly at the top level of the file. */
+/* Whether statements are being compiled directly at the top level of a file. */
 static lh_bool_t
 cnor_compile_at_top_level(const cnor_compiler_t *self)
 {
-    return (self->function == 0U && self->block_depth == 0U) ? lh_bool_true : lh_bool_false;
+    return (self->top_code && self->block_depth == 0U) ? lh_bool_true : lh_bool_false;
 }
 
+/* @p value, or `none` without one; its type in `self->type` either way. */
 static lh_bool_t
 cnor_compile_value_or_none(cnor_compiler_t *self, const cnor_node_t *value)
 {
-    return value != lh_null ? cnor_compile_expr(self, value) : cnor_emit_op(self, cnor_op_push_none);
+    if (value != lh_null)
+    {
+        return cnor_compile_expr(self, value);
+    }
+    self->type = cnor_static_none;
+    return cnor_emit_op(self, cnor_op_push_none);
 }
 
 lh_bool_t
@@ -27,33 +33,49 @@ cnor_compile_store(cnor_compiler_t *self, const cnor_binding_t *binding)
 
 /* -- let ------------------------------------------------------------------- */
 
+/* A top-level `let`: the global was declared by the declaration pass, so
+ * every function sees it; from here on it is initialized. */
+static lh_bool_t
+cnor_compile_let_global(cnor_compiler_t *self, const cnor_node_t *node, cnor_static_type_t type)
+{
+    const cnor_binding_t binding = cnor_scope_resolve(self, node->name);
+
+    cnor_scope_global_at(&self->scope, binding.index)->type = type;
+    if (binding.index + 1U > self->globals_ready)
+    {
+        self->globals_ready = binding.index + 1U;
+    }
+    return cnor_compile_store(self, &binding);
+}
+
 lh_bool_t
 cnor_compile_let(cnor_compiler_t *self, const cnor_node_t *node)
 {
+    const cnor_type_t annotation = node->data.let.type;
+    cnor_static_type_t type;
     cnor_binding_t binding;
+    cnor_slot_t slot;
 
     /* The initializer is compiled before the name exists, so `let x = x + 1`
-     * reads the outer `x`. */
-    if (!cnor_compile_value_or_none(self, node->data.let.init))
+     * reads the outer `x` (and fails at the top level, where the outer `x`
+     * would be this global before its `let`). */
+    if (!cnor_compile_value_or_none(self, node->data.let.init)
+        || (annotation != cnor_type_none
+            && !cnor_type_require(self, node, cnor_type_of_annotation(annotation), self->type)))
     {
         return lh_bool_false;
     }
+    type = cnor_type_of_variable(annotation, self->type);
     if (cnor_compile_at_top_level(self))
     {
-        /* Declared by the declaration pass, so every function sees it. */
-        binding = cnor_scope_resolve(self, node->name);
+        return cnor_compile_let_global(self, node, type);
     }
-    else
+    if (!cnor_scope_add_local(self, node, node->name, node->data.let.is_mutable, type, &slot))
     {
-        cnor_slot_t slot;
-
-        if (!cnor_scope_add_local(self, node, node->name, node->data.let.is_mutable, &slot))
-        {
-            return lh_bool_false;
-        }
-        binding.kind = cnor_binding_local;
-        binding.index = slot;
+        return lh_bool_false;
     }
+    binding.kind = cnor_binding_local;
+    binding.index = slot;
     return cnor_compile_store(self, &binding);
 }
 
@@ -70,9 +92,9 @@ cnor_compile_assign(cnor_compiler_t *self, const cnor_node_t *node)
         return cnor_compile_fail(self, target, cnor_error_not_assignable);
     }
     binding = cnor_scope_resolve(self, target->name);
-    if (binding.kind == cnor_binding_none)
+    if (binding.kind == cnor_binding_none || binding.kind == cnor_binding_ambiguous)
     {
-        return cnor_compile_fail_name(self, target, cnor_error_unknown_name);
+        return cnor_compile_fail_binding(self, target, &binding);
     }
     if (binding.kind != cnor_binding_local && binding.kind != cnor_binding_global)
     {
@@ -82,7 +104,13 @@ cnor_compile_assign(cnor_compiler_t *self, const cnor_node_t *node)
     {
         return cnor_compile_fail_name(self, target, cnor_error_immutable);
     }
-    return cnor_compile_expr(self, node->data.assign.value) && cnor_compile_store(self, &binding);
+    if (binding.kind == cnor_binding_global && !cnor_order_use_global(self, target, binding.index))
+    {
+        return lh_bool_false;
+    }
+    return cnor_compile_expr(self, node->data.assign.value)
+           && cnor_type_require(self, node, binding.type, self->type)
+           && cnor_compile_store(self, &binding);
 }
 
 /* -- expression statements and return -------------------------------------- */
@@ -94,17 +122,19 @@ cnor_compile_expr_stmt(cnor_compiler_t *self, const cnor_node_t *node)
     {
         return lh_bool_false;
     }
-    if (cnor_compile_at_top_level(self))
+    if (cnor_compile_at_top_level(self) && self->function == 0U)
     {
-        /* The last top-level expression is the program's result. */
+        /* The last top-level expression of the main file is the program's result. */
         return cnor_emit_insn(self, cnor_op_store_local, self->result_slot, 0U);
     }
     return cnor_emit_op(self, cnor_op_pop);
 }
 
+/* In a function with a return type, the value must have it (`none` too). */
 lh_bool_t
 cnor_compile_return(cnor_compiler_t *self, const cnor_node_t *node)
 {
     return cnor_compile_value_or_none(self, node->data.return_.value)
+           && cnor_type_require(self, node, self->returns, self->type)
            && cnor_emit_op(self, cnor_op_ret);
 }

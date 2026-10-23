@@ -1,0 +1,2 @@
+fn size() -> i32:
+    return "large"

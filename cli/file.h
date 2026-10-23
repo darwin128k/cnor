@@ -33,6 +33,19 @@ struct cnor_cli_buffer
 /** @copybrief cnor_cli_buffer */
 typedef struct cnor_cli_buffer cnor_cli_buffer_t;
 
+/**
+ * @enum cnor_cli_file_status
+ * @brief How reading a named file went.
+ */
+enum cnor_cli_file_status
+{
+    cnor_cli_file_ok = 0,      /**< Read whole. */
+    cnor_cli_file_cannot_open, /**< It cannot be opened: missing, or not allowed. */
+    cnor_cli_file_cannot_read  /**< Opened, but reading failed or it is too large. */
+};
+/** @copybrief cnor_cli_file_status */
+typedef enum cnor_cli_file_status cnor_cli_file_status_t;
+
 /** @brief True when @p path names the standard stream (`-`). */
 lh_bool_t
 cnor_cli_file_is_std(const lh_char_t *path);
@@ -44,6 +57,13 @@ cnor_cli_file_is_std(const lh_char_t *path);
  */
 lh_bool_t
 cnor_cli_file_read(const lh_char_t *path, cnor_cli_buffer_t *out);
+
+/**
+ * @brief Read all of the file @p path (never the standard input) into @p out.
+ * @return Whether it went, and if not at which step; @p out is empty then.
+ */
+cnor_cli_file_status_t
+cnor_cli_file_load(const lh_char_t *path, cnor_cli_buffer_t *out);
 
 /**
  * @brief Create or truncate @p path (or use the standard output) and write

@@ -61,7 +61,7 @@ enum cnor_keyword
     cnor_keyword_and,      /**< `and` */
     cnor_keyword_or,       /**< `or` */
     cnor_keyword_not,      /**< `not` */
-    cnor_keyword_import,   /**< `import` (reserved, no meaning yet) */
+    cnor_keyword_import,   /**< `import` */
     cnor_keyword_native,   /**< `native` */
     cnor_keyword_count
 };

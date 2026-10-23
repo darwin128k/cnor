@@ -110,6 +110,51 @@ cnor_cli_test(compile_reports_errors CODE 3
         ARGS compile ${cnor_cli_data}/compile_error.cn -o compile_error.tbc
         STDERR_REGEX "compile_error\\.cn:3: unknown name: missing\n$")
 
+# -- imports -------------------------------------------------------------------
+
+set(cnor_cli_imports ${cnor_cli_data}/imports)
+cnor_cli_test(run_imports CODE 0 ARGS run ${cnor_cli_imports}/main.cn
+        STDOUT_FILE ${cnor_cli_imports}/main.out STDERR_EMPTY)
+cnor_cli_test(run_import_path CODE 0
+        ARGS run ${cnor_cli_imports}/search.cn -I ${cnor_cli_imports}/extra
+        STDOUT_FILE ${cnor_cli_imports}/search.out STDERR_EMPTY)
+cnor_cli_test(run_import_path_long CODE 0
+        ARGS run --import-path ${cnor_cli_imports}/nothing -I ${cnor_cli_imports}/extra
+        ${cnor_cli_imports}/search.cn
+        STDOUT_FILE ${cnor_cli_imports}/search.out STDERR_EMPTY)
+cnor_cli_test(import_without_path CODE 3 ARGS run ${cnor_cli_imports}/search.cn
+        STDERR_REGEX "search\\.cn:2: imported file not found: tools\\.cn\n$")
+cnor_cli_test(import_missing CODE 3 ARGS run ${cnor_cli_imports}/missing.cn
+        STDERR_REGEX "missing\\.cn:1: imported file not found: nowhere\\.cn\n$")
+cnor_cli_test(import_cycle CODE 3 ARGS run ${cnor_cli_imports}/cycle_a.cn
+        STDERR_REGEX "cycle_b\\.cn:2: files import each other: cycle_a\\.cn\n$")
+cnor_cli_test(import_type_error CODE 3 ARGS run ${cnor_cli_imports}/type_error.cn
+        STDERR_REGEX "lib/bad_type\\.cn:2: type mismatch: expected i32, found str\n$")
+cnor_cli_test(import_runtime_error CODE 1 ARGS run ${cnor_cli_imports}/runtime_error.cn
+        STDOUT_FILE ${cnor_cli_imports}/runtime_error.out
+        STDERR_REGEX "lib/divide\\.cn:4: division by zero\n$")
+cnor_cli_test(init_order CODE 3 ARGS run ${cnor_cli_imports}/init_order.cn
+        STDERR_REGEX "init_order\\.cn:3: global used before its `let`: base\n$")
+cnor_cli_test(compile_imports CODE 0
+        ARGS compile ${cnor_cli_imports}/main.cn -o imports.tbc
+        STDERR_EMPTY SETUP cnor_cli_import_images)
+cnor_cli_test(compile_import_runtime_error CODE 0
+        ARGS compile -I ${cnor_cli_imports}/extra ${cnor_cli_imports}/runtime_error.cn
+        -o import_error.tbc
+        STDERR_EMPTY SETUP cnor_cli_import_images)
+cnor_cli_test(exec_imports CODE 0 ARGS exec imports.tbc
+        STDOUT_FILE ${cnor_cli_imports}/main.out STDERR_EMPTY REQUIRES cnor_cli_import_images)
+cnor_cli_test(exec_import_runtime_error CODE 1 ARGS exec import_error.tbc
+        STDOUT_FILE ${cnor_cli_imports}/runtime_error.out
+        STDERR_REGEX "lib/divide\\.cn:4: division by zero\n$"
+        REQUIRES cnor_cli_import_images)
+cnor_cli_test(import_path_on_exec CODE 2 ARGS exec imports.tbc -I ${cnor_cli_imports}
+        STDERR_REGEX "unknown option: -I")
+cnor_cli_test(import_path_missing_value CODE 2 ARGS run ${cnor_cli_imports}/main.cn -I
+        STDERR_REGEX "missing value for: -I")
+cnor_cli_test(help_mentions_imports CODE 0 ARGS --help STDOUT_REGEX "--import-path DIR"
+        STDERR_EMPTY)
+
 # -- bad command lines ---------------------------------------------------------
 
 cnor_cli_test(no_arguments CODE 2 STDERR_REGEX "missing command")

@@ -3,8 +3,8 @@
 
 /* -- the rule table -------------------------------------------------------- */
 
-/* Declarations were handled by the declaration pass; as statements they emit
- * nothing. */
+/* Declarations were handled by the declaration pass, imports when the files
+ * were loaded; as statements they emit nothing. */
 static lh_bool_t
 cnor_compile_nothing(cnor_compiler_t *self, const cnor_node_t *node)
 {
@@ -21,6 +21,7 @@ cnor_compile_nothing(cnor_compiler_t *self, const cnor_node_t *node)
 static const cnor_compile_rule_t m_rules[cnor_node_kind_count] = {
     [cnor_node_fn] = {lh_null, cnor_compile_nothing},
     [cnor_node_native_fn] = {lh_null, cnor_compile_nothing},
+    [cnor_node_import] = {lh_null, cnor_compile_nothing},
     [cnor_node_param] = {lh_null, lh_null},
     [cnor_node_let] = {lh_null, cnor_compile_let},
     [cnor_node_assign] = {lh_null, cnor_compile_assign},
@@ -68,6 +69,7 @@ cnor_compile_expr(cnor_compiler_t *self, const cnor_node_t *node)
         return cnor_compile_fail(self, node, cnor_error_unknown_construct);
     }
     self->emit.line = node->line;
+    self->type = cnor_static_any;
     return rule->expr(self, node);
 }
 

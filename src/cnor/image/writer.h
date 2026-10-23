@@ -26,7 +26,8 @@ struct cnor_image_parts
     cnor_count_t native_count;              /**< How many. */
     const cnor_byte_writer_t *lines;        /**< Line records, or ::lh_null. */
     cnor_count_t line_count;                /**< How many. */
-    lh_str_view_t file;                     /**< Source file name, may be empty. */
+    const lh_str_view_t *files;             /**< Source file names; 0 is the main one. */
+    cnor_count_t file_count;                /**< How many; 0 writes no file table. */
     lh_u32_t globals_count;                 /**< Global variables. */
     cnor_stack_slots_t stack_slots;         /**< Largest frame. */
 };

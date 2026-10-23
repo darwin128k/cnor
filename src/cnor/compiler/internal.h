@@ -1,13 +1,14 @@
 /**
  * @file internal.h
  * @brief Library-private: compiler state and the interfaces between its
- *        modules (emit, scope, constant, rules, expression and statement
- *        modules).
+ *        modules (files, emit, scope, types, initialization order, constant,
+ *        rules, expression and statement modules).
  */
 
 #ifndef CNOR_SRC_COMPILER_INTERNAL_H
 #define CNOR_SRC_COMPILER_INTERNAL_H
 
+#include <cnor/arena.h>
 #include <cnor/byte/writer.h>
 #include <cnor/compiler.h>
 #include <cnor/lexer.h>
@@ -16,6 +17,66 @@
 
 /** @def CNOR_COMPILER_MAX_LOOPS @brief Loops nested in one function. */
 #define CNOR_COMPILER_MAX_LOOPS CNOR_LEXER_MAX_INDENTS
+
+
+/* -- static types (type.c) ------------------------------------------------- */
+
+/**
+ * @enum cnor_static_type
+ * @brief What the compiler knows about a value's kind before it runs.
+ *
+ * `any` is "not known": a native's result, an unannotated function's result,
+ * a variable that started as `none`. Nothing is checked against `any`.
+ */
+enum cnor_static_type
+{
+    cnor_static_any = 0, /**< Unknown; accepted everywhere. */
+    cnor_static_none,    /**< `none`. */
+    cnor_static_bool,    /**< `bool` */
+    cnor_static_i32,     /**< `i32` */
+    cnor_static_u32,     /**< `u32` */
+    cnor_static_f32,     /**< `f32` */
+    cnor_static_str,     /**< `str` */
+    cnor_static_type_count
+};
+/** @copybrief cnor_static_type */
+typedef enum cnor_static_type cnor_static_type_t;
+
+/* -- files (module.c, path.c) ---------------------------------------------- */
+
+/**
+ * @typedef cnor_module_index_t
+ * @brief A source file of the compilation; 0 is the main file. Equal to its
+ *        index in the image's file table.
+ */
+typedef lh_u16_t cnor_module_index_t;
+
+/** @def CNOR_MODULE_HOST @brief The "file" the host's natives belong to. */
+#define CNOR_MODULE_HOST 0xFFFFU
+
+/**
+ * @enum cnor_module_state
+ * @brief Where a file is in the depth-first walk over the imports.
+ */
+enum cnor_module_state
+{
+    cnor_module_loading = 0, /**< Its imports are being followed: meeting it again is a cycle. */
+    cnor_module_loaded       /**< Done, with everything it imports. */
+};
+/** @copybrief cnor_module_state */
+typedef enum cnor_module_state cnor_module_state_t;
+
+/** @brief One source file: the main one or one it imports, directly or not. */
+struct cnor_module
+{
+    lh_str_view_t path;               /**< Resolved path, its identity; arena-owned. */
+    lh_str_view_t name;               /**< What the image and diagnostics call it. */
+    const cnor_node_t *program;       /**< Its top-level items. */
+    lh_array_t imports;               /**< cnor_module_index_t: the files it imports. */
+    cnor_function_index_t function;   /**< The function holding its top-level code. */
+    lh_u32_t first_global;            /**< Index of its first global. */
+    cnor_module_state_t state;        /**< Walk state. */
+};
 
 /* -- emit (emit.c) --------------------------------------------------------- */
 
@@ -66,7 +127,8 @@ enum cnor_binding_kind
     cnor_binding_local,
     cnor_binding_global,
     cnor_binding_function,
-    cnor_binding_native
+    cnor_binding_native,
+    cnor_binding_ambiguous /**< Defined by two files the current one imports. */
 };
 /** @copybrief cnor_binding_kind */
 typedef enum cnor_binding_kind cnor_binding_kind_t;
@@ -80,22 +142,32 @@ struct cnor_binding
     cnor_binding_kind_t kind; /**< What it is. */
     lh_u16_t index;           /**< Slot, global, function or native index. */
     lh_bool_t is_mutable;     /**< For variables: declared with `mut`. */
+    cnor_static_type_t type;  /**< For variables: what they hold. */
 };
 /** @copybrief cnor_binding */
 typedef struct cnor_binding cnor_binding_t;
 
+/** @brief A top-level name and the file it belongs to; first in every declaration. */
+struct cnor_decl_key
+{
+    lh_str_view_t name;         /**< Empty for a file's top-level code. */
+    cnor_module_index_t module; /**< Declaring file, or ::CNOR_MODULE_HOST. */
+};
+
 /** @brief A script function: declaration and, once compiled, its table entry. */
 struct cnor_function_decl
 {
-    lh_str_view_t name;
-    const cnor_node_t *node; /**< ::lh_null for the entry function. */
+    struct cnor_decl_key key;
+    const cnor_node_t *node; /**< ::lh_null for a file's top-level code. */
     cnor_image_function_t image;
+    lh_u32_t globals_needed; /**< 1 + highest global its code (or a callee's) uses; 0: none. */
 };
 
 /** @brief A native the script may call: declared, or known from the host. */
 struct cnor_native_decl
 {
-    lh_str_view_t name;
+    struct cnor_decl_key key;
+    const cnor_node_t *node; /**< The `native fn` declaration, ::lh_null for the host's. */
     cnor_argc_t arity_min;
     cnor_argc_t arity_max;
     lh_u16_t import; /**< Index in the image's native section, or CNOR_INDEX_NONE. */
@@ -104,8 +176,9 @@ struct cnor_native_decl
 /** @brief A global variable. */
 struct cnor_global_decl
 {
-    lh_str_view_t name;
+    struct cnor_decl_key key;
     lh_bool_t is_mutable;
+    cnor_static_type_t type; /**< Annotated, or inferred once its `let` is compiled. */
 };
 
 /** @brief A local variable of the function being compiled. */
@@ -114,21 +187,24 @@ struct cnor_local_decl
     lh_str_view_t name;
     cnor_slot_t slot;
     lh_bool_t is_mutable;
+    cnor_static_type_t type;
 };
 
 /** @brief One top-level name in ::cnor_name_index. */
 struct cnor_name_entry
 {
-    lh_str_view_t name;       /**< Empty for a free entry. */
-    lh_u32_t hash;            /**< Of the name. */
-    cnor_binding_kind_t kind; /**< Function, native or global. */
-    lh_u16_t index;           /**< In its table. */
+    lh_str_view_t name;         /**< Empty for a free entry. */
+    lh_u32_t hash;              /**< Of the name and the file. */
+    cnor_module_index_t module; /**< Declaring file. */
+    cnor_binding_kind_t kind;   /**< Function, native or global. */
+    lh_u16_t index;             /**< In its table. */
 };
 
 /**
  * @struct cnor_name_index
  * @brief Hash index of every top-level name (functions, natives, globals),
- *        which share one namespace, so a lookup does not scan the tables.
+ *        keyed by the name and its file: in one file the three share one
+ *        namespace. A lookup does not scan the tables.
  *
  * Open addressing with linear probing, kept at most half full. It only speeds
  * lookups up: when it cannot grow, it is dropped and the tables are scanned.
@@ -149,7 +225,7 @@ struct cnor_name_index
  */
 struct cnor_scope
 {
-    struct cnor_name_index top;  /**< Index of functions, natives and globals. */
+    struct cnor_name_index top;  /**< Index of functions, natives and globals by file. */
     lh_array_t functions;   /**< struct cnor_function_decl; 0 is the entry. */
     lh_array_t natives;     /**< struct cnor_native_decl. */
     lh_array_t imports;     /**< lh_str_view_t, the image's native section. */
@@ -203,6 +279,24 @@ struct cnor_loop
     cnor_label_t *continue_label;
 };
 
+/* -- initialization order (order.c) ---------------------------------------- */
+
+/** @brief A call from one function's code to another's. */
+struct cnor_call_edge
+{
+    cnor_function_index_t caller;
+    cnor_function_index_t callee;
+};
+
+/** @brief A call from a file's top-level code, checked once every function is compiled. */
+struct cnor_early_call
+{
+    cnor_function_index_t callee;
+    lh_u32_t globals_ready;     /**< Globals whose `let` has run at the call. */
+    cnor_line_t line;           /**< Of the call. */
+    cnor_module_index_t module; /**< File of the call. */
+};
+
 /**
  * @struct cnor_compiler
  * @brief The state of one compilation; lives on the stack of
@@ -220,6 +314,16 @@ struct cnor_compiler
     cnor_function_index_t function; /**< Being compiled. */
     cnor_slot_t result_slot;        /**< Entry function: last expression value. */
     lh_u32_t block_depth;           /**< 0 at the top level of a function. */
+    cnor_arena_t arena;             /**< Imported trees and resolved paths. */
+    lh_array_t modules;             /**< struct cnor_module; 0 is the main file. */
+    lh_array_t order;               /**< cnor_module_index_t, imported files first. */
+    cnor_module_index_t module;     /**< File being compiled. */
+    lh_bool_t top_code;             /**< Compiling a file's top-level code. */
+    lh_u32_t globals_ready;         /**< Top-level code: globals whose `let` has run. */
+    cnor_static_type_t type;        /**< Of the expression compiled last. */
+    cnor_static_type_t returns;     /**< Declared return type; `any` without one. */
+    lh_array_t calls;               /**< struct cnor_call_edge, from function code. */
+    lh_array_t early_calls;         /**< struct cnor_early_call, from top-level code. */
 };
 /** @copybrief cnor_compiler */
 typedef struct cnor_compiler cnor_compiler_t;
@@ -231,6 +335,50 @@ cnor_compile_fail(cnor_compiler_t *self, const cnor_node_t *node, cnor_error_t c
 /** @brief Record a failure about @p node's name. @return Always ::lh_bool_false. */
 lh_bool_t
 cnor_compile_fail_name(cnor_compiler_t *self, const cnor_node_t *node, cnor_error_t code);
+
+/** @brief Record a failure at @p line about @p name. @return Always ::lh_bool_false. */
+lh_bool_t
+cnor_compile_fail_text(cnor_compiler_t *self, cnor_line_t line, cnor_error_t code,
+                       lh_str_view_t name);
+
+/**
+ * @brief Record why @p binding cannot be used for @p node's name: an unknown
+ *        name, or one two imported files define. @return Always ::lh_bool_false.
+ */
+lh_bool_t
+cnor_compile_fail_binding(cnor_compiler_t *self, const cnor_node_t *node,
+                          const cnor_binding_t *binding);
+
+/* path.c */
+
+/** @brief Whether @p path is absolute: `/`, `\` or a drive letter first. */
+lh_bool_t
+cnor_path_is_absolute(lh_str_view_t path);
+
+/** @brief The directory part of @p path, separator included; empty for a bare name. */
+lh_str_view_t
+cnor_path_dir(lh_str_view_t path);
+
+/**
+ * @brief Join @p dir and @p path, fold `.` and `..`, write `/` between
+ *        segments; the text is allocated in @p arena.
+ */
+lh_bool_t
+cnor_path_join(cnor_arena_t *arena, lh_str_view_t dir, lh_str_view_t path, lh_str_view_t *out);
+
+/* module.c */
+void
+cnor_modules_init(cnor_compiler_t *self);
+void
+cnor_modules_deinit(cnor_compiler_t *self);
+/** @brief File @p index. */
+struct cnor_module *
+cnor_module_at(cnor_compiler_t *self, cnor_module_index_t index);
+cnor_count_t
+cnor_module_count(const cnor_compiler_t *self);
+/** @brief Load and parse every file @p program imports, directly or not, and order them. */
+lh_bool_t
+cnor_modules_load(cnor_compiler_t *self, const cnor_node_t *program);
 
 /* emit.c */
 void
@@ -287,13 +435,25 @@ cnor_scope_mark_t
 cnor_scope_enter_block(const cnor_scope_t *self);
 void
 cnor_scope_leave_block(cnor_scope_t *self, cnor_scope_mark_t mark);
+/** @brief Add the function holding the top-level code of file @p module. */
+lh_bool_t
+cnor_scope_add_module_code(cnor_compiler_t *self, cnor_module_index_t module);
 /** @brief Declare a local in the current block; @p node is for diagnostics. */
 lh_bool_t
 cnor_scope_add_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view_t name,
-                     lh_bool_t is_mutable, cnor_slot_t *slot);
-/** @brief Resolve @p name: locals, then globals, functions, natives. */
+                     lh_bool_t is_mutable, cnor_static_type_t type, cnor_slot_t *slot);
+/**
+ * @brief Resolve @p name: locals, then the current file's functions, natives
+ *        and globals, then those of the files it imports, then the host's
+ *        natives.
+ */
 cnor_binding_t
 cnor_scope_resolve(cnor_compiler_t *self, lh_str_view_t name);
+/** @brief The global declaration @p index. */
+struct cnor_global_decl *
+cnor_scope_global_at(cnor_scope_t *self, lh_u32_t index);
+cnor_count_t
+cnor_scope_global_count(const cnor_scope_t *self);
 /** @brief Native import index for native declaration @p native (adds it on first use). */
 lh_u16_t
 cnor_scope_import_native(cnor_compiler_t *self, lh_u16_t native);
@@ -312,6 +472,62 @@ cnor_constant_pool_count(const cnor_constant_pool_t *self);
 lh_bool_t
 cnor_constant_pool_intern(cnor_compiler_t *self, const cnor_node_t *node, cnor_const_kind_t kind,
                           cnor_const_index_t *index);
+
+/* type.c */
+
+/** @brief The static type an annotation names; `any` without one. */
+cnor_static_type_t
+cnor_type_of_annotation(cnor_type_t annotation);
+
+/** @brief Spelling of @p type in diagnostics. */
+const lh_char_t *
+cnor_type_name(cnor_static_type_t type);
+
+/** @brief Whether a value of type @p found may go where @p wanted is required. */
+lh_bool_t
+cnor_type_accepts(cnor_static_type_t wanted, cnor_static_type_t found);
+
+/** @brief Fail with "expected @p wanted, found @p found" unless it accepts. */
+lh_bool_t
+cnor_type_require(cnor_compiler_t *self, const cnor_node_t *node, cnor_static_type_t wanted,
+                  cnor_static_type_t found);
+
+/** @brief Type of a variable declared with @p annotation and initialized with @p init. */
+cnor_static_type_t
+cnor_type_of_variable(cnor_type_t annotation, cnor_static_type_t init);
+
+/** @brief Type of a literal node (a negated number included); `any` for other nodes. */
+cnor_static_type_t
+cnor_type_of_literal(const cnor_node_t *node);
+
+/** @brief Check `left op right` and give its type, or fail when it always fails. */
+lh_bool_t
+cnor_type_binary(cnor_compiler_t *self, const cnor_node_t *node, cnor_static_type_t left,
+                 cnor_static_type_t right, cnor_static_type_t *out);
+
+/** @brief Check `-operand` and give its type, or fail when it always fails. */
+lh_bool_t
+cnor_type_negate(cnor_compiler_t *self, const cnor_node_t *node, cnor_static_type_t operand,
+                 cnor_static_type_t *out);
+
+/** @brief Whether `==` between the two can ever hold (`none` and `any` always can). */
+lh_bool_t
+cnor_type_comparable(cnor_static_type_t a, cnor_static_type_t b);
+
+/* order.c */
+void
+cnor_order_init(cnor_compiler_t *self);
+void
+cnor_order_deinit(cnor_compiler_t *self);
+/** @brief Note a read or write of global @p index at @p node; top-level code fails early. */
+lh_bool_t
+cnor_order_use_global(cnor_compiler_t *self, const cnor_node_t *node, lh_u32_t index);
+/** @brief Note a call of script function @p callee at @p node. */
+void
+cnor_order_call(cnor_compiler_t *self, const cnor_node_t *node, cnor_function_index_t callee);
+/** @brief Once every function is compiled: no top-level call reaches a global too early. */
+lh_bool_t
+cnor_order_check(cnor_compiler_t *self);
 
 /* rules.c: the dispatch table keyed by node kind */
 
@@ -415,14 +631,11 @@ cnor_compile_match(cnor_compiler_t *self, const cnor_node_t *node);
 /* function.c */
 lh_bool_t
 cnor_compile_declaration(cnor_compiler_t *self, const cnor_node_t *node);
-/** @brief Declare every top-level function, native and global. */
+/** @brief Declare every file's top-level code, functions, natives and globals. */
 lh_bool_t
-cnor_compile_declare(cnor_compiler_t *self, const cnor_node_t *program);
-/** @brief Compile the entry function from the top-level statements. */
+cnor_compile_declare(cnor_compiler_t *self);
+/** @brief Compile every function, then check the order globals are used in. */
 lh_bool_t
-cnor_compile_entry(cnor_compiler_t *self, const cnor_node_t *program);
-/** @brief Compile every declared script function after the entry. */
-lh_bool_t
-cnor_compile_functions(cnor_compiler_t *self);
+cnor_compile_bodies(cnor_compiler_t *self);
 
 #endif /* CNOR_SRC_COMPILER_INTERNAL_H */

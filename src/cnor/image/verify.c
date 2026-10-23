@@ -256,9 +256,11 @@ static lh_bool_t
 cnor_verify_frame(struct cnor_verify *self)
 {
     const cnor_image_function_t *function = &self->function;
+    const cnor_count_t files = self->view->file_count > 0U ? self->view->file_count : 1U;
 
     if (function->size == 0U || function->slot_count < function->param_count
-        || (lh_u32_t) function->slot_count + function->max_stack > self->view->header.stack_slots)
+        || (lh_u32_t) function->slot_count + function->max_stack > self->view->header.stack_slots
+        || function->file >= files)
     {
         return cnor_verify_fail(self, cnor_error_bad_header, function->entry);
     }

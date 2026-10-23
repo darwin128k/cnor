@@ -142,4 +142,8 @@ cnor_parser_match(cnor_parser_t *self);
 cnor_node_t *
 cnor_parser_fn(cnor_parser_t *self);
 
+/** @brief `import "path"`, at the top of a file (stmt.c). */
+cnor_node_t *
+cnor_parser_import(cnor_parser_t *self);
+
 #endif /* CNOR_SRC_PARSER_INTERNAL_H */

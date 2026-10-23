@@ -1,6 +1,6 @@
 /**
  * @file vm.h
- * @brief The interpreter (::cnor_vm_t): load a v3 image, run it, read the result.
+ * @brief The interpreter (::cnor_vm_t): load a v4 image, run it, read the result.
  *
  * Loading checks the image (header, sections, verifier), binds every native
  * import by name against the host table, decodes the constants and allocates
@@ -117,6 +117,7 @@ struct cnor_vm
     cnor_step_count_t steps;           /**< Instructions executed by the current run. */
     lh_value_t result;                 /**< What the last run produced. */
     cnor_diag_t diag;                  /**< Why the last load or run failed. */
+    cnor_count_t file_count;           /**< File table entries; last, it is never hot. */
 };
 /** @copybrief cnor_vm */
 typedef struct cnor_vm cnor_vm_t;
@@ -176,9 +177,18 @@ cnor_vm_get_result(const cnor_vm_t *self);
 const lh_value_t *
 cnor_vm_get_global(const cnor_vm_t *self, cnor_global_index_t index);
 
-/** @brief Source file the loaded image names, or an empty view. */
+/** @brief Main source file the loaded image names, or an empty view. */
 lh_str_view_t
 cnor_vm_get_file(const cnor_vm_t *self);
+
+/**
+ * @brief Source file of the code at address @p addr: the main file or one it
+ *        imports, or an empty view without a file table. A run failure's
+ *        address is ::cnor_diag_get_offset; its diagnostic also keeps a copy
+ *        (::cnor_diag_get_file), cut to ::CNOR_DIAG_FILE_CAPACITY bytes.
+ */
+lh_str_view_t
+cnor_vm_get_file_at(const cnor_vm_t *self, cnor_code_addr_t addr);
 
 /** @brief Source line of code address @p addr, or 0 without a line table. */
 cnor_line_t

@@ -14,12 +14,19 @@ cnor_compile_logic(cnor_compiler_t *self, const cnor_node_t *node)
 {
     const cnor_op_t skip =
         node->data.binary.op == cnor_binary_and ? cnor_op_jmp_if_false : cnor_op_jmp_if_true;
+    cnor_static_type_t left;
     cnor_label_t end;
 
     cnor_label_init(&end);
-    return cnor_compile_expr(self, node->data.binary.left) && cnor_emit_op(self, cnor_op_dup)
-           && cnor_emit_jump(self, skip, &end) && cnor_emit_op(self, cnor_op_pop)
-           && cnor_compile_expr(self, node->data.binary.right) && cnor_emit_bind(self, &end);
+    if (!cnor_compile_expr(self, node->data.binary.left))
+    {
+        return lh_bool_false;
+    }
+    left = self->type;
+    return cnor_emit_op(self, cnor_op_dup) && cnor_emit_jump(self, skip, &end)
+           && cnor_emit_op(self, cnor_op_pop) && cnor_compile_expr(self, node->data.binary.right)
+           && cnor_emit_bind(self, &end)
+           && cnor_type_binary(self, node, left, self->type, &self->type);
 }
 
 /*

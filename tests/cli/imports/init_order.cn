@@ -1,0 +1,4 @@
+fn total() -> i32:
+    return base * 2
+let early = total()
+let base = 21

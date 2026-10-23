@@ -220,6 +220,25 @@ cnor_compile_match_table(cnor_compiler_t *self, const cnor_node_t *node, cnor_sl
 
 /* -- match ----------------------------------------------------------------- */
 
+/* Every pattern must be able to equal a subject of type @p subject. */
+static lh_bool_t
+cnor_match_check_patterns(cnor_compiler_t *self, const cnor_node_t *arm,
+                          cnor_static_type_t subject)
+{
+    for (; arm != lh_null; arm = arm->next)
+    {
+        const cnor_node_t *pattern = arm->data.arm.pattern;
+
+        if (pattern != lh_null
+            && !cnor_type_comparable(subject, cnor_type_of_literal(pattern))
+            && !cnor_type_require(self, pattern, subject, cnor_type_of_literal(pattern)))
+        {
+            return lh_bool_false;
+        }
+    }
+    return lh_bool_true;
+}
+
 lh_bool_t
 cnor_compile_match(cnor_compiler_t *self, const cnor_node_t *node)
 {
@@ -233,7 +252,9 @@ cnor_compile_match(cnor_compiler_t *self, const cnor_node_t *node)
 
     cnor_label_init(&end);
     ok = cnor_compile_expr(self, node->data.match.subject)
-         && cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false, &subject)
+         && cnor_match_check_patterns(self, node->data.match.arms, self->type)
+         && cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false, self->type,
+                                 &subject)
          && cnor_emit_insn(self, cnor_op_store_local, subject, 0U);
     if (ok && cnor_match_is_dense(node->data.match.arms, &first, &count))
     {

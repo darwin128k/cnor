@@ -3,8 +3,10 @@
 
 /* -- arguments ------------------------------------------------------------- */
 
+/* Compile the arguments; with @p params (a declaration's parameter list),
+ * each must have its parameter's type. */
 static lh_bool_t
-cnor_compile_args(cnor_compiler_t *self, const cnor_node_t *node)
+cnor_compile_args(cnor_compiler_t *self, const cnor_node_t *node, const cnor_node_t *params)
 {
     const cnor_node_t *arg;
 
@@ -14,8 +16,25 @@ cnor_compile_args(cnor_compiler_t *self, const cnor_node_t *node)
         {
             return lh_bool_false;
         }
+        if (params != lh_null)
+        {
+            if (!cnor_type_require(self, arg,
+                                   cnor_type_of_annotation(params->data.param.type), self->type))
+            {
+                return lh_bool_false;
+            }
+            params = params->next;
+        }
     }
     return lh_bool_true;
+}
+
+/* The type a declaration's `->` names; `any` without one. */
+static cnor_static_type_t
+cnor_compile_result_type(const cnor_node_t *declaration)
+{
+    return declaration != lh_null ? cnor_type_of_annotation(declaration->data.fn.returns)
+                                  : cnor_static_any;
 }
 
 /* -- callees --------------------------------------------------------------- */
@@ -24,13 +43,19 @@ static lh_bool_t
 cnor_compile_call_function(cnor_compiler_t *self, const cnor_node_t *node, lh_u16_t index)
 {
     const struct cnor_function_decl *callee = cnor_scope_function_at(&self->scope, index);
+    const cnor_node_t *declaration = callee->node;
 
     if (callee->image.param_count != node->data.call.argc)
     {
         return cnor_compile_fail_name(self, node, cnor_error_wrong_arg_count);
     }
-    return cnor_compile_args(self, node)
-           && cnor_emit_insn(self, cnor_op_call, index, node->data.call.argc);
+    if (!cnor_compile_args(self, node, declaration->data.fn.params))
+    {
+        return lh_bool_false;
+    }
+    cnor_order_call(self, node, index);
+    self->type = cnor_compile_result_type(declaration);
+    return cnor_emit_insn(self, cnor_op_call, index, node->data.call.argc);
 }
 
 static lh_bool_t
@@ -43,10 +68,13 @@ cnor_compile_call_native(cnor_compiler_t *self, const cnor_node_t *node, lh_u16_
     {
         return cnor_compile_fail_name(self, node, cnor_error_wrong_arg_count);
     }
-    if (!cnor_compile_args(self, node))
+    /* A `native fn` declaration states types; the host's table does not. */
+    if (!cnor_compile_args(self, node,
+                           native->node != lh_null ? native->node->data.fn.params : lh_null))
     {
         return lh_bool_false;
     }
+    self->type = cnor_compile_result_type(native->node);
     return cnor_emit_insn(self, cnor_op_native, cnor_scope_import_native(self, index), argc);
 }
 
@@ -64,7 +92,13 @@ cnor_compile_call_builtin(cnor_compiler_t *self, const cnor_node_t *node)
     {
         return cnor_compile_fail_name(self, node, cnor_error_wrong_arg_count);
     }
-    return cnor_compile_args(self, node) && cnor_emit_op(self, cnor_op_len);
+    if (!cnor_compile_args(self, node, lh_null)
+        || !cnor_type_require(self, node->data.call.args, cnor_static_str, self->type))
+    {
+        return lh_bool_false;
+    }
+    self->type = cnor_static_i32;
+    return cnor_emit_op(self, cnor_op_len);
 }
 
 lh_bool_t
@@ -82,6 +116,6 @@ cnor_compile_call(cnor_compiler_t *self, const cnor_node_t *node)
         return cnor_compile_call_builtin(self, node);
     default:
         /* A variable: there are no function values to call. */
-        return cnor_compile_fail_name(self, node, cnor_error_unknown_name);
+        return cnor_compile_fail_binding(self, node, &binding);
     }
 }

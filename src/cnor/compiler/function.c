@@ -19,17 +19,27 @@ cnor_compile_declaration(cnor_compiler_t *self, const cnor_node_t *node)
     }
 }
 
-lh_bool_t
-cnor_compile_declare(cnor_compiler_t *self, const cnor_node_t *program)
+/* One file: the function holding its top-level code (the main file's is
+ * function 0, added first), then its functions, natives and globals. */
+static lh_bool_t
+cnor_compile_declare_module(cnor_compiler_t *self, cnor_module_index_t index)
 {
-    /* Function 0 is the entry point: the top-level statements. */
-    if (!cnor_scope_add_function(self, lh_null))
+    struct cnor_module *module = cnor_module_at(self, index);
+    const cnor_node_t *node;
+
+    self->module = index;
+    if (index != 0U)
     {
-        return lh_bool_false;
+        module->function = (cnor_function_index_t) cnor_scope_function_count(&self->scope);
+        if (!cnor_scope_add_module_code(self, index))
+        {
+            return lh_bool_false;
+        }
     }
-    for (; program != lh_null; program = program->next)
+    module->first_global = cnor_scope_global_count(&self->scope);
+    for (node = module->program; node != lh_null; node = node->next)
     {
-        if (!cnor_compile_declaration(self, program))
+        if (!cnor_compile_declaration(self, node))
         {
             return lh_bool_false;
         }
@@ -37,17 +47,158 @@ cnor_compile_declare(cnor_compiler_t *self, const cnor_node_t *program)
     return lh_bool_true;
 }
 
+lh_bool_t
+cnor_compile_declare(cnor_compiler_t *self)
+{
+    const lh_usize_t count = lh_array_get_size(&self->order);
+    lh_usize_t i;
+
+    /* Function 0 is the entry point: the main file's top-level code. */
+    if (!cnor_scope_add_module_code(self, 0U))
+    {
+        return lh_bool_false;
+    }
+    /* Imported files first, so globals are numbered in the order their
+     * `let`s run. */
+    for (i = 0U; i < count; ++i)
+    {
+        if (!cnor_compile_declare_module(
+                self, *(const cnor_module_index_t *) lh_array_get_ptr(&self->order, i)))
+        {
+            return lh_bool_false;
+        }
+    }
+    return lh_bool_true;
+}
+
+/* -- returns --------------------------------------------------------------- */
+
+static lh_bool_t
+cnor_compile_list_returns(const cnor_node_t *body);
+
+/* Whether @p body holds a `break` of the loop it is the body of. */
+static lh_bool_t
+cnor_compile_list_breaks(const cnor_node_t *body)
+{
+    const cnor_node_t *arm;
+
+    for (; body != lh_null; body = body->next)
+    {
+        switch (body->kind)
+        {
+        case cnor_node_break:
+            return lh_bool_true;
+        case cnor_node_if:
+            if (cnor_compile_list_breaks(body->data.if_.then_body)
+                || cnor_compile_list_breaks(body->data.if_.else_body))
+            {
+                return lh_bool_true;
+            }
+            break;
+        case cnor_node_match:
+            for (arm = body->data.match.arms; arm != lh_null; arm = arm->next)
+            {
+                if (cnor_compile_list_breaks(arm->data.arm.body))
+                {
+                    return lh_bool_true;
+                }
+            }
+            break;
+        default:
+            /* A `break` in an inner loop ends that loop. */
+            break;
+        }
+    }
+    return lh_bool_false;
+}
+
+/* A `match` returns when it has a `_` and every arm returns. */
+static lh_bool_t
+cnor_compile_match_returns(const cnor_node_t *node)
+{
+    const cnor_node_t *arm;
+    lh_bool_t has_default = lh_bool_false;
+
+    for (arm = node->data.match.arms; arm != lh_null; arm = arm->next)
+    {
+        if (!cnor_compile_list_returns(arm->data.arm.body))
+        {
+            return lh_bool_false;
+        }
+        has_default = has_default || arm->data.arm.pattern == lh_null;
+    }
+    return has_default;
+}
+
+/* Whether running @p node can never go on to the next statement. */
+static lh_bool_t
+cnor_compile_stmt_returns(const cnor_node_t *node)
+{
+    switch (node->kind)
+    {
+    case cnor_node_return:
+        return lh_bool_true;
+    case cnor_node_if:
+        return (node->data.if_.else_body != lh_null
+                && cnor_compile_list_returns(node->data.if_.then_body)
+                && cnor_compile_list_returns(node->data.if_.else_body))
+                   ? lh_bool_true
+                   : lh_bool_false;
+    case cnor_node_match:
+        return cnor_compile_match_returns(node);
+    case cnor_node_while:
+        /* Only `while true` without a `break` never ends; any other loop may. */
+        return (node->data.while_.cond->kind == cnor_node_true
+                && !cnor_compile_list_breaks(node->data.while_.body))
+                   ? lh_bool_true
+                   : lh_bool_false;
+    default:
+        return lh_bool_false;
+    }
+}
+
+/*
+ * Whether running @p body can never reach its end. The rule is the one a
+ * reader applies, not the emitter's reachability: some statement returns, an
+ * `if` returns when both branches do, a `match` when it has a `_` and every
+ * arm does. A `for` or a `while` may finish, unless it is `while true` with no
+ * `break` of its own.
+ */
+static lh_bool_t
+cnor_compile_list_returns(const cnor_node_t *body)
+{
+    for (; body != lh_null; body = body->next)
+    {
+        if (cnor_compile_stmt_returns(body))
+        {
+            return lh_bool_true;
+        }
+    }
+    return lh_bool_false;
+}
+
 /* -- function frames ------------------------------------------------------- */
 
 static void
 cnor_compile_begin_function(cnor_compiler_t *self, cnor_function_index_t index)
 {
+    struct cnor_function_decl *function = cnor_scope_function_at(&self->scope, index);
+
     self->function = index;
+    self->module = function->key.module;
+    self->top_code = lh_bool_false;
+    self->returns = cnor_static_any;
     self->block_depth = 0U;
     self->loop_depth = 0U;
     cnor_scope_begin_function(&self->scope);
     cnor_emit_begin_function(&self->emit);
-    cnor_scope_function_at(&self->scope, index)->image.entry = cnor_emit_get_addr(&self->emit);
+    if (cnor_module_count(self) > 1U)
+    {
+        /* Functions are moved into index order when the image is written
+         * (see compiler.c), so each needs a line record of its own. */
+        self->emit.last_line = 0U;
+    }
+    function->image.entry = cnor_emit_get_addr(&self->emit);
 }
 
 static lh_bool_t
@@ -72,7 +223,8 @@ cnor_compile_params(cnor_compiler_t *self, const cnor_node_t *param)
     {
         cnor_slot_t slot;
 
-        if (!cnor_scope_add_local(self, param, param->name, lh_bool_false, &slot))
+        if (!cnor_scope_add_local(self, param, param->name, lh_bool_false,
+                                  cnor_type_of_annotation(param->data.param.type), &slot))
         {
             return lh_bool_false;
         }
@@ -80,28 +232,83 @@ cnor_compile_params(cnor_compiler_t *self, const cnor_node_t *param)
     return lh_bool_true;
 }
 
-/* -- bodies ---------------------------------------------------------------- */
+/* -- top-level code -------------------------------------------------------- */
 
-lh_bool_t
-cnor_compile_entry(cnor_compiler_t *self, const cnor_node_t *program)
+/* Start a file's top-level code: the globals of the files before it are ready. */
+static void
+cnor_compile_begin_top_code(cnor_compiler_t *self, cnor_function_index_t index)
 {
-    cnor_compile_begin_function(self, 0U);
-    if (!cnor_scope_add_local(self, program, lh_str_view_empty(), lh_bool_true,
-                              &self->result_slot))
+    cnor_compile_begin_function(self, index);
+    self->top_code = lh_bool_true;
+    self->globals_ready = cnor_module_at(self, self->module)->first_global;
+}
+
+static lh_bool_t
+cnor_compile_statements(cnor_compiler_t *self, const cnor_node_t *node)
+{
+    for (; node != lh_null; node = node->next)
     {
-        return lh_bool_false;
-    }
-    for (; program != lh_null; program = program->next)
-    {
-        if (!cnor_compile_stmt(self, program))
+        if (!cnor_compile_stmt(self, node))
         {
             return lh_bool_false;
         }
+    }
+    return lh_bool_true;
+}
+
+/* The top-level code of every imported file, imported ones first, each once;
+ * the lines are the main file's first `import`. */
+static lh_bool_t
+cnor_compile_module_calls(cnor_compiler_t *self)
+{
+    const lh_usize_t count = lh_array_get_size(&self->order);
+    lh_usize_t i;
+
+    self->emit.line = cnor_module_at(self, 0U)->program->line;
+    for (i = 0U; i < count; ++i)
+    {
+        const cnor_module_index_t index =
+            *(const cnor_module_index_t *) lh_array_get_ptr(&self->order, i);
+
+        if (index != 0U
+            && (!cnor_emit_insn(self, cnor_op_call, cnor_module_at(self, index)->function, 0U)
+                || !cnor_emit_op(self, cnor_op_pop)))
+        {
+            return lh_bool_false;
+        }
+    }
+    return lh_bool_true;
+}
+
+/* Function 0: the imported files' code, then the main file's top level. */
+static lh_bool_t
+cnor_compile_entry(cnor_compiler_t *self)
+{
+    const cnor_node_t *program = cnor_module_at(self, 0U)->program;
+
+    cnor_compile_begin_top_code(self, 0U);
+    if (!cnor_scope_add_local(self, program, lh_str_view_empty(), lh_bool_true, cnor_static_any,
+                              &self->result_slot)
+        || !cnor_compile_module_calls(self) || !cnor_compile_statements(self, program))
+    {
+        return lh_bool_false;
     }
     /* Falling off the end returns the last top-level expression's value. */
     return cnor_emit_insn(self, cnor_op_load_local, self->result_slot, 0U)
            && cnor_emit_op(self, cnor_op_ret) && cnor_compile_end_function(self, lh_null);
 }
+
+/* An imported file's top-level code, a function of its own run for its effects. */
+static lh_bool_t
+cnor_compile_module_code(cnor_compiler_t *self, cnor_function_index_t index)
+{
+    cnor_compile_begin_top_code(self, index);
+    return cnor_compile_statements(self, cnor_module_at(self, self->module)->program)
+           && cnor_emit_op(self, cnor_op_push_none) && cnor_emit_op(self, cnor_op_ret)
+           && cnor_compile_end_function(self, lh_null);
+}
+
+/* -- bodies ---------------------------------------------------------------- */
 
 static lh_bool_t
 cnor_compile_function(cnor_compiler_t *self, cnor_function_index_t index)
@@ -109,26 +316,70 @@ cnor_compile_function(cnor_compiler_t *self, cnor_function_index_t index)
     const cnor_node_t *node = cnor_scope_function_at(&self->scope, index)->node;
 
     cnor_compile_begin_function(self, index);
+    self->returns = cnor_type_of_annotation(node->data.fn.returns);
     self->emit.line = node->line;
-    /* Falling off the end of a function returns `none`. */
-    return cnor_compile_params(self, node->data.fn.params)
-           && cnor_compile_block(self, node->data.fn.body)
-           && cnor_emit_op(self, cnor_op_push_none) && cnor_emit_op(self, cnor_op_ret)
+    if (!cnor_compile_params(self, node->data.fn.params)
+        || !cnor_compile_block(self, node->data.fn.body))
+    {
+        return lh_bool_false;
+    }
+    /* Falling off the end of a function returns `none`, which a function with
+     * a return type may not do. */
+    if (node->data.fn.returns != cnor_type_none && !cnor_compile_list_returns(node->data.fn.body))
+    {
+        return cnor_compile_fail_name(self, node, cnor_error_missing_return);
+    }
+    return cnor_emit_op(self, cnor_op_push_none) && cnor_emit_op(self, cnor_op_ret)
            && cnor_compile_end_function(self, node);
 }
 
+static lh_bool_t
+cnor_compile_body(cnor_compiler_t *self, cnor_function_index_t index)
+{
+    if (cnor_scope_function_at(&self->scope, index)->node != lh_null)
+    {
+        return cnor_compile_function(self, index);
+    }
+    return index == 0U ? cnor_compile_entry(self) : cnor_compile_module_code(self, index);
+}
+
+/*
+ * Compile every function. A file's top-level code comes before its functions,
+ * which see the types its `let`s give the globals, and imported files come
+ * before the files importing them: so the main file's code (function 0) is
+ * compiled after the imported files and before the main file's functions.
+ * With a single file that is index order.
+ */
 lh_bool_t
-cnor_compile_functions(cnor_compiler_t *self)
+cnor_compile_bodies(cnor_compiler_t *self)
 {
     const cnor_count_t count = cnor_scope_function_count(&self->scope);
+    cnor_count_t main_first = 1U;
     cnor_count_t i;
 
-    for (i = 1U; i < count; ++i)
+    while (main_first < count
+           && cnor_scope_function_at(&self->scope, (cnor_function_index_t) main_first)->key.module
+                  != 0U)
     {
-        if (!cnor_compile_function(self, (cnor_function_index_t) i))
+        ++main_first;
+    }
+    for (i = 1U; i < main_first; ++i)
+    {
+        if (!cnor_compile_body(self, (cnor_function_index_t) i))
         {
             return lh_bool_false;
         }
     }
-    return lh_bool_true;
+    if (!cnor_compile_body(self, 0U))
+    {
+        return lh_bool_false;
+    }
+    for (i = main_first; i < count; ++i)
+    {
+        if (!cnor_compile_body(self, (cnor_function_index_t) i))
+        {
+            return lh_bool_false;
+        }
+    }
+    return cnor_order_check(self);
 }

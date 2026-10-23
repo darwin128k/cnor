@@ -5,7 +5,7 @@ public header under `include/cnor/` and its implementation under `src/cnor/`;
 headers under `src/cnor/` are library-private.
 
 ```
-source text
+source text (the main file; imported files through the host's loader)
    |  lexer      include/cnor/lexer.h        src/cnor/lexer/
    v
 tokens (pulled one at a time)
@@ -14,15 +14,15 @@ tokens (pulled one at a time)
 AST in an arena  include/cnor/ast.h, arena.h
    |  compiler   include/cnor/compiler.h     src/cnor/compiler/
    v
-image (.tbc v3)  include/cnor/image.h        src/cnor/image/
+image (.tbc v4)  include/cnor/image.h        src/cnor/image/
    |  loader + verifier                      src/cnor/image/view.c, verify.c
    v
 VM               include/cnor/vm.h           src/cnor/vm/
 ```
 
 Everything reports failures through one type, `cnor_diag_t` (code, line,
-offset, copied name), with codes in `cnor_error_t` and messages from
-`cnor_error_get_message`.
+offset, copied name or detail, copied file name), with codes in
+`cnor_error_t` and messages from `cnor_error_get_message`.
 
 ## Modules
 
@@ -37,7 +37,7 @@ offset, copied name), with codes in `cnor_error_t` and messages from
 | parser | `parser.h`, `src/cnor/parser/{parser,token,literal,expr,stmt,control,fn}.c` | Recursive descent with a statement rule table and a binary precedence table |
 | op | `op.h`, `op.c` | The opcode enum, the info table (operands, size, stack effect, flags), the operand-form mapping and the shared decoder |
 | byte | `src/cnor/byte/{reader,writer}.{h,c}` | Little-endian byte writer over `lh_array_t`, bounds-checked sticky reader |
-| image | `image.h`, `src/cnor/image/{header,view,names,writer,verify}.c` | v3 format: header read, section views, line lookup, writer, verifier |
+| image | `image.h`, `src/cnor/image/{header,view,names,writer,verify}.c` | v4 format: header read, section views, line and file lookup, writer, verifier |
 | native | `native.h`, `native/*.h`, `native.c` | Host native entries and tables, lookup by name, arity check |
 | compiler | `compiler.h`, `src/cnor/compiler/*.c` | AST to image; see below |
 | vm | `vm.h`, `vm/stack.h`, `vm/str_pool.h`, `src/cnor/vm/**` | Loader, dispatch loop with a handler table, opcode families under `vm/op/` |
@@ -48,11 +48,15 @@ offset, copied name), with codes in `cnor_error_t` and messages from
 
 | File | Role |
 |---|---|
-| `compiler.c` | Entry points, state setup, building the image parts, diagnostics |
-| `function.c` | Declaration pass (function 0 = top level, then `fn`, `native fn`, top-level `let`), entry function, function bodies, frame sizes |
+| `compiler.c` | Entry points, state setup, the pipeline (load files, declare, compile bodies, check the order of globals, write), moving the entry function's code to the front, building the image parts, diagnostics with their file |
+| `module.c` | The files of a compilation: resolving each `import`, loading through the host's loader, parsing once, finding cycles, ordering files after what they import |
+| `path.c` | Import paths by text: absolute or not, directory part, joining with `.` / `..` folded and `/` separators |
+| `function.c` | Declaration pass (function 0 = the main file's top level; per file in import order: a function for its top-level code, then `fn`, `native fn`, top-level `let`), the entry function (calls to each imported file's code, then the main file's statements), function bodies, the "always returns" rule, frame sizes |
+| `type.c` | Static types: names, what accepts what, the types of literals, operators and variables, `type_mismatch` / `operand_type` details |
+| `order.c` | Globals used before their `let`: checked directly in top-level code; for functions, the highest global each names and the call graph, checked at each top-level call once every body is compiled |
 | `rules.c` | **The dispatch table by node kind**, `cnor_compile_expr` / `cnor_compile_stmt` / `cnor_compile_block` |
 | `emit.c` | Byte emission, stack-depth tracking from the op table, labels and jump patch chains, line table |
-| `scope.c` | Functions, natives, imports, globals, block-scoped locals, name resolution; a hash index over the top-level names keeps resolution constant-time in large files |
+| `scope.c` | Functions, natives, imports, globals, block-scoped locals, name resolution; top-level names are keyed by (file, name) in a hash index, so resolution stays constant-time in large files; a file sees its own names, then those of the files it imports directly (two of those defining a name: ambiguous) |
 | `constant.c` | Constant pool with de-duplication |
 | `expr.c` | Literals, names, unary and binary operators (choosing the operand form, see below), indexing |
 | `logic.c` | Short-circuit `and` / `or` as values, and conditions (`and` / `or` / `not` in `if` and `while`) as jumps |
@@ -64,6 +68,22 @@ Two passes: the declaration pass registers every function, native and global,
 so calls and globals may appear before their definition; the second pass
 compiles bodies. Function 0 holds the top-level statements and a hidden result
 slot (slot 0) that receives each top-level expression statement's value.
+
+With imports, `module.c` first loads every file depth first, and the files are
+declared in that order (imported files first), so global indices follow the
+order the `let`s run in. Bodies are compiled file by file in the same order, a
+file's top-level code before its functions, so unannotated globals have their
+inferred types before any function uses them. The main file's code
+(function 0) is therefore compiled after the imported files; `compiler.c`
+moves it, and its line records, to the front of the code before writing the
+image (jumps are relative and calls use indices, so nothing is patched). Each
+function starts a line record of its own in that case. A single file compiles
+exactly as before: function 0 first, the same code.
+
+Types are tracked alongside code generation: each expression leaves its
+static type in `cnor_compiler_t.type`, each variable keeps one, and the
+checks in `type.c` run where the code is emitted. Code generation does not
+look at the types.
 
 Stack depth is tracked while emitting: every instruction applies its stack
 effect from the op table, labels remember the depth at their first jump, and
@@ -113,8 +133,12 @@ initializers, so a missing entry is visible in one place.
    statements. A node kind without a handler fails with `unknown_construct`.
    A binary operator that maps to one instruction is one row in
    `m_binary_ops` (`src/cnor/compiler/expr.c`).
-5. **Tests**: a parser case in `tests/test_parser.c` and an end-to-end case in
-   `tests/test_compiler.c`.
+5. **Types**: give the construct's expressions a static type in
+   `self->type` and check its operands with `cnor_type_require` /
+   `cnor_type_binary` (`src/cnor/compiler/type.c`).
+6. **Tests**: a parser case in `tests/test_parser.c` and an end-to-end case in
+   `tests/test_compiler.c` (`tests/test_language.c` for typing, the order of
+   globals and imports).
 
 Most constructs need no new instruction: control flow is labels and jumps
 (`cnor_label_init`, `cnor_emit_jump`, `cnor_emit_bind`), and the emitter keeps
@@ -413,6 +437,7 @@ host like any other, written only against the public headers:
 | `options.{h,c}` | Subcommands, options, defaults, `--help`, the exit codes |
 | `command.{h,c}` | `run`, `compile`, `exec`: compile, load, run, report `file:line: message` |
 | `file.{h,c}` | Whole-file reads and writes through lh's file API (UTF-8 paths, UTF-16 calls on Windows); `-` is the standard stream |
+| `loader.{h,c}` | The compiler's import loader on the file system (a file that cannot be opened is not found, one that cannot be read is an error), `-I` search paths, the UTF-8 byte order mark |
 | `natives.{h,c}` | `print`, `println`, `eprint`, `eprintln`; their `ctx` holds the two streams |
 | `text.{h,c}` | How a value is written, for the natives and the result |
 

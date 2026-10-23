@@ -161,6 +161,39 @@ cnor_parser_expr_or_assign(cnor_parser_t *self)
     return node;
 }
 
+/* -- import ---------------------------------------------------------------- */
+
+cnor_node_t *
+cnor_parser_import(cnor_parser_t *self)
+{
+    cnor_node_t *node = cnor_parser_node(self, cnor_node_import);
+    cnor_node_t *path;
+
+    if (node == lh_null)
+    {
+        return lh_null;
+    }
+    cnor_parser_advance(self);
+    if (!cnor_parser_at(self, cnor_token_string))
+    {
+        return cnor_parser_fail(self, cnor_error_unexpected_token);
+    }
+    path = cnor_parser_literal(self);
+    if (path == lh_null)
+    {
+        return lh_null;
+    }
+    node->name = path->name;
+    return cnor_parser_end_simple(self, lh_bool_false) ? node : lh_null;
+}
+
+/* An `import` inside a block. */
+static cnor_node_t *
+cnor_parser_misplaced_import(cnor_parser_t *self)
+{
+    return cnor_parser_fail(self, cnor_error_misplaced_import);
+}
+
 /* -- statement table ------------------------------------------------------- */
 
 /**
@@ -183,6 +216,7 @@ static const struct cnor_parser_stmt_rule m_stmt_rules[] = {
     {cnor_keyword_while, cnor_parser_while, lh_bool_true},
     {cnor_keyword_for, cnor_parser_for, lh_bool_true},
     {cnor_keyword_match, cnor_parser_match, lh_bool_true},
+    {cnor_keyword_import, cnor_parser_misplaced_import, lh_bool_false},
 };
 
 #define CNOR_PARSER_STMT_RULE_COUNT (sizeof(m_stmt_rules) / sizeof(m_stmt_rules[0]))

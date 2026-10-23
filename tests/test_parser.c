@@ -493,6 +493,38 @@ CNOR_TEST(unescapes_a_string)
     done(&p);
 }
 
+CNOR_TEST(reads_imports_at_the_top_of_a_file_only)
+{
+    parsed_t p;
+
+    parse(&p, "# header\nimport \"a.cn\"\nimport \"lib/b.cn\";\nlet x = 1\n");
+    REQUIRE(p.tree != lh_null);
+    CHECK_EQ(p.tree->kind, cnor_node_import);
+    CHECK(name_is(p.tree, "a.cn"));
+    CHECK_EQ(p.tree->line, 2U);
+    REQUIRE(p.tree->next != lh_null);
+    CHECK_EQ(p.tree->next->kind, cnor_node_import);
+    CHECK(name_is(p.tree->next, "lib/b.cn"));
+    CHECK_EQ(p.tree->next->next->kind, cnor_node_let);
+    done(&p);
+    parse(&p, "let x = 1\nimport \"a.cn\"\n");
+    CHECK(p.tree == lh_null);
+    CHECK_EQ(p.error, cnor_error_misplaced_import);
+    CHECK_EQ(p.line, 2U);
+    done(&p);
+    parse(&p, "fn f():\n    import \"a.cn\"\n");
+    CHECK_EQ(p.error, cnor_error_misplaced_import);
+    done(&p);
+    parse(&p, "if true:\n    import \"a.cn\"\n");
+    CHECK_EQ(p.error, cnor_error_misplaced_import);
+    done(&p);
+    /* The path is a string literal. */
+    parse(&p, "import a\n");
+    CHECK(p.tree == lh_null);
+    CHECK(p.error != cnor_error_none);
+    done(&p);
+}
+
 static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(reads_a_function_with_a_body),
     CNOR_TEST_CASE(reads_several_functions_into_one_list),
@@ -529,6 +561,7 @@ static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(reads_a_real_literal_as_text),
     CNOR_TEST_CASE(reads_an_index_and_a_typed_let),
     CNOR_TEST_CASE(unescapes_a_string),
+    CNOR_TEST_CASE(reads_imports_at_the_top_of_a_file_only),
 };
 
 int

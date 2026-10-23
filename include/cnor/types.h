@@ -63,6 +63,12 @@ typedef lh_u16_t cnor_const_index_t;
 typedef lh_u16_t cnor_function_index_t;
 
 /**
+ * @typedef cnor_file_index_t
+ * @brief Index into the image's file table. File 0 is the main file.
+ */
+typedef lh_u16_t cnor_file_index_t;
+
+/**
  * @typedef cnor_native_index_t
  * @brief Index into the native import section of an image.
  */

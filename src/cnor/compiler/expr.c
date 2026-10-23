@@ -8,6 +8,7 @@
 static lh_bool_t
 cnor_compile_int(cnor_compiler_t *self, cnor_int_literal_t value, lh_bool_t negate)
 {
+    self->type = (negate || value <= CNOR_I32_MAX) ? cnor_static_i32 : cnor_static_u32;
     if (negate && value <= CNOR_I32_MAX + 1U)
     {
         return cnor_emit_insn(self, cnor_op_push_i32, (lh_u32_t) (0U - value), 0U);
@@ -32,6 +33,7 @@ cnor_compile_constant(cnor_compiler_t *self, const cnor_node_t *node, cnor_const
 lh_bool_t
 cnor_compile_literal(cnor_compiler_t *self, const cnor_node_t *node)
 {
+    self->type = cnor_type_of_literal(node);
     switch (node->kind)
     {
     case cnor_node_int:
@@ -56,15 +58,17 @@ cnor_compile_ident(cnor_compiler_t *self, const cnor_node_t *node)
 {
     const cnor_binding_t binding = cnor_scope_resolve(self, node->name);
 
+    self->type = binding.type;
     switch (binding.kind)
     {
     case cnor_binding_local:
         return cnor_emit_insn(self, cnor_op_load_local, binding.index, 0U);
     case cnor_binding_global:
-        return cnor_emit_insn(self, cnor_op_load_global, binding.index, 0U);
+        return cnor_order_use_global(self, node, binding.index)
+               && cnor_emit_insn(self, cnor_op_load_global, binding.index, 0U);
     default:
         /* Functions and natives are not values: there is nothing to push. */
-        return cnor_compile_fail_name(self, node, cnor_error_unknown_name);
+        return cnor_compile_fail_binding(self, node, &binding);
     }
 }
 
@@ -84,7 +88,13 @@ cnor_compile_unary(cnor_compiler_t *self, const cnor_node_t *node)
     {
         return lh_bool_false;
     }
-    return cnor_emit_op(self, node->data.unary.op == cnor_unary_neg ? cnor_op_neg : cnor_op_not);
+    if (node->data.unary.op == cnor_unary_not)
+    {
+        self->type = cnor_static_bool;
+        return cnor_emit_op(self, cnor_op_not);
+    }
+    return cnor_type_negate(self, node, self->type, &self->type)
+           && cnor_emit_op(self, cnor_op_neg);
 }
 
 /* Opcode of an arithmetic or comparison operator; `and` / `or` are logic.c's. */
@@ -136,14 +146,35 @@ cnor_compile_int_operand(const cnor_node_t *node, lh_u32_t *bits)
     return lh_bool_false;
 }
 
+/* Type of a local named by @p node (known to be one). */
+static cnor_static_type_t
+cnor_compile_local_type(cnor_compiler_t *self, const cnor_node_t *node)
+{
+    return cnor_scope_resolve(self, node->name).type;
+}
+
+/* Compile @p node onto the stack; its type through @p type. */
+static lh_bool_t
+cnor_compile_typed(cnor_compiler_t *self, const cnor_node_t *node, cnor_static_type_t *type)
+{
+    if (!cnor_compile_expr(self, node))
+    {
+        return lh_bool_false;
+    }
+    *type = self->type;
+    return lh_bool_true;
+}
+
 /*
  * A binary operator whose operands are locals or `i32` literals takes them
  * straight from the frame or the code (`add_ll`, `add_li`, `add_i`, ...)
  * instead of pushing them first. Reading a local or a literal has no effect
- * of its own, so the order of evaluation is unchanged.
+ * of its own, so the order of evaluation is unchanged. The operand types go
+ * to @p left_type and @p right_type.
  */
 static lh_bool_t
-cnor_compile_binary_form(cnor_compiler_t *self, const cnor_node_t *node, cnor_op_t op)
+cnor_compile_binary_form(cnor_compiler_t *self, const cnor_node_t *node, cnor_op_t op,
+                         cnor_static_type_t *left_type, cnor_static_type_t *right_type)
 {
     const cnor_node_t *left = node->data.binary.left;
     const cnor_node_t *right = node->data.binary.right;
@@ -153,24 +184,28 @@ cnor_compile_binary_form(cnor_compiler_t *self, const cnor_node_t *node, cnor_op
 
     if (cnor_compile_local_operand(self, left, &a))
     {
+        *left_type = cnor_compile_local_type(self, left);
         if (cnor_compile_local_operand(self, right, &b))
         {
+            *right_type = cnor_compile_local_type(self, right);
             return cnor_emit_insn(
                 self, cnor_op_get_operand_form(op, cnor_operand_form_local_local), a, b);
         }
         if (cnor_compile_int_operand(right, &k))
         {
+            *right_type = cnor_static_i32;
             return cnor_emit_insn(self, cnor_op_get_operand_form(op, cnor_operand_form_local_int),
                                   a, k);
         }
     }
     if (cnor_compile_int_operand(right, &k))
     {
-        return cnor_compile_expr(self, left)
+        *right_type = cnor_static_i32;
+        return cnor_compile_typed(self, left, left_type)
                && cnor_emit_insn(
                    self, cnor_op_get_operand_form(op, cnor_operand_form_stack_int), k, 0U);
     }
-    return cnor_compile_expr(self, left) && cnor_compile_expr(self, right)
+    return cnor_compile_typed(self, left, left_type) && cnor_compile_typed(self, right, right_type)
            && cnor_emit_op(self, op);
 }
 
@@ -178,17 +213,31 @@ lh_bool_t
 cnor_compile_binary(cnor_compiler_t *self, const cnor_node_t *node)
 {
     const cnor_binary_op_t op = node->data.binary.op;
+    cnor_static_type_t left = cnor_static_any;
+    cnor_static_type_t right = cnor_static_any;
 
     if (op == cnor_binary_and || op == cnor_binary_or)
     {
         return cnor_compile_logic(self, node);
     }
-    return cnor_compile_binary_form(self, node, m_binary_ops[op]);
+    return cnor_compile_binary_form(self, node, m_binary_ops[op], &left, &right)
+           && cnor_type_binary(self, node, left, right, &self->type);
 }
 
+/* `text[i]`: a one-character string of a string, at an integer. */
 lh_bool_t
 cnor_compile_index(cnor_compiler_t *self, const cnor_node_t *node)
 {
-    return cnor_compile_expr(self, node->data.index.target)
-           && cnor_compile_expr(self, node->data.index.index) && cnor_emit_op(self, cnor_op_index);
+    cnor_static_type_t target = cnor_static_any;
+    cnor_static_type_t index = cnor_static_any;
+
+    if (!cnor_compile_typed(self, node->data.index.target, &target)
+        || !cnor_type_require(self, node, cnor_static_str, target)
+        || !cnor_compile_typed(self, node->data.index.index, &index)
+        || !cnor_type_require(self, node, cnor_static_i32, index))
+    {
+        return lh_bool_false;
+    }
+    self->type = cnor_static_str;
+    return cnor_emit_op(self, cnor_op_index);
 }

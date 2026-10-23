@@ -1,0 +1,6 @@
+import "../shared.cn"
+
+fn greet(who: str) -> str:
+    count = count + 1
+    return "hello, " + who
+println("greet ready")

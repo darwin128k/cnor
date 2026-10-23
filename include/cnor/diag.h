@@ -26,6 +26,12 @@
 #define CNOR_DIAG_NAME_CAPACITY 32U
 
 /**
+ * @def CNOR_DIAG_FILE_CAPACITY
+ * @brief Bytes of a file name a diagnostic keeps; a longer one keeps its end.
+ */
+#define CNOR_DIAG_FILE_CAPACITY 128U
+
+/**
  * @struct cnor_diag
  * @brief A failure and its place. Fields via ::cnor_diag_fields.
  */
@@ -33,7 +39,7 @@ struct cnor_diag
 {
     /** Members: ::cnor_diag_fields. */
     cnor_diag_fields(cnor_error_t, cnor_line_t, lh_u32_t, lh_u8_t, lh_char_t,
-                     CNOR_DIAG_NAME_CAPACITY);
+                     CNOR_DIAG_NAME_CAPACITY, CNOR_DIAG_FILE_CAPACITY);
 };
 /** @copybrief cnor_diag */
 typedef struct cnor_diag cnor_diag_t;
@@ -61,6 +67,14 @@ cnor_diag_set(cnor_diag_t *self, cnor_error_t code, cnor_line_t line, lh_u32_t o
 lh_bool_t
 cnor_diag_set_name(cnor_diag_t *self, cnor_error_t code, cnor_line_t line, lh_str_view_t name);
 
+/**
+ * @brief Record the source file the recorded failure is in, unless a file is
+ *        recorded already or nothing failed. A name longer than
+ *        ::CNOR_DIAG_FILE_CAPACITY keeps its end, cut at a character boundary.
+ */
+void
+cnor_diag_set_file(cnor_diag_t *self, lh_str_view_t file);
+
 /** @brief True when nothing has been recorded. */
 lh_bool_t
 cnor_diag_is_ok(const cnor_diag_t *self);
@@ -80,6 +94,10 @@ cnor_diag_get_offset(const cnor_diag_t *self);
 /** @brief The name the failure is about (a view into @p self), or an empty view. */
 lh_str_view_t
 cnor_diag_get_name(const cnor_diag_t *self);
+
+/** @brief The file the failure is in (a view into @p self), or an empty view. */
+lh_str_view_t
+cnor_diag_get_file(const cnor_diag_t *self);
 
 LH_COMPILER_EXTERN_C_END
 

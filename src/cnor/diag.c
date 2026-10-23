@@ -10,6 +10,7 @@ cnor_diag_init(cnor_diag_t *self)
     self->line = 0U;
     self->offset = 0U;
     self->name_size = 0U;
+    self->file_size = 0U;
 }
 
 lh_bool_t
@@ -53,6 +54,35 @@ cnor_diag_set_name(cnor_diag_t *self, cnor_error_t code, cnor_line_t line, lh_st
     return lh_bool_false;
 }
 
+/* UTF-8 continuation bytes are 10xxxxxx; a kept end must not start inside a
+ * character. */
+static lh_bool_t
+cnor_diag_is_continuation(lh_char_t c)
+{
+    return ((lh_u8_t) c & 0xC0U) == 0x80U ? lh_bool_true : lh_bool_false;
+}
+
+void
+cnor_diag_set_file(cnor_diag_t *self, lh_str_view_t file)
+{
+    const lh_char_t *data = lh_str_view_get_data(&file);
+    lh_usize_t size = lh_str_view_get_size(&file);
+
+    lh_return_ifn(self);
+    if (self->code == cnor_error_none || self->file_size != 0U || size == 0U)
+    {
+        return;
+    }
+    while (size > CNOR_DIAG_FILE_CAPACITY
+           || (size < lh_str_view_get_size(&file) && cnor_diag_is_continuation(*data)))
+    {
+        ++data;
+        --size;
+    }
+    lh_memory_copy(self->file, CNOR_DIAG_FILE_CAPACITY, data, size);
+    self->file_size = (lh_u8_t) size;
+}
+
 lh_bool_t
 cnor_diag_is_ok(const cnor_diag_t *self)
 {
@@ -93,4 +123,18 @@ cnor_diag_get_name(const cnor_diag_t *self)
     }
     lh_str_init_by_size(&name, self->name, self->name_size);
     return name;
+}
+
+lh_str_view_t
+cnor_diag_get_file(const cnor_diag_t *self)
+{
+    lh_str_view_t file;
+
+    lh_return_ifn(self, lh_str_view_empty());
+    if (self->file_size == 0U)
+    {
+        return lh_str_view_empty();
+    }
+    lh_str_init_by_size(&file, self->file, self->file_size);
+    return file;
 }

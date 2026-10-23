@@ -1,6 +1,7 @@
 #include "command.h"
 
 #include "file.h"
+#include "loader.h"
 #include "natives.h"
 #include "text.h"
 
@@ -9,10 +10,8 @@
 #include <cnor/error.h>
 #include <cnor/image.h>
 #include <cnor/vm.h>
-#include <lh/initializer.h>
 #include <lh/null.h>
 #include <lh/str/view.h>
-#include <lh/str/view/initializer.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -72,16 +71,23 @@ cnor_cli_report_io(const lh_char_t *path, const lh_char_t *what)
 
 /* -- compiling ------------------------------------------------------------- */
 
-/* Read and compile options->input into @p image. */
+/* The file a diagnostic names, or @p fallback when it names none. */
+static lh_str_view_t
+cnor_cli_diag_file(const cnor_diag_t *diag, lh_str_view_t fallback)
+{
+    const lh_str_view_t file = cnor_diag_get_file(diag);
+
+    return lh_str_view_get_size(&file) > 0U ? file : fallback;
+}
+
+/* Read and compile options->input, and what it imports, into @p image. */
 static cnor_cli_exit_t
 cnor_cli_compile_input(const cnor_cli_options_t *options, cnor_image_t *image)
 {
-    static const lh_byte_t bom[3] = {0xEFU, 0xBBU, 0xBFU};
     cnor_compiler_config_t config = cnor_compiler_config_initializer();
+    cnor_cli_loader_t loader;
     cnor_cli_buffer_t source;
-    lh_str_view_t text;
     cnor_diag_t diag;
-    lh_usize_t skip = 0U;
     lh_bool_t ok;
 
     cnor_image_init(image);
@@ -89,22 +95,16 @@ cnor_cli_compile_input(const cnor_cli_options_t *options, cnor_image_t *image)
     {
         return cnor_cli_report_io(options->input, "cannot read the file");
     }
-    /* A UTF-8 byte order mark is not part of the program. */
-    if (source.size >= 3U && memcmp(source.data, bom, 3U) == 0)
-    {
-        skip = 3U;
-    }
-    text = lh_initializer_of(lh_str_view_t, lh_str_view_initializer,
-                             (const lh_char_t *) source.data + skip, source.size - skip);
     config.natives = cnor_cli_natives();
     config.file = cnor_cli_view(cnor_cli_display_name(options->input));
     config.emit_lines = options->lines;
+    cnor_cli_loader_configure(&loader, options, &config);
     cnor_diag_init(&diag);
-    ok = cnor_compiler_compile_source(text, &config, image, &diag);
+    ok = cnor_compiler_compile_source(cnor_cli_loader_text(&source), &config, image, &diag);
     cnor_cli_buffer_deinit(&source);
     if (!ok)
     {
-        cnor_cli_report(config.file, &diag);
+        cnor_cli_report(cnor_cli_diag_file(&diag, config.file), &diag);
         return cnor_cli_exit_compile;
     }
     return cnor_cli_exit_ok;
@@ -112,15 +112,13 @@ cnor_cli_compile_input(const cnor_cli_options_t *options, cnor_image_t *image)
 
 /* -- running --------------------------------------------------------------- */
 
-/* Where a run's diagnostics point: the source the image was compiled from,
- * when it recorded one, else @p fallback. */
+/* Where a run's diagnostics point: the source file of the failing code, when
+ * the image recorded one, else @p fallback. */
 static lh_str_view_t
 cnor_cli_run_file(const cnor_vm_t *vm, const lh_char_t *fallback)
 {
-    const lh_str_view_t recorded = cnor_vm_get_file(vm);
-
-    return lh_str_view_get_size(&recorded) > 0U ? recorded
-                                                : cnor_cli_view(cnor_cli_display_name(fallback));
+    return cnor_cli_diag_file(cnor_vm_get_diag(vm),
+                              cnor_cli_view(cnor_cli_display_name(fallback)));
 }
 
 /* Load @p size bytes of image and run them; @p path names them. */

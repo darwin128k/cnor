@@ -1,0 +1,3 @@
+# tools.cn is not beside this file: it is found through -I.
+import "tools.cn"
+triple(14)
