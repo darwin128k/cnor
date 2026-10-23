@@ -1,0 +1,108 @@
+#include <cnor/parser/internal.h>
+#include <lh/null.h>
+
+/* -- parameters ------------------------------------------------------------ */
+
+static cnor_node_t *
+cnor_parser_param(cnor_parser_t *self)
+{
+    cnor_node_t *param = cnor_parser_node(self, cnor_node_param);
+
+    if (param == lh_null)
+    {
+        return lh_null;
+    }
+    if (!cnor_parser_at(self, cnor_token_ident))
+    {
+        return cnor_parser_fail(self, cnor_error_unexpected_token);
+    }
+    if (!cnor_parser_take_name(self, param) || !cnor_parser_advance(self)
+        || !cnor_parser_expect_punct(self, cnor_punct_colon)
+        || !cnor_parser_type(self, &param->data.param.type))
+    {
+        return lh_null;
+    }
+    return param;
+}
+
+static lh_bool_t
+cnor_parser_params(cnor_parser_t *self, cnor_node_t *node)
+{
+    cnor_node_list_t params = {lh_null, lh_null};
+    lh_u32_t count = 0U;
+
+    if (!cnor_parser_expect_punct(self, cnor_punct_lparen))
+    {
+        return lh_bool_false;
+    }
+    while (!cnor_parser_at_punct(self, cnor_punct_rparen))
+    {
+        cnor_node_t *param = cnor_parser_param(self);
+
+        if (param == lh_null)
+        {
+            return lh_bool_false;
+        }
+        if (++count > CNOR_ARGC_MAX)
+        {
+            cnor_parser_fail(self, cnor_error_too_many_args);
+            return lh_bool_false;
+        }
+        cnor_node_list_append(&params, param);
+        if (!cnor_parser_accept_punct(self, cnor_punct_comma))
+        {
+            break;
+        }
+    }
+    node->data.fn.params = params.head;
+    node->data.fn.param_count = (cnor_argc_t) count;
+    return cnor_parser_expect_punct(self, cnor_punct_rparen);
+}
+
+/* -- declarations ---------------------------------------------------------- */
+
+cnor_node_t *
+cnor_parser_fn(cnor_parser_t *self)
+{
+    const lh_bool_t is_native = cnor_parser_at_keyword(self, cnor_keyword_native);
+    cnor_node_t *node = cnor_parser_node(self, is_native ? cnor_node_native_fn : cnor_node_fn);
+
+    if (node == lh_null)
+    {
+        return lh_null;
+    }
+    if (is_native)
+    {
+        cnor_parser_advance(self);
+        if (!cnor_parser_at_keyword(self, cnor_keyword_fn))
+        {
+            return cnor_parser_fail(self, cnor_error_unexpected_token);
+        }
+    }
+    cnor_parser_advance(self);
+    if (!cnor_parser_at(self, cnor_token_ident))
+    {
+        return cnor_parser_fail(self, cnor_error_unexpected_token);
+    }
+    if (!cnor_parser_take_name(self, node) || !cnor_parser_advance(self)
+        || !cnor_parser_params(self, node))
+    {
+        return lh_null;
+    }
+    if (cnor_parser_accept_punct(self, cnor_punct_arrow)
+        && !cnor_parser_type(self, &node->data.fn.returns))
+    {
+        return lh_null;
+    }
+    if (is_native)
+    {
+        /* A native declaration has no body: it is a line of its own. */
+        return cnor_parser_end_simple(self, lh_bool_false) ? node : lh_null;
+    }
+    if (!cnor_parser_expect_punct(self, cnor_punct_colon))
+    {
+        return lh_null;
+    }
+    node->data.fn.body = cnor_parser_block(self);
+    return node->data.fn.body != lh_null ? node : lh_null;
+}

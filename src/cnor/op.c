@@ -1,0 +1,153 @@
+#include <cnor/error.h>
+#include <cnor/op.h>
+#include <lh/bit/endian.h>
+#include <lh/null.h>
+
+/* -- the table ------------------------------------------------------------- */
+
+#define CNOR_OP_ROW(name_, a_, b_, size_, pops_, pushes_, flags_)                                  \
+    {name_, {cnor_operand_##a_, cnor_operand_##b_}, size_, pops_, pushes_, flags_}
+
+/* Indexed by ::cnor_op_t; the order must follow the enum. */
+static const cnor_op_info_t m_ops[cnor_op_count] = {
+    CNOR_OP_ROW("halt", none, none, 1U, 0U, 0U, CNOR_OP_FLAG_TERMINATOR),
+    CNOR_OP_ROW("push_none", none, none, 1U, 0U, 1U, 0U),
+    CNOR_OP_ROW("push_true", none, none, 1U, 0U, 1U, 0U),
+    CNOR_OP_ROW("push_false", none, none, 1U, 0U, 1U, 0U),
+    CNOR_OP_ROW("push_i32", s32, none, 5U, 0U, 1U, 0U),
+    CNOR_OP_ROW("push_u32", u32, none, 5U, 0U, 1U, 0U),
+    CNOR_OP_ROW("push_const", u16, none, 3U, 0U, 1U, 0U),
+    CNOR_OP_ROW("load_local", u8, none, 2U, 0U, 1U, 0U),
+    CNOR_OP_ROW("store_local", u8, none, 2U, 1U, 0U, 0U),
+    CNOR_OP_ROW("load_global", u16, none, 3U, 0U, 1U, 0U),
+    CNOR_OP_ROW("store_global", u16, none, 3U, 1U, 0U, 0U),
+    CNOR_OP_ROW("dup", none, none, 1U, 1U, 2U, 0U),
+    CNOR_OP_ROW("swap", none, none, 1U, 2U, 2U, 0U),
+    CNOR_OP_ROW("pop", none, none, 1U, 1U, 0U, 0U),
+    CNOR_OP_ROW("add", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("sub", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("mul", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("div", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("mod", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("neg", none, none, 1U, 1U, 1U, 0U),
+    CNOR_OP_ROW("eq", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("ne", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("lt", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("le", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("gt", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("ge", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("not", none, none, 1U, 1U, 1U, 0U),
+    CNOR_OP_ROW("jmp", s32, none, 5U, 0U, 0U, CNOR_OP_FLAG_JUMP | CNOR_OP_FLAG_TERMINATOR),
+    CNOR_OP_ROW("jmp_if_false", s32, none, 5U, 1U, 0U, CNOR_OP_FLAG_JUMP),
+    CNOR_OP_ROW("jmp_if_true", s32, none, 5U, 1U, 0U, CNOR_OP_FLAG_JUMP),
+    CNOR_OP_ROW("call", u16, u8, 4U, 0U, 1U, CNOR_OP_FLAG_POPS_ARGC),
+    CNOR_OP_ROW("ret", none, none, 1U, 1U, 0U, CNOR_OP_FLAG_TERMINATOR),
+    CNOR_OP_ROW("native", u16, u8, 4U, 0U, 1U, CNOR_OP_FLAG_POPS_ARGC),
+    CNOR_OP_ROW("len", none, none, 1U, 1U, 1U, 0U),
+    CNOR_OP_ROW("index", none, none, 1U, 2U, 1U, 0U),
+};
+
+/* -- queries --------------------------------------------------------------- */
+
+lh_bool_t
+cnor_op_is_valid(lh_u32_t byte)
+{
+    return byte < (lh_u32_t) cnor_op_count ? lh_bool_true : lh_bool_false;
+}
+
+const cnor_op_info_t *
+cnor_op_get_info(cnor_op_t op)
+{
+    if (!cnor_op_is_valid((lh_u32_t) op))
+    {
+        return lh_null;
+    }
+    return &m_ops[op];
+}
+
+lh_u8_t
+cnor_operand_get_size(cnor_operand_kind_t kind)
+{
+    switch (kind)
+    {
+    case cnor_operand_u8:
+        return 1U;
+    case cnor_operand_u16:
+        return 2U;
+    case cnor_operand_u32:
+    case cnor_operand_s32:
+        return 4U;
+    default:
+        return 0U;
+    }
+}
+
+lh_u32_t
+cnor_insn_get_pops(const cnor_insn_t *insn)
+{
+    const cnor_op_info_t *info = cnor_op_get_info(insn->op);
+    lh_u32_t pops = info->pops;
+
+    if ((info->flags & CNOR_OP_FLAG_POPS_ARGC) != 0U)
+    {
+        pops += insn->operands[1];
+    }
+    return pops;
+}
+
+lh_s64_t
+cnor_insn_get_jump_target(const cnor_insn_t *insn)
+{
+    return (lh_s64_t) insn->next + (lh_s64_t) (lh_s32_t) insn->operands[0];
+}
+
+/* -- decoding -------------------------------------------------------------- */
+
+static lh_u32_t
+cnor_operand_read(const lh_byte_t *at, cnor_operand_kind_t kind)
+{
+    switch (kind)
+    {
+    case cnor_operand_u8:
+        return at[0];
+    case cnor_operand_u16:
+        return lh_bit_unpack_le16(at);
+    case cnor_operand_u32:
+    case cnor_operand_s32:
+        return lh_bit_unpack_le32(at);
+    default:
+        return 0U;
+    }
+}
+
+cnor_error_t
+cnor_insn_decode(const lh_byte_t *code, cnor_code_addr_t size, cnor_code_addr_t at,
+                 cnor_insn_t *out)
+{
+    const cnor_op_info_t *info;
+    cnor_code_addr_t cursor = at + 1U;
+    lh_uint_t i;
+
+    if (at >= size)
+    {
+        return cnor_error_code_truncated;
+    }
+    if (!cnor_op_is_valid(code[at]))
+    {
+        return cnor_error_bad_opcode;
+    }
+    out->op = (cnor_op_t) code[at];
+    info = cnor_op_get_info(out->op);
+    if (size - at < info->size)
+    {
+        return cnor_error_code_truncated;
+    }
+    out->at = at;
+    out->next = at + info->size;
+    for (i = 0U; i < CNOR_OP_MAX_OPERANDS; ++i)
+    {
+        out->operands[i] = cnor_operand_read(code + cursor, info->operands[i]);
+        cursor += cnor_operand_get_size(info->operands[i]);
+    }
+    return cnor_error_none;
+}

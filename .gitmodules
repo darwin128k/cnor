@@ -1,0 +1,3 @@
+[submodule "lib/lh"]
+	path = lib/lh
+	url = https://github.com/darwin128k/lh

@@ -1,0 +1,851 @@
+/* Image format, verifier and VM, driven by hand-built images. Ported from the
+ * original bytecode/VM suite (adapted to the v1 format and to the load-time
+ * verifier, which now catches what the original found while running), plus
+ * verifier rejections. */
+
+#include "harness.h"
+
+#include <cnor/byte/writer.h>
+#include <cnor/image/writer.h>
+#include <cnor/native/initializer.h>
+#include <cnor/op.h>
+#include <cnor/vm.h>
+#include <lh/null.h>
+
+/* -- image builder --------------------------------------------------------- */
+
+#define MAX_FUNCTIONS 4
+#define MAX_NATIVES 4
+
+typedef struct program
+{
+    cnor_byte_writer_t code;
+    cnor_byte_writer_t consts;
+    cnor_byte_writer_t lines;
+    cnor_count_t const_count;
+    cnor_count_t line_count;
+    cnor_image_function_t functions[MAX_FUNCTIONS];
+    cnor_count_t function_count;
+    lh_str_view_t natives[MAX_NATIVES];
+    cnor_count_t native_count;
+    lh_u32_t globals;
+    cnor_stack_slots_t stack_slots;
+    lh_str_view_t file;
+    cnor_image_t image;
+} program_t;
+
+static lh_str_view_t
+view_of(const char *text)
+{
+    lh_str_view_t view;
+
+    lh_str_init_by_size(&view, text, strlen(text));
+    return view;
+}
+
+static void
+p_init(program_t *p)
+{
+    memset(p, 0, sizeof(*p));
+    cnor_byte_writer_init(&p->code);
+    cnor_byte_writer_init(&p->consts);
+    cnor_byte_writer_init(&p->lines);
+    lh_str_view_init_empty(&p->file);
+    p->stack_slots = 16U;
+    cnor_image_init(&p->image);
+}
+
+static void
+p_deinit(program_t *p)
+{
+    cnor_byte_writer_deinit(&p->code);
+    cnor_byte_writer_deinit(&p->consts);
+    cnor_byte_writer_deinit(&p->lines);
+    cnor_image_deinit(&p->image);
+}
+
+static void
+op(program_t *p, cnor_op_t code)
+{
+    cnor_byte_writer_put_u8(&p->code, (lh_u8_t) code);
+}
+
+static void
+op_u32(program_t *p, cnor_op_t code, lh_u32_t operand)
+{
+    op(p, code);
+    cnor_byte_writer_put_u32(&p->code, operand);
+}
+
+static void
+op_u16_u8(program_t *p, cnor_op_t code, lh_u16_t a, lh_u8_t b)
+{
+    op(p, code);
+    cnor_byte_writer_put_u16(&p->code, a);
+    cnor_byte_writer_put_u8(&p->code, b);
+}
+
+static void
+add_const(program_t *p, const char *text)
+{
+    cnor_byte_writer_put_u8(&p->consts, (lh_u8_t) cnor_const_str);
+    cnor_byte_writer_put_u16(&p->consts, (lh_u16_t) strlen(text));
+    cnor_byte_writer_put_bytes(&p->consts, (const lh_byte_t *) text, (lh_u32_t) strlen(text));
+    p->const_count++;
+}
+
+static void
+add_line(program_t *p, lh_u32_t addr, lh_u32_t line)
+{
+    cnor_byte_writer_put_u32(&p->lines, addr);
+    cnor_byte_writer_put_u32(&p->lines, line);
+    p->line_count++;
+}
+
+/* Close the function that started at @p entry. */
+static void
+end_function(program_t *p, cnor_code_addr_t entry, cnor_argc_t params, lh_u8_t slots,
+             lh_u16_t max_stack)
+{
+    cnor_image_function_t *f = &p->functions[p->function_count++];
+
+    f->entry = entry;
+    f->size = cnor_byte_writer_get_size(&p->code) - entry;
+    f->param_count = params;
+    f->slot_count = slots;
+    f->max_stack = max_stack;
+}
+
+static cnor_code_addr_t
+here(const program_t *p)
+{
+    return cnor_byte_writer_get_size(&p->code);
+}
+
+/* One entry function covering all the code, unless functions were closed. */
+static void
+build(program_t *p, lh_u16_t max_stack)
+{
+    cnor_image_parts_t parts;
+
+    if (p->function_count == 0U)
+    {
+        end_function(p, 0U, 0U, 0U, max_stack);
+    }
+    parts.code = &p->code;
+    parts.consts = &p->consts;
+    parts.const_count = p->const_count;
+    parts.functions = p->functions;
+    parts.function_count = p->function_count;
+    parts.natives = p->natives;
+    parts.native_count = p->native_count;
+    parts.lines = p->line_count > 0U ? &p->lines : lh_null;
+    parts.line_count = p->line_count;
+    parts.file = p->file;
+    parts.globals_count = p->globals;
+    parts.stack_slots = p->stack_slots;
+    (void) cnor_image_write(&parts, &p->image);
+}
+
+/* -- natives --------------------------------------------------------------- */
+
+static lh_value_t
+double_it(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, cnor_error_t *error)
+{
+    (void) argc;
+    (void) ctx;
+    (void) error;
+    return lh_value_make_sint(lh_value_get_data(&args[0])->i * 2);
+}
+
+static const cnor_native_t m_natives[] = {
+    cnor_native_initializer("double_it", double_it, 1U, 1U),
+};
+static const cnor_native_table_t m_table = cnor_native_table_initializer(m_natives, 1U);
+
+static void
+vm_open(cnor_vm_t *vm)
+{
+    cnor_vm_config_t config = cnor_vm_config_initializer();
+
+    config.natives = &m_table;
+    cnor_vm_init(vm, &config);
+}
+
+static cnor_error_t
+vm_code(const cnor_vm_t *vm)
+{
+    return cnor_diag_get_code(cnor_vm_get_diag(vm));
+}
+
+/* Load and run @p p; the error, and the result through @p result. */
+static cnor_error_t
+load_and_run(program_t *p, lh_value_t *result)
+{
+    cnor_vm_t vm;
+    cnor_error_t code;
+
+    vm_open(&vm);
+    if (cnor_vm_load(&vm, p->image.data, p->image.size))
+    {
+        (void) cnor_vm_run(&vm);
+    }
+    code = vm_code(&vm);
+    if (result != lh_null)
+    {
+        *result = cnor_vm_get_result(&vm);
+    }
+    cnor_vm_deinit(&vm);
+    return code;
+}
+
+static long long
+sint_of(const lh_value_t *value)
+{
+    return lh_value_get_kind(value) == lh_value_kind_sint ? (long long) lh_value_get_data(value)->i
+                                                          : -999999;
+}
+
+/* -- header ---------------------------------------------------------------- */
+
+CNOR_TEST(refuses_a_buffer_shorter_than_a_header)
+{
+    lh_byte_t buffer[4] = {0U, 0U, 0U, 0U};
+    cnor_image_header_t header;
+
+    CHECK_EQ(cnor_image_header_read(buffer, sizeof(buffer), &header), cnor_error_too_small);
+}
+
+CNOR_TEST(refuses_a_buffer_without_the_signature)
+{
+    program_t p;
+    cnor_image_header_t header;
+
+    p_init(&p);
+    op(&p, cnor_op_halt);
+    build(&p, 0U);
+    REQUIRE(p.image.data != lh_null);
+    p.image.data[0] = 0U;
+    CHECK_EQ(cnor_image_header_read(p.image.data, p.image.size, &header), cnor_error_bad_magic);
+    p_deinit(&p);
+}
+
+CNOR_TEST(refuses_a_version_it_does_not_speak)
+{
+    program_t p;
+    cnor_image_header_t header;
+
+    p_init(&p);
+    op(&p, cnor_op_halt);
+    build(&p, 0U);
+    REQUIRE(p.image.data != lh_null);
+    p.image.data[4] = (lh_byte_t) (CNOR_IMAGE_VERSION + 1U);
+    CHECK_EQ(cnor_image_header_read(p.image.data, p.image.size, &header),
+             cnor_error_bad_version);
+    p_deinit(&p);
+}
+
+CNOR_TEST(refuses_a_stack_beyond_what_the_host_offers)
+{
+    program_t p;
+    cnor_vm_t vm;
+    cnor_vm_config_t config = cnor_vm_config_initializer();
+
+    p_init(&p);
+    p.stack_slots = 4096U;
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op(&p, cnor_op_halt);
+    build(&p, 1U);
+    config.stack_slots = 1024U;
+    cnor_vm_init(&vm, &config);
+    CHECK(!cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK_EQ(vm_code(&vm), cnor_error_stack_too_big);
+    cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
+CNOR_TEST(reads_the_sections_of_a_well_formed_image)
+{
+    program_t p;
+    cnor_image_header_t header;
+
+    p_init(&p);
+    add_const(&p, "hi");
+    op(&p, cnor_op_push_const);
+    cnor_byte_writer_put_u16(&p.code, 0U);
+    op(&p, cnor_op_halt);
+    build(&p, 1U);
+    REQUIRE(cnor_image_header_read(p.image.data, p.image.size, &header) == cnor_error_none);
+    CHECK_EQ(header.sections[cnor_image_section_code].size, 4U);
+    CHECK_EQ(header.sections[cnor_image_section_consts].size, 4U + 1U + 2U + 2U);
+    CHECK_EQ(header.sections[cnor_image_section_code].offset % CNOR_IMAGE_ALIGN, 0U);
+    CHECK_EQ(header.image_size, p.image.size);
+    p_deinit(&p);
+}
+
+/* -- running --------------------------------------------------------------- */
+
+CNOR_TEST(runs_a_program_that_only_stops)
+{
+    program_t p;
+    lh_value_t result;
+
+    p_init(&p);
+    op(&p, cnor_op_halt);
+    build(&p, 0U);
+    CHECK_EQ(load_and_run(&p, &result), cnor_error_none);
+    CHECK_EQ(lh_value_get_kind(&result), lh_value_kind_none);
+    p_deinit(&p);
+}
+
+CNOR_TEST(adds_two_numbers)
+{
+    program_t p;
+    lh_value_t result;
+
+    p_init(&p);
+    op_u32(&p, cnor_op_push_i32, 2U);
+    op_u32(&p, cnor_op_push_i32, 40U);
+    op(&p, cnor_op_add);
+    op(&p, cnor_op_halt);
+    build(&p, 2U);
+    CHECK_EQ(load_and_run(&p, &result), cnor_error_none);
+    CHECK_EQ(sint_of(&result), 42);
+    p_deinit(&p);
+}
+
+CNOR_TEST(mixes_signed_and_unsigned_without_wrapping)
+{
+    program_t p;
+    lh_value_t result;
+
+    p_init(&p);
+    op_u32(&p, cnor_op_push_u32, 4000000000U);
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op(&p, cnor_op_sub);
+    op(&p, cnor_op_halt);
+    build(&p, 2U);
+    CHECK_EQ(load_and_run(&p, &result), cnor_error_none);
+    CHECK_EQ(sint_of(&result), 3999999999LL);
+    p_deinit(&p);
+}
+
+CNOR_TEST(reports_division_by_zero_instead_of_trapping)
+{
+    program_t p;
+
+    p_init(&p);
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op_u32(&p, cnor_op_push_i32, 0U);
+    op(&p, cnor_op_div);
+    op(&p, cnor_op_halt);
+    build(&p, 2U);
+    CHECK_EQ(load_and_run(&p, lh_null), cnor_error_div_by_zero);
+    CHECK(strcmp(cnor_error_get_message(cnor_error_div_by_zero), "division by zero") == 0);
+    p_deinit(&p);
+}
+
+CNOR_TEST(refuses_a_byte_that_is_not_an_opcode_at_load)
+{
+    program_t p;
+    cnor_vm_t vm;
+
+    p_init(&p);
+    cnor_byte_writer_put_u8(&p.code, 0xFEU);
+    op(&p, cnor_op_halt);
+    build(&p, 0U);
+    vm_open(&vm);
+    CHECK(!cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK_EQ(vm_code(&vm), cnor_error_bad_opcode);
+    CHECK_EQ(cnor_diag_get_offset(cnor_vm_get_diag(&vm)), 0U);
+    cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
+CNOR_TEST(refuses_an_instruction_that_runs_past_the_code)
+{
+    program_t p;
+
+    p_init(&p);
+    op(&p, cnor_op_push_i32);
+    build(&p, 1U);
+    CHECK_EQ(load_and_run(&p, lh_null), cnor_error_code_truncated);
+    p_deinit(&p);
+}
+
+CNOR_TEST(refuses_more_pushes_than_the_declared_depth)
+{
+    program_t p;
+    int i;
+
+    p_init(&p);
+    for (i = 0; i < 20; ++i)
+    {
+        op_u32(&p, cnor_op_push_i32, 1U);
+    }
+    op(&p, cnor_op_halt);
+    build(&p, 16U);
+    CHECK_EQ(load_and_run(&p, lh_null), cnor_error_bad_stack);
+    p_deinit(&p);
+}
+
+CNOR_TEST(overflows_the_stack_it_was_given)
+{
+    program_t p;
+    cnor_vm_t vm;
+    cnor_vm_config_t config = cnor_vm_config_initializer();
+    cnor_code_addr_t entry;
+
+    /* f0: call f1; ret.  f1: push 1; call f1; ret -- one more value per call. */
+    p_init(&p);
+    op_u16_u8(&p, cnor_op_call, 1U, 0U);
+    op(&p, cnor_op_ret);
+    end_function(&p, 0U, 0U, 0U, 1U);
+    entry = here(&p);
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op_u16_u8(&p, cnor_op_call, 1U, 0U);
+    op(&p, cnor_op_ret);
+    end_function(&p, entry, 0U, 0U, 2U);
+    p.stack_slots = 2U;
+    build(&p, 0U);
+    config.stack_slots = 32U;
+    config.max_depth = 1000U;
+    cnor_vm_init(&vm, &config);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK(!cnor_vm_run(&vm));
+    CHECK_EQ(vm_code(&vm), cnor_error_stack_overflow);
+    cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
+CNOR_TEST(joins_two_strings_and_measures_them)
+{
+    program_t p;
+    lh_value_t result;
+
+    p_init(&p);
+    add_const(&p, "hello, ");
+    add_const(&p, "world");
+    op(&p, cnor_op_push_const);
+    cnor_byte_writer_put_u16(&p.code, 0U);
+    op(&p, cnor_op_push_const);
+    cnor_byte_writer_put_u16(&p.code, 1U);
+    op(&p, cnor_op_add);
+    op(&p, cnor_op_len);
+    op(&p, cnor_op_halt);
+    build(&p, 2U);
+    CHECK_EQ(load_and_run(&p, &result), cnor_error_none);
+    CHECK_EQ(sint_of(&result), 12);
+    p_deinit(&p);
+}
+
+CNOR_TEST(calls_a_native_and_keeps_its_result)
+{
+    program_t p;
+    lh_value_t result;
+
+    p_init(&p);
+    p.natives[p.native_count++] = view_of("double_it");
+    op_u32(&p, cnor_op_push_i32, 21U);
+    op_u16_u8(&p, cnor_op_native, 0U, 1U);
+    op(&p, cnor_op_halt);
+    build(&p, 1U);
+    CHECK_EQ(load_and_run(&p, &result), cnor_error_none);
+    CHECK_EQ(sint_of(&result), 42);
+    p_deinit(&p);
+}
+
+CNOR_TEST(refuses_a_native_it_was_not_given_at_load)
+{
+    program_t p;
+    cnor_vm_t vm;
+    lh_str_view_t name;
+
+    p_init(&p);
+    p.natives[p.native_count++] = view_of("missing");
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op_u16_u8(&p, cnor_op_native, 0U, 1U);
+    op(&p, cnor_op_halt);
+    build(&p, 1U);
+    vm_open(&vm);
+    CHECK(!cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK_EQ(vm_code(&vm), cnor_error_no_such_native);
+    name = cnor_diag_get_name(cnor_vm_get_diag(&vm));
+    CHECK(lh_str_view_get_size(&name) == 7U);
+    cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
+CNOR_TEST(refuses_a_call_with_the_wrong_arity)
+{
+    program_t p;
+
+    p_init(&p);
+    p.natives[p.native_count++] = view_of("double_it");
+    op_u16_u8(&p, cnor_op_native, 0U, 0U);
+    op(&p, cnor_op_halt);
+    build(&p, 1U);
+    CHECK_EQ(load_and_run(&p, lh_null), cnor_error_bad_arity);
+    p_deinit(&p);
+}
+
+CNOR_TEST(keeps_globals_across_runs_until_a_reset)
+{
+    program_t p;
+    cnor_vm_t vm;
+    const lh_value_t *g;
+
+    p_init(&p);
+    p.globals = 1U;
+    op(&p, cnor_op_load_global);
+    cnor_byte_writer_put_u16(&p.code, 0U);
+    op(&p, cnor_op_pop);
+    op_u32(&p, cnor_op_push_i32, 7U);
+    op(&p, cnor_op_store_global);
+    cnor_byte_writer_put_u16(&p.code, 0U);
+    op(&p, cnor_op_halt);
+    build(&p, 1U);
+    vm_open(&vm);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    g = cnor_vm_get_global(&vm, 0U);
+    REQUIRE(g != lh_null);
+    CHECK_EQ(lh_value_get_kind(g), lh_value_kind_none);
+    CHECK(cnor_vm_run(&vm));
+    CHECK_EQ(sint_of(cnor_vm_get_global(&vm, 0U)), 7);
+    CHECK(cnor_vm_run(&vm));
+    CHECK_EQ(sint_of(cnor_vm_get_global(&vm, 0U)), 7);
+    /* Only the globals remain on the stack between runs. */
+    CHECK_EQ(vm.stack.sp, 1U);
+    cnor_vm_reset(&vm);
+    CHECK_EQ(lh_value_get_kind(cnor_vm_get_global(&vm, 0U)), lh_value_kind_none);
+    CHECK(cnor_vm_get_global(&vm, 1U) == lh_null);
+    cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
+CNOR_TEST(maps_a_failure_back_to_the_source_line)
+{
+    program_t p;
+    cnor_vm_t vm;
+    lh_str_view_t file;
+
+    /* 0: push_i32 (line 1), 5: push_i32 (line 2), 10: div (line 3). */
+    p_init(&p);
+    p.file = view_of("main.cn");
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op_u32(&p, cnor_op_push_i32, 0U);
+    op(&p, cnor_op_div);
+    op(&p, cnor_op_halt);
+    add_line(&p, 0U, 1U);
+    add_line(&p, 5U, 2U);
+    add_line(&p, 10U, 3U);
+    build(&p, 2U);
+    vm_open(&vm);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK(!cnor_vm_run(&vm));
+    CHECK_EQ(vm_code(&vm), cnor_error_div_by_zero);
+    CHECK_EQ(cnor_diag_get_line(cnor_vm_get_diag(&vm)), 3U);
+    CHECK_EQ(cnor_diag_get_offset(cnor_vm_get_diag(&vm)), 10U);
+    CHECK_EQ(cnor_vm_get_line_at(&vm, 7U), 2U);
+    file = cnor_vm_get_file(&vm);
+    CHECK(lh_str_view_get_size(&file) == 7U
+          && memcmp(lh_str_view_get_data(&file), "main.cn", 7U) == 0);
+    cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
+CNOR_TEST(answers_no_line_for_a_program_built_without_them)
+{
+    program_t p;
+    cnor_vm_t vm;
+    lh_str_view_t file;
+
+    p_init(&p);
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op_u32(&p, cnor_op_push_i32, 0U);
+    op(&p, cnor_op_div);
+    op(&p, cnor_op_halt);
+    build(&p, 2U);
+    vm_open(&vm);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK(!cnor_vm_run(&vm));
+    CHECK_EQ(cnor_diag_get_line(cnor_vm_get_diag(&vm)), 0U);
+    file = cnor_vm_get_file(&vm);
+    CHECK_EQ(lh_str_view_get_size(&file), 0U);
+    cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
+CNOR_TEST(refuses_to_run_before_anything_is_loaded)
+{
+    cnor_vm_t vm;
+
+    cnor_vm_init(&vm, lh_null);
+    CHECK(!cnor_vm_run(&vm));
+    CHECK_EQ(vm_code(&vm), cnor_error_not_loaded);
+    cnor_vm_deinit(&vm);
+}
+
+CNOR_TEST(reuses_one_machine_for_two_programs)
+{
+    program_t first;
+    program_t second;
+    cnor_vm_t vm;
+    lh_value_t result;
+
+    p_init(&first);
+    op_u32(&first, cnor_op_push_i32, 5U);
+    op(&first, cnor_op_neg);
+    op(&first, cnor_op_halt);
+    build(&first, 1U);
+    p_init(&second);
+    op_u32(&second, cnor_op_push_i32, 11U);
+    op(&second, cnor_op_halt);
+    build(&second, 1U);
+
+    vm_open(&vm);
+    REQUIRE(cnor_vm_load(&vm, first.image.data, first.image.size));
+    CHECK(cnor_vm_run(&vm));
+    result = cnor_vm_get_result(&vm);
+    CHECK_EQ(sint_of(&result), -5);
+    REQUIRE(cnor_vm_load(&vm, second.image.data, second.image.size));
+    CHECK(cnor_vm_run(&vm));
+    result = cnor_vm_get_result(&vm);
+    CHECK_EQ(sint_of(&result), 11);
+    cnor_vm_deinit(&vm);
+    cnor_vm_deinit(&vm);
+    p_deinit(&first);
+    p_deinit(&second);
+}
+
+/* -- instruction budget ------------------------------------------------------- */
+
+CNOR_TEST(stops_a_jump_to_itself_and_unwinds)
+{
+    program_t p;
+    cnor_vm_t vm;
+    cnor_vm_config_t config = cnor_vm_config_initializer();
+
+    /* 0: push 7; 5: store_global 0; 8: push 1; 13: pop; 14: jmp back to 8.
+     * Jumps are relative to the end of the jump (19), so the offset is -11. */
+    p_init(&p);
+    p.globals = 1U;
+    op_u32(&p, cnor_op_push_i32, 7U);
+    op(&p, cnor_op_store_global);
+    cnor_byte_writer_put_u16(&p.code, 0U);
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op(&p, cnor_op_pop);
+    op_u32(&p, cnor_op_jmp, (lh_u32_t) -11);
+    build(&p, 1U);
+    config.max_steps = 100U;
+    cnor_vm_init(&vm, &config);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK(!cnor_vm_run(&vm));
+    CHECK_EQ(vm_code(&vm), cnor_error_step_limit);
+    CHECK_EQ(cnor_vm_get_steps(&vm), 100U);
+    /* Stopped before an instruction of the loop, with only the globals left. */
+    CHECK(cnor_diag_get_offset(cnor_vm_get_diag(&vm)) >= 8U);
+    CHECK_EQ(vm.stack.sp, 1U);
+    CHECK_EQ(vm.depth, 0U);
+    CHECK_EQ(sint_of(cnor_vm_get_global(&vm, 0U)), 7);
+    /* The machine stays usable: the next run gets a fresh budget. */
+    CHECK(!cnor_vm_run(&vm));
+    CHECK_EQ(cnor_vm_get_steps(&vm), 100U);
+    cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
+CNOR_TEST(runs_unlimited_with_a_zero_budget)
+{
+    program_t p;
+    cnor_vm_t vm;
+    cnor_vm_config_t config = cnor_vm_config_initializer();
+    lh_value_t result;
+
+    p_init(&p);
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op(&p, cnor_op_halt);
+    build(&p, 1U);
+    config.max_steps = 0U;
+    cnor_vm_init(&vm, &config);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK(cnor_vm_run(&vm));
+    result = cnor_vm_get_result(&vm);
+    CHECK_EQ(sint_of(&result), 1);
+    CHECK_EQ(cnor_vm_get_steps(&vm), 2U);
+    cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
+/* -- verifier -------------------------------------------------------------- */
+
+static cnor_error_t
+load_error(program_t *p)
+{
+    cnor_vm_t vm;
+    cnor_error_t code;
+
+    vm_open(&vm);
+    code = cnor_vm_load(&vm, p->image.data, p->image.size) ? cnor_error_none : vm_code(&vm);
+    cnor_vm_deinit(&vm);
+    return code;
+}
+
+CNOR_TEST(rejects_a_jump_into_the_middle_of_an_instruction)
+{
+    program_t p;
+
+    /* 0: jmp +2 lands inside the push at 5. */
+    p_init(&p);
+    op_u32(&p, cnor_op_jmp, 2U);
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op(&p, cnor_op_halt);
+    build(&p, 1U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_jump);
+    p_deinit(&p);
+}
+
+CNOR_TEST(rejects_a_jump_out_of_its_function)
+{
+    program_t p;
+
+    p_init(&p);
+    op_u32(&p, cnor_op_jmp, 100U);
+    op(&p, cnor_op_halt);
+    build(&p, 0U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_jump);
+    p_deinit(&p);
+}
+
+CNOR_TEST(rejects_paths_that_disagree_on_the_stack)
+{
+    program_t p;
+
+    /* push true; jmp_if_false +5 (skip a push); push 1; halt -- depth 0 or 1 at halt. */
+    p_init(&p);
+    op(&p, cnor_op_push_true);
+    op_u32(&p, cnor_op_jmp_if_false, 5U);
+    op_u32(&p, cnor_op_push_i32, 1U);
+    op(&p, cnor_op_halt);
+    build(&p, 1U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_stack);
+    p_deinit(&p);
+}
+
+CNOR_TEST(rejects_an_operand_stack_underflow)
+{
+    program_t p;
+
+    p_init(&p);
+    op(&p, cnor_op_add);
+    op(&p, cnor_op_halt);
+    build(&p, 2U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_stack);
+    p_deinit(&p);
+}
+
+CNOR_TEST(rejects_code_that_falls_off_its_function)
+{
+    program_t p;
+
+    p_init(&p);
+    op(&p, cnor_op_push_none);
+    build(&p, 1U);
+    CHECK_EQ(load_error(&p), cnor_error_no_terminator);
+    p_deinit(&p);
+}
+
+CNOR_TEST(rejects_operands_outside_their_tables)
+{
+    program_t p;
+
+    p_init(&p);
+    op(&p, cnor_op_push_const);
+    cnor_byte_writer_put_u16(&p.code, 0U);
+    op(&p, cnor_op_halt);
+    build(&p, 1U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_operand);
+    p_deinit(&p);
+
+    p_init(&p);
+    op(&p, cnor_op_load_local);
+    cnor_byte_writer_put_u8(&p.code, 3U);
+    op(&p, cnor_op_halt);
+    build(&p, 1U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_operand);
+    p_deinit(&p);
+}
+
+CNOR_TEST(rejects_a_call_with_the_wrong_argument_count)
+{
+    program_t p;
+    cnor_code_addr_t entry;
+
+    p_init(&p);
+    op_u16_u8(&p, cnor_op_call, 1U, 0U);
+    op(&p, cnor_op_ret);
+    end_function(&p, 0U, 0U, 0U, 1U);
+    entry = here(&p);
+    op(&p, cnor_op_push_none);
+    op(&p, cnor_op_ret);
+    end_function(&p, entry, 1U, 1U, 1U);
+    build(&p, 0U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_operand);
+    p_deinit(&p);
+}
+
+CNOR_TEST(rejects_functions_that_do_not_tile_the_code)
+{
+    program_t p;
+
+    p_init(&p);
+    op(&p, cnor_op_push_none);
+    op(&p, cnor_op_ret);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 0U, 1U);
+    p.functions[0].size = 2U;
+    build(&p, 0U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_header);
+    p_deinit(&p);
+}
+
+static const cnor_test_case_t m_cases[] = {
+    CNOR_TEST_CASE(refuses_a_buffer_shorter_than_a_header),
+    CNOR_TEST_CASE(refuses_a_buffer_without_the_signature),
+    CNOR_TEST_CASE(refuses_a_version_it_does_not_speak),
+    CNOR_TEST_CASE(refuses_a_stack_beyond_what_the_host_offers),
+    CNOR_TEST_CASE(reads_the_sections_of_a_well_formed_image),
+    CNOR_TEST_CASE(runs_a_program_that_only_stops),
+    CNOR_TEST_CASE(adds_two_numbers),
+    CNOR_TEST_CASE(mixes_signed_and_unsigned_without_wrapping),
+    CNOR_TEST_CASE(reports_division_by_zero_instead_of_trapping),
+    CNOR_TEST_CASE(refuses_a_byte_that_is_not_an_opcode_at_load),
+    CNOR_TEST_CASE(refuses_an_instruction_that_runs_past_the_code),
+    CNOR_TEST_CASE(refuses_more_pushes_than_the_declared_depth),
+    CNOR_TEST_CASE(overflows_the_stack_it_was_given),
+    CNOR_TEST_CASE(joins_two_strings_and_measures_them),
+    CNOR_TEST_CASE(calls_a_native_and_keeps_its_result),
+    CNOR_TEST_CASE(refuses_a_native_it_was_not_given_at_load),
+    CNOR_TEST_CASE(refuses_a_call_with_the_wrong_arity),
+    CNOR_TEST_CASE(keeps_globals_across_runs_until_a_reset),
+    CNOR_TEST_CASE(maps_a_failure_back_to_the_source_line),
+    CNOR_TEST_CASE(answers_no_line_for_a_program_built_without_them),
+    CNOR_TEST_CASE(refuses_to_run_before_anything_is_loaded),
+    CNOR_TEST_CASE(reuses_one_machine_for_two_programs),
+    CNOR_TEST_CASE(stops_a_jump_to_itself_and_unwinds),
+    CNOR_TEST_CASE(runs_unlimited_with_a_zero_budget),
+    CNOR_TEST_CASE(rejects_a_jump_into_the_middle_of_an_instruction),
+    CNOR_TEST_CASE(rejects_a_jump_out_of_its_function),
+    CNOR_TEST_CASE(rejects_paths_that_disagree_on_the_stack),
+    CNOR_TEST_CASE(rejects_an_operand_stack_underflow),
+    CNOR_TEST_CASE(rejects_code_that_falls_off_its_function),
+    CNOR_TEST_CASE(rejects_operands_outside_their_tables),
+    CNOR_TEST_CASE(rejects_a_call_with_the_wrong_argument_count),
+    CNOR_TEST_CASE(rejects_functions_that_do_not_tile_the_code),
+};
+
+int
+main(int argc, char **argv)
+{
+    return cnor_test_main("image_vm", m_cases, CNOR_TEST_COUNT(m_cases), argc, argv);
+}

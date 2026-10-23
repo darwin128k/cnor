@@ -1,0 +1,234 @@
+#include <cnor/image/view.h>
+#include <cnor/vm/internal.h>
+#include <lh/memory.h>
+#include <lh/runtime/allocator.h>
+
+/* -- release --------------------------------------------------------------- */
+
+static void
+cnor_vm_free(lh_ptr block)
+{
+    if (block != lh_null)
+    {
+        lh_runtime_allocator_free(block);
+    }
+}
+
+/* Forget the loaded program, keep the configuration. */
+static void
+cnor_vm_unload(cnor_vm_t *self)
+{
+    cnor_vm_free(self->image);
+    cnor_vm_free(self->functions);
+    cnor_vm_free(self->constants);
+    cnor_vm_free((lh_ptr) self->natives);
+    cnor_vm_free(self->frames);
+    cnor_vm_stack_deinit(&self->stack);
+    cnor_str_pool_deinit(&self->str_pool);
+    self->image = lh_null;
+    self->code = lh_null;
+    self->code_size = 0U;
+    self->functions = lh_null;
+    self->function_count = 0U;
+    self->constants = lh_null;
+    self->const_count = 0U;
+    self->natives = lh_null;
+    self->native_count = 0U;
+    self->line_count = 0U;
+    self->frames = lh_null;
+    self->depth = 0U;
+    self->fp = 0U;
+    self->function = 0U;
+    self->ip = 0U;
+    self->running = lh_bool_false;
+    self->steps = 0U;
+    self->result = lh_value_make_none();
+}
+
+/* -- lifetime -------------------------------------------------------------- */
+
+void
+cnor_vm_init(cnor_vm_t *self, const cnor_vm_config_t *config)
+{
+    const cnor_vm_config_t defaults = cnor_vm_config_initializer();
+
+    self->config = config != lh_null ? *config : defaults;
+    self->image = lh_null;
+    self->functions = lh_null;
+    self->constants = lh_null;
+    self->natives = lh_null;
+    self->frames = lh_null;
+    cnor_vm_stack_init(&self->stack);
+    cnor_str_pool_init(&self->str_pool);
+    cnor_vm_unload(self);
+    cnor_diag_init(&self->diag);
+}
+
+void
+cnor_vm_deinit(cnor_vm_t *self)
+{
+    cnor_vm_unload(self);
+}
+
+void
+cnor_vm_reset(cnor_vm_t *self)
+{
+    self->stack.sp = 0U;
+    cnor_vm_stack_push_none(&self->stack, self->image != lh_null ? self->header.globals_count : 0U);
+    cnor_str_pool_rewind(&self->str_pool);
+    self->depth = 0U;
+    self->running = lh_bool_false;
+    self->result = lh_value_make_none();
+}
+
+lh_bool_t
+cnor_vm_load(cnor_vm_t *self, const lh_byte_t *data, lh_u32_t size)
+{
+    cnor_vm_unload(self);
+    cnor_diag_init(&self->diag);
+    if (data == lh_null || size == 0U)
+    {
+        return cnor_diag_set(&self->diag, cnor_error_too_small, 0U, 0U);
+    }
+    /* The machine keeps its own copy: strings and names point into it. */
+    self->image = (lh_byte_t *) lh_runtime_allocator_alloc(size);
+    if (self->image == lh_null)
+    {
+        return cnor_diag_set(&self->diag, cnor_error_no_memory, 0U, 0U);
+    }
+    lh_memory_copy(self->image, size, data, size);
+    if (!cnor_vm_load_image(self, size))
+    {
+        cnor_vm_unload(self);
+        return lh_bool_false;
+    }
+    cnor_vm_reset(self);
+    return lh_bool_true;
+}
+
+/* -- running --------------------------------------------------------------- */
+
+/* Main's frame sits right above the globals. */
+static lh_bool_t
+cnor_vm_enter_main(cnor_vm_t *self)
+{
+    const cnor_image_function_t *main = &self->functions[0];
+
+    self->stack.sp = self->header.globals_count;
+    self->depth = 0U;
+    self->fp = self->stack.sp;
+    self->function = 0U;
+    self->ip = main->entry;
+    if (!cnor_vm_stack_fits(&self->stack, (cnor_stack_slots_t) main->slot_count + main->max_stack))
+    {
+        return cnor_diag_set(&self->diag, cnor_error_stack_overflow, 0U, main->entry);
+    }
+    cnor_vm_stack_push_none(&self->stack, main->slot_count);
+    return lh_bool_true;
+}
+
+lh_bool_t
+cnor_vm_run(cnor_vm_t *self)
+{
+    lh_bool_t ok;
+
+    cnor_diag_init(&self->diag);
+    self->result = lh_value_make_none();
+    self->steps = 0U;
+    if (self->image == lh_null)
+    {
+        return cnor_diag_set(&self->diag, cnor_error_not_loaded, 0U, 0U);
+    }
+    if (!cnor_vm_enter_main(self))
+    {
+        return lh_bool_false;
+    }
+    self->running = lh_bool_true;
+    ok = cnor_vm_dispatch(self);
+    /* Unwind whatever a failure left so globals are all that remains. */
+    self->stack.sp = self->header.globals_count;
+    self->depth = 0U;
+    return ok;
+}
+
+/* -- queries --------------------------------------------------------------- */
+
+const cnor_diag_t *
+cnor_vm_get_diag(const cnor_vm_t *self)
+{
+    return &self->diag;
+}
+
+cnor_step_count_t
+cnor_vm_get_steps(const cnor_vm_t *self)
+{
+    return self->steps;
+}
+
+lh_value_t
+cnor_vm_get_result(const cnor_vm_t *self)
+{
+    return self->result;
+}
+
+const lh_value_t *
+cnor_vm_get_global(const cnor_vm_t *self, cnor_global_index_t index)
+{
+    if (self->image == lh_null || index >= self->header.globals_count)
+    {
+        return lh_null;
+    }
+    return &self->stack.values[index];
+}
+
+/* The loaded image was fully checked, so a view can be rebuilt from its parts. */
+static cnor_image_view_t
+cnor_vm_view(const cnor_vm_t *self)
+{
+    cnor_image_view_t view;
+
+    view.header = self->header;
+    view.data = self->image;
+    view.code = self->code;
+    view.code_size = self->code_size;
+    view.const_count = self->const_count;
+    view.function_count = self->function_count;
+    view.native_count = self->native_count;
+    view.line_count = self->line_count;
+    return view;
+}
+
+lh_str_view_t
+cnor_vm_get_file(const cnor_vm_t *self)
+{
+    cnor_image_view_t view;
+
+    if (self->image == lh_null)
+    {
+        return lh_str_view_empty();
+    }
+    view = cnor_vm_view(self);
+    return cnor_image_view_file(&view);
+}
+
+cnor_line_t
+cnor_vm_get_line_at(const cnor_vm_t *self, cnor_code_addr_t addr)
+{
+    cnor_image_view_t view;
+
+    if (self->image == lh_null)
+    {
+        return 0U;
+    }
+    view = cnor_vm_view(self);
+    return cnor_image_view_line_at(&view, addr);
+}
+
+/* -- failures -------------------------------------------------------------- */
+
+lh_bool_t
+cnor_vm_fail(cnor_vm_t *vm, const cnor_insn_t *insn, cnor_error_t code)
+{
+    vm->running = lh_bool_false;
+    return cnor_diag_set(&vm->diag, code, cnor_vm_get_line_at(vm, insn->at), insn->at);
+}
