@@ -386,17 +386,21 @@ place, the handlers under `src/cnor/vm/op/`:
     `logic` -18 / -23%, `strbuild` -8 / +2%, `streq` -15 / +1%. Step counts
     are unchanged.
 
-- **Where the loop starts.** With GCC and Clang `dispatch.c` is compiled
-  with `-falign-functions=64` (CMakeLists.txt), so `cnor_vm_dispatch` starts
-  on a 64-byte line whatever is linked before it. Its speed depends on that
-  offset: the faster compiler of 2026-10-23 left the dispatch object byte for
-  byte the same, but the smaller code before it moved the loop from offset 0
-  to offset 32 of a line, and the computed-goto build (`-O2`,
-  `-Wa,-mbranches-within-32B-boundaries`) ran `native` 9%, `globals` 8% and
-  `nested` 7% slower on the same instruction count; padding the link by 16
-  bytes, or the alignment, put it back. Which offset is best is a property of
-  the build, not a rule: in the `-O3` `switch` build offset 32 runs `loop`
-  and `nested` about 10% faster than offset 0 and `match` 10% slower.
+- **Where the loop starts.** Where the dispatch loop's hot blocks sit in
+  64-byte lines decides much of its speed, more than most code changes. With
+  the `switch`, every instruction goes through one 22-byte block (the budget
+  test, the table load, the indirect jump): placed across two lines it ran the
+  benchmarks up to 35% slower (`-O2`) and 10 to 19% slower (`-O3`) on the same
+  instructions, wherever the rest of the code sat; anywhere inside one line it
+  did not matter. The computed-goto build has no such block, but its
+  instruction bodies moved by 16 or 32 bytes swing single benchmarks by 5 to
+  10%. So, with compilers that take the options (CMakeLists.txt), `dispatch.c`
+  is compiled with `-falign-functions=64 -falign-loops=64 -falign-jumps=64`:
+  the function, its loop heads and every block reached only by a jump start on
+  a line. The layout then no longer depends on unrelated code linked before or
+  after it, nor on the size of the blocks before a hot one; the code grows by
+  about 1.7 KB. Measured on one machine (bench/README.md); a different core
+  may prefer other placements, but none straddles a line.
 
 ## Bounding a run
 

@@ -114,14 +114,24 @@ target_link_libraries(${PROJECT_NAME} PUBLIC lh)
 if (NOT CNOR_VM_COMPUTED_GOTO)
     target_compile_definitions(${PROJECT_NAME} PRIVATE CNOR_VM_COMPUTED_GOTO=0)
 endif ()
-# The dispatch loop runs at a speed that depends on where it starts in a
-# 64-byte line: the same code moved by 32 bytes ran `native`, `nested` and
-# `globals` 7 to 9% slower (docs/architecture.md, "Where the loop starts").
-# Starting it on a line keeps the size of unrelated code linked before it from
-# moving it.
-if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+# The dispatch loop runs at a speed that depends on where its hot blocks sit in
+# 64-byte lines (docs/architecture.md, "Where the loop starts"): with the
+# switch, one 22-byte block that every instruction goes through ran the
+# benchmarks up to 35% slower when it straddled two lines. The function, its
+# loop heads and every block reached only by a jump start on a line, so
+# neither unrelated code nor the position of a block before them moves them.
+include(CheckCCompilerFlag)
+set(CNOR_DISPATCH_ALIGN_FLAGS "")
+foreach (CNOR_ALIGN_FLAG IN ITEMS -falign-functions=64 -falign-loops=64 -falign-jumps=64)
+    string(MAKE_C_IDENTIFIER "CNOR_HAS${CNOR_ALIGN_FLAG}" CNOR_ALIGN_VAR)
+    check_c_compiler_flag(${CNOR_ALIGN_FLAG} ${CNOR_ALIGN_VAR})
+    if (${CNOR_ALIGN_VAR})
+        list(APPEND CNOR_DISPATCH_ALIGN_FLAGS ${CNOR_ALIGN_FLAG})
+    endif ()
+endforeach ()
+if (CNOR_DISPATCH_ALIGN_FLAGS)
     set_source_files_properties(${CNOR_SRC_PATH}/cnor/vm/dispatch.c PROPERTIES
-            COMPILE_OPTIONS -falign-functions=64)
+            COMPILE_OPTIONS "${CNOR_DISPATCH_ALIGN_FLAGS}")
 endif ()
 
 # Optional optimizations, all OFF by default; bench/README.md has what they

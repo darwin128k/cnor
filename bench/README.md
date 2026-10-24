@@ -149,9 +149,17 @@ one pinned CPU), before the types / with them / now:
 
 Instructions per compile (callgrind): `fib` 38.0k before the types, 41.9k
 with them, 31.5k now; `compile` 70.4M, 74.2M, 64.9M. The dispatch object is
-unchanged, but the smaller compiler moved it within a cache line, which cost
-up to 9% on some run workloads until `dispatch.c` was aligned (see
-docs/architecture.md, "Where the loop starts").
+unchanged, but the smaller compiler moved it within a cache line: up to 9%
+slower runs with computed goto, and with the `switch` the block every
+instruction goes through straddled two lines (`-O3`: `loop` +6%, `nested`
++8%, `text` +9%; plain `-O2`: up to +36%). `dispatch.c` is now compiled with
+its function, loop heads and jump targets on 64-byte lines (see
+docs/architecture.md, "Where the loop starts"). Run medians of `cnor_bench`
+(`-O3`, 5 processes x 15 iterations) against the build before this work,
+types/import, then: computed goto `fib` -2%, `loop` -31%, `nested` -1%,
+`text` +2%, `native` -10%, `match` -12%; `switch` -13%, -5%, -6%, -3%, -7%,
+-7%. At plain `-O2` the `switch` build still runs `fib` 5% and `text` 4%
+slower than with the types/import layout, which was a lucky one there.
 
 ## Optional optimizations
 
