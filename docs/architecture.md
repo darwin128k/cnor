@@ -187,6 +187,15 @@ Add the code to `cnor_error_t` in its stage's group and its message to
   and hands back one `lh_runtime_allocator` block (`cnor_image_t`).
 - The VM copies the image at load and allocates the stack, frames, constants,
   bindings and string pool once; nothing is allocated while running.
+- The stack and the string pool are sized by the configuration, not by the
+  program, and a load keeps them: a host that loads another script (a plugin
+  reloading on a map change, a host with several images) does not free and
+  reserve megabytes again. Only the image, the function table, the constants
+  and the native bindings belong to the program and are freed with it.
+  Measured on a Windows host (2026-10-25, MinGW GCC, i686 and x86-64): a
+  reload of a small program went from 300 to 580 us to 2.3 to 2.5 us, the
+  compile itself takes 6 to 14 us. A script therefore starts in less than
+  20 us, without a build step.
 - Diagnostics copy the name they report (up to `CNOR_DIAG_NAME_CAPACITY`
   bytes), so they outlive the tree or image they came from.
 
@@ -250,6 +259,17 @@ place, the handlers under `src/cnor/vm/op/`:
   signed integers (with `eq` / `ne` also comparing any two values in place);
   anything else, and a `div` / `mod` by 0 or -1, defers to `op/operand.c`,
   which fetches the operands and runs the plain operator's value-level code.
+- **A remainder by a power of two is a mask.** The rule of `%` for integers is
+  the C rule (truncated toward zero), so a positive dividend and a power of
+  two leave the low bits: `x % 8` is `x & 7`. Only the two forms with an
+  immediate divisor do the test (`mod_li`, `mod_i`), and the test runs on the
+  divisor's 32 bits: a 64-bit test would take two registers on a 32-bit host,
+  where the dispatch loop has few to spare. The dividend's sign is checked
+  too, because a negative dividend keeps the C rule and not the mask.
+  Measured 2026-10-25 on a Windows host (MinGW GCC): a `match` over `i % 8`
+  runs 30% faster on x86-64, and the 32-bit build gains less, because there a
+  64-bit remainder is a call into the compiler's runtime and the mask saves
+  that call but the loop is register-starved either way.
 - **`for_loop`.** One instruction per `for` step: add one to the variable,
   compare with the hidden bound slot, jump back. Signed integers run inline;
   other kinds run `add` and `lt`'s value-level code, so wrapping, mixed kinds

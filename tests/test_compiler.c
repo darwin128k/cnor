@@ -1105,6 +1105,35 @@ CNOR_TEST(wraps_a_loop_variable_like_addition)
     CHECK_EQ(steps, 777U);
 }
 
+/* A remainder by a power of two is a mask in the dispatch loop, but the rule
+ * of `%` is the C rule: a negative dividend keeps its sign, and a divisor of
+ * 1, 0 or -1 is not a power of two to mask with. */
+CNOR_TEST(keeps_the_rule_of_the_remainder_by_a_power_of_two)
+{
+    /* A local and an immediate: the divisor is a power of two, and the
+     * dividend is not negative, so the remainder is a mask. */
+    CHECK_EQ(run_sint("let mut x = 17\nlet mut n = 0\nn = x % 8\nn\n"), 1);
+    CHECK_EQ(run_sint("let mut x = 40\nlet mut n = 0\nn = x % 8\nn\n"), 0);
+    /* The negative dividend keeps the C rule: the remainder is not a mask. */
+    CHECK_EQ(run_sint("let mut x = -9\nlet mut n = 0\nn = x % 8\nn\n"), -1);
+    CHECK_EQ(run_sint("let mut x = -16\nlet mut n = 0\nn = x % 8\nn\n"), 0);
+    CHECK_EQ(run_sint("let mut x = -17\nlet mut n = 0\nn = x % 8\nn\n"), -1);
+    /* 1 is a power of two, and the remainder by 1 is 0. */
+    CHECK_EQ(run_sint("let mut x = 17\nlet mut n = 0\nn = x % 1\nn\n"), 0);
+    CHECK_EQ(run_sint("let mut x = -17\nlet mut n = 0\nn = x % 1\nn\n"), 0);
+    /* A divisor that is no power of two keeps the plain remainder. */
+    CHECK_EQ(run_sint("let mut x = 17\nlet mut n = 0\nn = x % 3\nn\n"), 2);
+    CHECK_EQ(run_sint("let mut x = -17\nlet mut n = 0\nn = x % 3\nn\n"), -2);
+    CHECK_EQ(run_sint("let mut x = 17\nlet mut n = 0\nn = x % 6\nn\n"), 5);
+    CHECK_EQ(run_sint("let mut x = 17\nlet mut n = 0\nn = x % 16\nn\n"), 1);
+    CHECK_EQ(run_sint("let mut x = -17\nlet mut n = 0\nn = x % 16\nn\n"), -1);
+    /* The remainder of a computed dividend, on the stack. */
+    CHECK_EQ(run_sint("let mut x = 17\nlet mut n = 0\nn = (x + 3) % 8\nn\n"), 4);
+    CHECK_EQ(run_sint("let mut x = -17\nlet mut n = 0\nn = (x + 3) % 8\nn\n"), -6);
+    /* And in a loop. */
+    CHECK_EQ(run_sint("let mut n = 0\nfor i in 0..40:\n    n = n + i % 8\nn\n"), 140);
+}
+
 /* One pass of `for` over a local sum is three instructions: add_ll, its
  * store and the for_loop. */
 CNOR_TEST(runs_a_for_step_in_one_instruction)
@@ -2179,6 +2208,7 @@ static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(matches_integer_arms_by_value),
     CNOR_TEST_CASE(counts_ranges_at_their_edges),
     CNOR_TEST_CASE(wraps_a_loop_variable_like_addition),
+    CNOR_TEST_CASE(keeps_the_rule_of_the_remainder_by_a_power_of_two),
     CNOR_TEST_CASE(runs_a_for_step_in_one_instruction),
     CNOR_TEST_CASE(stops_after_exactly_the_budget_inside_for_loops),
     CNOR_TEST_CASE(compares_text_by_its_bytes),

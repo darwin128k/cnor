@@ -14,7 +14,9 @@ cnor_vm_free(lh_ptr block)
     }
 }
 
-/* Forget the loaded program, keep the configuration. */
+/* Forget the loaded program, keep the configuration and the storage: the
+ * stack and the string pool are sized by the configuration, not by the
+ * program, so a host that loads another script keeps them. */
 static void
 cnor_vm_unload(cnor_vm_t *self)
 {
@@ -23,8 +25,6 @@ cnor_vm_unload(cnor_vm_t *self)
     cnor_vm_free(self->constants);
     cnor_vm_free((lh_ptr) self->natives);
     cnor_vm_free(self->frames);
-    cnor_vm_stack_deinit(&self->stack);
-    cnor_str_pool_deinit(&self->str_pool);
     self->image = lh_null;
     self->code = lh_null;
     self->code_size = 0U;
@@ -69,6 +69,8 @@ void
 cnor_vm_deinit(cnor_vm_t *self)
 {
     cnor_vm_unload(self);
+    cnor_vm_stack_deinit(&self->stack);
+    cnor_str_pool_deinit(&self->str_pool);
 }
 
 void

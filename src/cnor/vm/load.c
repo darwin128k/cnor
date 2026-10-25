@@ -133,10 +133,22 @@ cnor_vm_allocate(cnor_vm_t *vm)
     {
         return cnor_diag_set(&vm->diag, cnor_error_stack_too_big, 0U, 0U);
     }
+    /* The stack and the string pool are sized by the configuration, not by the
+     * program, and a host that loads another script keeps them: freeing and
+     * reserving megabytes again costs more than the whole load. */
+    if (vm->stack.capacity < vm->config.stack_slots
+        && !cnor_vm_stack_reserve(&vm->stack, vm->config.stack_slots))
+    {
+        return cnor_diag_set(&vm->diag, cnor_error_no_memory, 0U, 0U);
+    }
+    if (vm->str_pool.size < vm->config.str_pool_size
+        && !cnor_str_pool_reserve(&vm->str_pool, vm->config.str_pool_size))
+    {
+        return cnor_diag_set(&vm->diag, cnor_error_no_memory, 0U, 0U);
+    }
     vm->frames = (cnor_vm_frame_t *) cnor_vm_alloc_table(vm->config.max_depth,
                                                          sizeof(cnor_vm_frame_t));
-    if (vm->frames == lh_null || !cnor_vm_stack_reserve(&vm->stack, vm->config.stack_slots)
-        || !cnor_str_pool_reserve(&vm->str_pool, vm->config.str_pool_size))
+    if (vm->frames == lh_null)
     {
         return cnor_diag_set(&vm->diag, cnor_error_no_memory, 0U, 0U);
     }

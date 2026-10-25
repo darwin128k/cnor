@@ -45,18 +45,36 @@ compare the two. `CNOR_IPO=ON` (link-time optimization) and `CNOR_PGO`
 (profile-guided optimization) are optional and OFF by default; see "Optional
 optimizations" below for what they measured and how to train a profile.
 
-### Against Lua and Python
+### Against Lua, Pawn and Python
 
 `compare/workloads.lua` and `compare/workloads.py` are the same programs in
 Lua 5.4 and Python 3 (locals throughout, a C function in place of the native:
-`math.abs`, `abs`). `compare/compare.py` runs whichever interpreters are
-installed, checks their results, and prints them next to cnor's:
+`math.abs`, `abs`). `compare/pawn/` holds the same programs in Pawn 4.1, the
+language of the Half-Life 1.6 plugins, with a small runner that times a
+compiled `.amx` (`compare/pawn/README.md` has how to build it).
+`compare/compare.py` runs whichever interpreters are installed, checks their
+results, and prints them next to cnor's:
 
 ```sh
 python3 bench/compare/compare.py --cnor build-bench/bench/cnor_bench --iterations 7
 ```
 
 Lua times are `os.clock` (CPU time), Python times `time.perf_counter_ns`.
+
+### Comparing two builds
+
+A change that is not about the hot path can still move a benchmark by 10 to
+35%: on an Intel core with the jump-alignment erratum the layout of the
+dispatch loop decides (see `docs/architecture.md`, "Where the loop starts"). So
+two builds are never compared by running them one after the other.
+`compare/ab.py` interleaves the runs of every build and reports the minimum:
+
+```sh
+python3 bench/compare/ab.py base=build/bench/cnor_bench new=build2/bench/cnor_bench
+```
+
+This is how the changes in "Windows: the Half-Life 1.6 target" below were
+measured.
 
 ## Sample results
 
@@ -104,6 +122,82 @@ the best of a few rounds; the median over 15 interleaved rounds is 12 to
 jump back out of line, behind a taken branch, and merged it with the exit
 into one indirect jump. Marking the jump back likely and giving it its own
 dispatch fixed it (see docs/architecture.md, win #6).
+
+## Windows: the Half-Life 1.6 target
+
+Half-Life 1.6 runs on 32-bit x86, so for a plugin the 32-bit numbers are the
+ones that count. Measured on a Windows host, Intel i7-3770K (3.5 GHz, an Ivy
+Bridge, so it has the jump alignment erratum), MinGW GCC 16, `-O2`, computed
+goto, 2026-10-25. Run time, minimum of several interleaved rounds
+(`compare/ab.py`).
+
+### Against Pawn and Lua, on one machine
+
+The same programs in cnor, Pawn 4.1 and Lua 5.4, all built here, all run
+interleaved on the same Windows host (i7-3770K, MinGW GCC 16, 2026-10-25);
+run time, minimum of six interleaved rounds. Pawn's cells are 32 bits, so its
+`loop` and `native` results overflow where cnor and Lua keep 64.
+
+| Workload | cnor 32-bit | cnor 64-bit | Pawn 32-bit | Pawn 64-bit | Lua 32-bit | Lua 64-bit |
+|---|---|---|---|---|---|---|
+| fib | 6.10 | 4.58 | 6.65 | 7.92 | 10.00 | 6.00 |
+| loop | 103.02 | 79.51 | 120.13 | 110.14 | 232.00 | 126.00 |
+| nested | 21.40 | 21.63 | 31.54 | 25.36 | 26.00 | 22.00 |
+| text | 18.89 | 12.45 | 17.68 | 29.95 | 91.00 | 60.00 |
+| native | 19.36 | 11.95 | 33.00 | 24.93 | 37.00 | 27.00 |
+| match | 24.03 | 19.99 | 33.68 | 30.10 | 44.00 | 41.00 |
+
+In milliseconds; lower is better. cnor 32-bit is faster than Pawn 32-bit on
+five of the six workloads (1.1 to 1.7 times) and faster than Lua 32-bit on all
+six (1.3 to 4.8 times). The one that Pawn wins is `text`, by 7%: Pawn keeps one
+character per cell and reads a character with one load, while cnor copies the
+24-byte value of the text onto the stack and then reads the character out of
+it (seven instructions per character, against Pawn's three or four). The way
+out is an operand form for the index, the same trick the arithmetic operators
+already use: `text[i]` would be one instruction instead of three.
+
+### Build with MinGW GCC, not with MSVC
+
+The dispatch loop uses computed goto where the compiler has it (GCC and
+Clang, on every platform) and a `switch` where it has not (MSVC). The two are
+not close on a 32-bit host: same source, same flags, interleaved runs.
+
+| Workload | computed goto ms | switch ms |
+|---|---|---|
+| fib | 5.95 | 5.76 |
+| loop | 124.65 | 295.98 |
+| nested | 31.20 | 60.80 |
+| text | 27.27 | 26.58 |
+| native | 22.12 | 29.36 |
+| match | 24.84 | 31.34 |
+
+A plugin built with MSVC would run its tight loops more than twice as slowly
+as the same source built with MinGW GCC, and the Linux build uses the fast
+one. So "the same speed on Windows and Linux" holds for the same compiler
+family (GCC or Clang), not across compiler families: build the plugin with
+`i686-w64-mingw32-gcc` (or another GCC-compatible cross compiler).
+
+### What the changes of 2026-10-25 bought
+
+Measured against the same source without them, interleaved (`compare/ab.py`).
+The numbers carry the layout noise of a few percent that every A/B on this
+host carries.
+
+| Change | 32-bit | 64-bit |
+|---|---|---|
+| A remainder by a power of two is a mask | match -30% | match -33% |
+| The stack and the string pool survive a load | load 300 to 580 us -> 2.3 to 2.5 us | the same |
+| A native reads the fields of a value directly | native -10% | native -17% |
+
+The remainder is the one that mattered: `match` over `i % 8` was the only
+workload where Pawn was ahead of cnor.
+
+The last one is not a change in the VM but in the way a native is written:
+`lh`'s accessors (`lh_value_get_kind`, `lh_value_get_data`) are ordinary
+functions in another library, and a host that reads the arguments of a native
+through them pays a call per field. The fields of a value are public, so a
+native reads `args[0].kind` and `args[0].data` directly, as
+`bench/workloads.c` does.
 
 Static types, global initializers and `import` (image format v4, 2026-10-23)
 change no run-time code: every workload compiles to the same code section

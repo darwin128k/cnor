@@ -6,23 +6,32 @@
 
 /* -- natives --------------------------------------------------------------- */
 
-/* absval(x): |x| of an integer. */
+/* absval(x): |x| of an integer.
+ *
+ * The fields of a value are read directly, not through lh's accessors: those
+ * are ordinary functions in another library, and a host that calls a native
+ * in a loop pays a call per field. This is how a native should be written. */
 static lh_value_t
 cnor_bench_native_absval(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx,
                          cnor_error_t *error)
 {
+    lh_value_t result;
+
     (void) argc;
     (void) ctx;
-    switch (lh_value_get_kind(&args[0]))
+    result.kind = args[0].kind;
+    result.data.u = args[0].data.u;
+    switch (args[0].kind)
     {
     case lh_value_kind_sint:
     {
-        const lh_sllong_t x = lh_value_get_data(&args[0])->i;
+        const lh_sllong_t x = args[0].data.i;
 
-        return lh_value_make_sint(x < 0 ? -x : x);
+        result.data.i = x < 0 ? -x : x;
+        return result;
     }
     case lh_value_kind_uint:
-        return args[0];
+        return result;
     default:
         *error = cnor_error_type;
         return lh_value_make_none();

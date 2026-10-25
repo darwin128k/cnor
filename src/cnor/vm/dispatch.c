@@ -199,6 +199,23 @@ cnor_vm_slow(cnor_vm_t *vm)
 #define CNOR_VM_WRAP(a, op, b) ((lh_sllong_t) ((lh_ullong_t) (a) op (lh_ullong_t) (b)))
 
 /*
+ * The remainder by a power of two is a mask, as long as the dividend is not
+ * negative: the rule of `%` for integers is the C rule (truncated toward
+ * zero), so a positive dividend and a power of two leave the low bits. The
+ * divisor is an immediate, and the test is done on its 32 bits: a 64-bit test
+ * would need two registers on a 32-bit host, where the dispatch loop has few
+ * to spare.
+ *
+ * The test needs no sign test on the divisor: a negative divisor has more
+ * than one bit set, so it fails the mask test (and 0 never reaches here: the
+ * callers send it to the slow path, which fails the division).
+ */
+#define CNOR_VM_MOD_I(a, b32)                                                                        \
+    (((((lh_u32_t) (b32) & ((lh_u32_t) (b32) - 1U)) == 0U) && ((a) >= 0))                            \
+         ? ((a) & (lh_sllong_t) ((lh_u32_t) (b32) - 1U))                                            \
+         : ((a) % (lh_sllong_t) (b32)))
+
+/*
  * Fusion: a few instructions look at the opcode after them and, when it is
  * the usual partner, execute it too without going back through dispatch. The
  * partner is still a separate instruction of the image: it is counted against
@@ -896,7 +913,41 @@ cnor_vm_switch:
     CNOR_VM_FORMS(sub, CNOR_VM_STORE_OR_SET, 1, CNOR_VM_WRAP(a, -, b))
     CNOR_VM_FORMS(mul, CNOR_VM_STORE_OR_SET, 1, CNOR_VM_WRAP(a, *, b))
     CNOR_VM_FORMS(div, CNOR_VM_STORE_OR_SET, b != 0 && b != -1, a / b)
-    CNOR_VM_FORMS(mod, CNOR_VM_STORE_OR_SET, b != 0 && b != -1, a % b)
+    /* The remainder by a power of two is a mask; only the forms with an
+     * immediate divisor are worth the test, the other two pay for it on every
+     * remainder. */
+    CNOR_VM_OP(mod_ll)
+    {
+        CNOR_VM_FORM_LL(CNOR_VM_STORE_OR_SET, b != 0 && b != -1, a % b);
+    }
+    CNOR_VM_OP(mod_li)
+    {
+        const lh_value_t *const left = &fp[pc[1]];
+        const lh_s32_t b32 = (lh_s32_t) cnor_vm_fast_s32(pc + 2);
+
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(left) == lh_value_kind_sint) && b32 != 0
+            && b32 != -1)
+        {
+            const lh_sllong_t a = cnor_vm_fast_sint(left);
+
+            ++sp;
+            CNOR_VM_STORE_OR_SET(6U, CNOR_VM_MOD_I(a, b32));
+        }
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(mod_i)
+    {
+        const lh_s32_t b32 = (lh_s32_t) cnor_vm_fast_s32(pc + 1);
+
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_sint) && b32 != 0
+            && b32 != -1)
+        {
+            const lh_sllong_t a = cnor_vm_fast_sint(&sp[-1]);
+
+            CNOR_VM_STORE_OR_SET(5U, CNOR_VM_MOD_I(a, b32));
+        }
+        CNOR_VM_SLOW();
+    }
     CNOR_VM_EQUALITY_FORMS(eq, 1)
     CNOR_VM_EQUALITY_FORMS(ne, 0)
     CNOR_VM_FORMS(lt, CNOR_VM_BRANCH_OR_SET, 1, a < b)
