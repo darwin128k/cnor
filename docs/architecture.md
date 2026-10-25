@@ -267,10 +267,13 @@ place, the handlers under `src/cnor/vm/op/`:
   divisor's 32 bits: a 64-bit test would take two registers on a 32-bit host,
   where the dispatch loop has few to spare. The dividend's sign is checked
   too, because a negative dividend keeps the C rule and not the mask.
-  Measured 2026-10-25 on a Windows host (MinGW GCC): a `match` over `i % 8`
-  runs 30% faster on x86-64, and the 32-bit build gains less, because there a
-  64-bit remainder is a call into the compiler's runtime and the mask saves
-  that call but the loop is register-starved either way.
+  Measured 2026-10-25 on a Windows host (MinGW GCC): the remainder itself runs
+  36% faster on a 32-bit host and 77% faster on a 64-bit one (20 million
+  remainders: 175 to 112 ms, and 215 to 49 ms), which on the `match` workload
+  (a million remainders by 8) is about 13% on 32-bit and 30% on 64-bit. The
+  workload cannot show this on its own: the change moves the code in the
+  dispatch loop, and the layout alone moves a benchmark by tens of percent
+  (see "Where the loop starts"), so the mechanism was measured on its own.
 - **The index forms.** `text[i]` used to copy the 24-byte value of the text
   onto the stack, push the index and index that copy: three instructions and
   two copies. The forms `index_ll`, `index_li` and `index_i` read the text and
@@ -291,6 +294,15 @@ place, the handlers under `src/cnor/vm/op/`:
   `native` workload runs 1% faster (32-bit) and 1% slower (64-bit) — the copy
   was cheap, and what a call costs is the dispatch and the call itself, not
   the value that comes back.
+- **The division takes the narrowest width that is exact.** A 64-bit division
+  on a 32-bit host is a call into the compiler's runtime (`__divdi3`), where
+  a 32-bit division is one instruction. When both operands fit in 32 bits the
+  division is exact in 32 bits: the value keeps its 64-bit width, and
+  nothing wraps that would not wrap at 64 bits. The divisor of the `_li` and
+  `_i` forms is an immediate, so the test of it folds away and only the
+  dividend is checked. Measured on a 32-bit host (MinGW GCC, 20 million
+  divisions): 9 to 10.7 ns through the runtime, 6.35 ns in 32 bits — about
+  ten cycles saved per division, with the result the same either way.
 - **`for_loop`.** One instruction per `for` step: add one to the variable,
   compare with the hidden bound slot, jump back. Signed integers run inline;
   other kinds run `add` and `lt`'s value-level code, so wrapping, mixed kinds
@@ -453,8 +465,15 @@ place, the handlers under `src/cnor/vm/op/`:
   pads the code after every branch and is no better: the 64-bit build runs 29
   to 75% slower, the 32-bit build is unchanged. So the computed-goto blocks
   stay where they land, and the answer to the layout sensitivity is the
-  method, not a flag: two builds are compared by interleaving their runs and
-  taking the minimum (`bench/compare/ab.py`), never one after the other.
+  method, not a flag. `bench/compare/layouts.py` builds the same source
+  several times, with a padding function of a different size before the
+  dispatch loop, and measures every build: on a Windows host (an Intel
+  i7-3770K, MinGW GCC, 32-bit) the same source lands 16 to 96% apart
+  depending on the layout (bench/README.md has the table). Two things follow:
+  a single measurement of two builds says which of the two is faster here, and
+  nothing about the change; and a change is judged by the number of steps it
+  removes, by the operation measured on its own, and by the median over
+  several layouts.
 
 ## Bounding a run
 

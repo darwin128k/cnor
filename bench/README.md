@@ -183,25 +183,37 @@ host carries.
 
 | Change | 32-bit | 64-bit |
 |---|---|---|
-| A remainder by a power of two is a mask | match -30% | match -33% |
+| A remainder by a power of two is a mask | the remainder 175 to 112 ms, the `match` workload about -13% | the remainder 215 to 49 ms, the `match` workload about -30% |
 | The index of a local text is one instruction | text -18% | text -13% |
 | The stack and the string pool survive a load | load 300 to 580 us -> 2.3 to 2.5 us | the same |
 | A native reads the fields of a value directly | native -10% | native -17% |
 | A native writes its result in place | native -1% | native +1% |
+| A division takes the narrowest exact width | 9 to 10.7 ns -> 6.35 ns per division | no change |
 
 The remainder is the one that mattered: `match` over `i % 8` was the only
 workload where Pawn was ahead of cnor.
 
 The index forms are the second: `text[i]` used to copy the text onto the
 stack first, and the forms read it where it lies. The `text` workload's step
-count drops by a quarter (6,620,021 to 4,900,021 steps), and the time by
-18% on 32-bit.
+count drops by a quarter (6,620,021 to 4,900,021 steps), and that is the
+part of the claim no layout can distort.
 
 The native's result in place removes a copy of 24 bytes per call, and that is
 all it does: the measured difference is 1%, because what a native call costs
 is the dispatch and the call itself, not the value that comes back. The
 change is worth keeping for the copy it removes and for the simpler
 convention, not for the speed.
+
+The division takes the narrowest width that is exact: on a 32-bit host a
+64-bit division is a call into the compiler's runtime, and the same division
+in 32 bits is one instruction. The value keeps its 64-bit width, so nothing
+wraps that would not wrap at 64 bits. Measured on its own (20 million
+divisions, MinGW GCC, 32-bit): 9 to 10.7 ns through the runtime, 6.35 ns in
+32 bits.
+
+The benchmark itself cannot show the last two: they move the code in the
+dispatch loop, and on this host the layout alone moves a workload by tens of
+percent (see below).
 
 The last one is not a change in the VM but in the way a native is written:
 `lh`'s accessors (`lh_value_get_kind`, `lh_value_get_data`) are ordinary
@@ -223,9 +235,37 @@ alignment erratum), both against the same source:
 Neither is in the build. The computed-goto blocks are reached through an
 indirect jump, and padding them apart only pushes the hot loop out of the
 instruction cache; the assembler flag pads the code after every branch and
-costs the same. The layout sensitivity is therefore answered by the method:
-compare two builds by interleaving their runs (`compare/ab.py`), never one
-after the other.
+costs the same.
+
+**How much the layout alone can do.** `compare/layouts.py` builds the same
+source several times, with a padding function of a different size before the
+dispatch loop, and measures every build. On this host (32-bit, five layouts,
+minimum of two rounds each):
+
+| Workload | median | min | max | spread |
+|---|---|---|---|---|
+| fib | 6.31 | 6.11 | 9.63 | 57% |
+| loop | 107.58 | 105.65 | 122.10 | 16% |
+| nested | 18.99 | 18.67 | 22.12 | 18% |
+| text | 16.42 | 14.70 | 28.81 | 96% |
+| native | 19.97 | 19.48 | 29.26 | 50% |
+| match | 25.88 | 24.94 | 32.26 | 29% |
+
+So a single measurement of two builds is worth little: the difference between
+them may be the change, or the layout, or both. Three things are trusted
+instead, and only these:
+
+1. **The step count.** It is exact and it does not depend on the machine: the
+   index forms take the `text` workload from 6,620,021 steps to 4,900,021, a
+   quarter less work, and no layout can fake that.
+2. **The mechanism on its own.** A micro-benchmark of the operation itself
+   (the remainder by a power of two, the division), which no layout touches.
+3. **The median over several layouts** (`compare/layouts.py`), which is what a
+   change is judged by when it changes the code size.
+
+A/B of two binaries (`compare/ab.py`) answers a different question: which of
+the two is faster *on this machine*. That is worth knowing before shipping,
+and it is not evidence about the change.
 
 Static types, global initializers and `import` (image format v4, 2026-10-23)
 change no run-time code: every workload compiles to the same code section

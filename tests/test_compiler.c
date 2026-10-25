@@ -1285,6 +1285,25 @@ CNOR_TEST(makes_an_array_and_writes_its_elements)
              cnor_error_type_mismatch);
 }
 
+/* The division takes the narrowest width that is exact: the value keeps its
+ * 64-bit width, and the result is the same either way. */
+CNOR_TEST(divides_at_the_width_the_value_fits_in)
+{
+    CHECK_EQ(run_sint("let mut a = 2147483647\nlet mut n = 0\nn = a / 2\nn\n"), 1073741823);
+    CHECK_EQ(run_sint("let mut a = 2147483648\nlet mut n = 0\nn = a / 2\nn\n"), 1073741824);
+    CHECK_EQ(run_sint("let mut a = -2147483648\nlet mut n = 0\nn = a / 2\nn\n"), -1073741824);
+    /* A value that no longer fits in 32 bits keeps the 64-bit rule. */
+    CHECK_EQ(run_sint("let mut a = 0xFFFFFFFF\nlet mut n = 0\n"
+                      "a = a + 1\nn = a / 7\nn\n"),
+             613566756);
+    /* The remainder keeps the C rule: the sign of the dividend. */
+    CHECK_EQ(run_sint("let mut a = 17\nlet mut n = 0\nn = a % 5\nn\n"), 2);
+    CHECK_EQ(run_sint("let mut a = -17\nlet mut n = 0\nn = a % 5\nn\n"), -2);
+    CHECK_EQ(run_sint("let mut a = 0xFFFFFFFF\nlet mut n = 0\n"
+                      "a = a + 1\nn = a % 7\nn\n"),
+             4);
+}
+
 /* One pass of `for` over a local sum is three instructions: add_ll, its
  * store and the for_loop. */
 CNOR_TEST(runs_a_for_step_in_one_instruction)
@@ -2360,6 +2379,7 @@ static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(counts_ranges_at_their_edges),
     CNOR_TEST_CASE(wraps_a_loop_variable_like_addition),
     CNOR_TEST_CASE(computes_index_forms_as_the_stack_does),
+    CNOR_TEST_CASE(divides_at_the_width_the_value_fits_in),
     CNOR_TEST_CASE(makes_an_array_and_writes_its_elements),
     CNOR_TEST_CASE(takes_the_index_of_a_local_in_one_instruction),
     CNOR_TEST_CASE(keeps_the_rule_of_the_remainder_by_a_power_of_two),

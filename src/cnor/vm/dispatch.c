@@ -205,6 +205,26 @@ cnor_vm_slow(cnor_vm_t *vm)
 #define CNOR_VM_WRAP(a, op, b) ((lh_sllong_t) ((lh_ullong_t) (a) op (lh_ullong_t) (b)))
 
 /*
+ * Whether @p x fits in a signed 32-bit integer.
+ */
+#define CNOR_VM_FITS32(x) ((x) >= -2147483647LL - 1LL && (x) <= 2147483647LL)
+
+/*
+ * A 64-bit division is a call into the compiler's runtime on a 32-bit host
+ * (`__divdi3`), a few dozen cycles and a call against one instruction. When
+ * both operands fit in 32 bits, the division is exact in 32 bits: the value
+ * keeps its 64-bit width, and nothing wraps that would not wrap at 64 bits.
+ * The divisor of the `_li` and `_i` forms is an immediate, so the test of it
+ * folds away and only the dividend is checked.
+ */
+#define CNOR_VM_DIV(a, b)                                                                            \
+    ((CNOR_VM_FITS32(a) && CNOR_VM_FITS32(b)) ? (lh_sllong_t) ((lh_s32_t) (a) / (lh_s32_t) (b))      \
+                                             : (a) / (b))
+#define CNOR_VM_MOD(a, b)                                                                            \
+    ((CNOR_VM_FITS32(a) && CNOR_VM_FITS32(b)) ? (lh_sllong_t) ((lh_s32_t) (a) % (lh_s32_t) (b))      \
+                                             : (a) % (b))
+
+/*
  * The remainder by a power of two is a mask, as long as the dividend is not
  * negative: the rule of `%` for integers is the C rule (truncated toward
  * zero), so a positive dividend and a power of two leave the low bits. The
@@ -219,7 +239,8 @@ cnor_vm_slow(cnor_vm_t *vm)
 #define CNOR_VM_MOD_I(a, b32)                                                                        \
     (((((lh_u32_t) (b32) & ((lh_u32_t) (b32) - 1U)) == 0U) && ((a) >= 0))                            \
          ? ((a) & (lh_sllong_t) ((lh_u32_t) (b32) - 1U))                                            \
-         : ((a) % (lh_sllong_t) (b32)))
+         : (CNOR_VM_FITS32(a) ? (lh_sllong_t) ((lh_s32_t) (a) % (lh_s32_t) (b32))                     \
+                               : (a) % (lh_sllong_t) (b32)))
 
 /*
  * Fusion: a few instructions look at the opcode after them and, when it is
@@ -711,7 +732,7 @@ cnor_vm_switch:
         if (cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_sint && sp[-1].data.i != 0
             && sp[-1].data.i != -1)
         {
-            CNOR_VM_SINT_PAIR(CNOR_VM_STORE_OR_SET, a / b);
+            CNOR_VM_SINT_PAIR(CNOR_VM_STORE_OR_SET, CNOR_VM_DIV(a, b));
         }
         CNOR_VM_SLOW();
     }
@@ -720,7 +741,7 @@ cnor_vm_switch:
         if (cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_sint && sp[-1].data.i != 0
             && sp[-1].data.i != -1)
         {
-            CNOR_VM_SINT_PAIR(CNOR_VM_STORE_OR_SET, a % b);
+            CNOR_VM_SINT_PAIR(CNOR_VM_STORE_OR_SET, CNOR_VM_MOD(a, b));
         }
         CNOR_VM_SLOW();
     }
@@ -926,13 +947,13 @@ cnor_vm_switch:
     }
     CNOR_VM_FORMS(sub, CNOR_VM_STORE_OR_SET, 1, CNOR_VM_WRAP(a, -, b))
     CNOR_VM_FORMS(mul, CNOR_VM_STORE_OR_SET, 1, CNOR_VM_WRAP(a, *, b))
-    CNOR_VM_FORMS(div, CNOR_VM_STORE_OR_SET, b != 0 && b != -1, a / b)
+    CNOR_VM_FORMS(div, CNOR_VM_STORE_OR_SET, b != 0 && b != -1, CNOR_VM_DIV(a, b))
     /* The remainder by a power of two is a mask; only the forms with an
      * immediate divisor are worth the test, the other two pay for it on every
      * remainder. */
     CNOR_VM_OP(mod_ll)
     {
-        CNOR_VM_FORM_LL(CNOR_VM_STORE_OR_SET, b != 0 && b != -1, a % b);
+        CNOR_VM_FORM_LL(CNOR_VM_STORE_OR_SET, b != 0 && b != -1, CNOR_VM_MOD(a, b));
     }
     CNOR_VM_OP(mod_li)
     {
