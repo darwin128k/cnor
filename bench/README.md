@@ -134,25 +134,33 @@ goto, 2026-10-25. Run time, minimum of several interleaved rounds
 ### Against Pawn and Lua, on one machine
 
 The same programs in cnor, Pawn 4.1 and Lua 5.4, all built here, all run
-interleaved on the same Windows host (i7-3770K, MinGW GCC 16, 2026-10-25);
-run time, minimum of five interleaved rounds. Pawn's cells are 32 bits, so its
-`loop` and `native` results overflow where cnor and Lua keep 64.
+interleaved on the same Windows host (i7-3770K, MinGW GCC 16, 2026-10-25).
+Each language is built in **five code layouts** (a padding function of a
+different size before its entry point) and the **median over the layouts** is
+reported: where the code lands is worth tens of percent, and a single build
+would measure that instead of the language. Run time, minimum of three
+interleaved rounds. Pawn's cells are 32 bits, so its `loop` and `native`
+results overflow where cnor and Lua keep 64.
 
 | Workload | cnor 32-bit | Lua 32-bit | Pawn 32-bit | Python 3.14 |
 |---|---|---|---|---|
-| fib | 5.95 | 8.00 | 6.39 | 12.74 |
-| loop | 106.10 | 233.00 | 128.86 | 783.53 |
-| nested | 21.14 | 26.00 | 31.37 | 83.60 |
-| text | 15.84 | 93.00 | 16.71 | 34.52 |
-| native | 19.35 | 38.00 | 36.81 | 90.07 |
-| match | 25.57 | 42.00 | 35.55 | 132.44 |
+| fib | 6.40 | 9.00 | 7.21 | 21.23 |
+| loop | 118.61 | 271.00 | 163.09 | 1277.07 |
+| nested | 19.97 | 30.00 | 37.51 | 119.25 |
+| text | 18.48 | 103.00 | 19.56 | 58.37 |
+| native | 19.73 | 38.00 | 37.38 | 121.09 |
+| match | 25.79 | 47.00 | 35.58 | 187.50 |
 
 In milliseconds; lower is better. cnor 32-bit is faster than Pawn 32-bit on
 all six workloads (1.1 to 1.9 times) and faster than Lua 32-bit on all six
-(1.2 to 5.9 times). The `text` workload was the one Pawn won until the index
+(1.4 to 5.6 times). The `text` workload was the one Pawn won until the index
 forms of 2026-10-25 (see below): Pawn keeps one character per cell and reads
 a character with one load, while cnor copied the 24-byte value of the text
 onto the stack first.
+
+The medians are higher than a single build gives (the median of several
+layouts sits above the best of them), but the ratios hold: the conclusion
+does not depend on where the code landed.
 
 ### Build with MinGW GCC, not with MSVC
 
@@ -265,7 +273,9 @@ instead, and only these:
 
 A/B of two binaries (`compare/ab.py`) answers a different question: which of
 the two is faster *on this machine*. That is worth knowing before shipping,
-and it is not evidence about the change.
+and it is not evidence about the change. The comparison of the languages
+above therefore takes the median over five layouts of each of them
+(`compare/compare.py` takes several builds per language and medians them).
 
 Static types, global initializers and `import` (image format v4, 2026-10-23)
 change no run-time code: every workload compiles to the same code section
