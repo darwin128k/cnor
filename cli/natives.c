@@ -8,9 +8,9 @@
 /* -- writing --------------------------------------------------------------- */
 
 /* The arguments, separated by one space, then a newline when asked. */
-static lh_value_t
+static void
 cnor_cli_natives_write(FILE *to, const lh_value_t *args, cnor_argc_t argc, lh_bool_t newline,
-                       cnor_error_t *error)
+                       lh_value_t *result, cnor_error_t *error)
 {
     lh_bool_t ok = lh_bool_true;
     cnor_argc_t i;
@@ -27,38 +27,41 @@ cnor_cli_natives_write(FILE *to, const lh_value_t *args, cnor_argc_t argc, lh_bo
     {
         *error = cnor_error_native_fail;
     }
-    return lh_value_make_none();
+    *result = lh_value_make_none();
 }
 
 /* -- natives --------------------------------------------------------------- */
 
-static lh_value_t
-cnor_cli_native_print(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, cnor_error_t *error)
+static void
+cnor_cli_native_print(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, lh_value_t *result,
+                      cnor_error_t *error)
 {
-    return cnor_cli_natives_write(((cnor_cli_streams_t *) ctx)->out, args, argc, lh_bool_false,
-                                  error);
+    cnor_cli_natives_write(((cnor_cli_streams_t *) ctx)->out, args, argc, lh_bool_false, result,
+                            error);
 }
 
-static lh_value_t
-cnor_cli_native_println(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, cnor_error_t *error)
+static void
+cnor_cli_native_println(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, lh_value_t *result,
+                        cnor_error_t *error)
 {
-    return cnor_cli_natives_write(((cnor_cli_streams_t *) ctx)->out, args, argc, lh_bool_true,
-                                  error);
+    cnor_cli_natives_write(((cnor_cli_streams_t *) ctx)->out, args, argc, lh_bool_true, result,
+                            error);
 }
 
-static lh_value_t
-cnor_cli_native_eprint(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, cnor_error_t *error)
+static void
+cnor_cli_native_eprint(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, lh_value_t *result,
+                       cnor_error_t *error)
 {
-    return cnor_cli_natives_write(((cnor_cli_streams_t *) ctx)->err, args, argc, lh_bool_false,
-                                  error);
+    cnor_cli_natives_write(((cnor_cli_streams_t *) ctx)->err, args, argc, lh_bool_false, result,
+                            error);
 }
 
-static lh_value_t
-cnor_cli_native_eprintln(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx,
+static void
+cnor_cli_native_eprintln(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, lh_value_t *result,
                          cnor_error_t *error)
 {
-    return cnor_cli_natives_write(((cnor_cli_streams_t *) ctx)->err, args, argc, lh_bool_true,
-                                  error);
+    cnor_cli_natives_write(((cnor_cli_streams_t *) ctx)->err, args, argc, lh_bool_true, result,
+                            error);
 }
 
 /* -- table ----------------------------------------------------------------- */

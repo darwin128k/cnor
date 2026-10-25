@@ -93,6 +93,42 @@ cnor_parser_parenthesized(cnor_parser_t *self)
     return node;
 }
 
+/* `[value; count]`: an array of `count` elements, every one of them `value`. */
+static cnor_node_t *
+cnor_parser_array(cnor_parser_t *self)
+{
+    cnor_node_t *node = cnor_parser_node(self, cnor_node_array);
+    cnor_node_t *value;
+    cnor_node_t *count;
+
+    if (node == lh_null)
+    {
+        return lh_null;
+    }
+    cnor_parser_advance(self);
+    value = cnor_parser_expr(self);
+    if (value == lh_null || !cnor_parser_expect_punct(self, cnor_punct_semicolon))
+    {
+        return lh_null;
+    }
+    count = cnor_parser_expr(self);
+    if (count == lh_null)
+    {
+        return lh_null;
+    }
+    if (count->kind != cnor_node_int)
+    {
+        return cnor_parser_fail(self, cnor_error_bad_number);
+    }
+    if (!cnor_parser_expect_punct(self, cnor_punct_rbracket))
+    {
+        return lh_null;
+    }
+    node->data.array.value = value;
+    node->data.array.count = count->data.int_.value;
+    return node;
+}
+
 static cnor_node_t *
 cnor_parser_primary(cnor_parser_t *self)
 {
@@ -103,6 +139,10 @@ cnor_parser_primary(cnor_parser_t *self)
     if (cnor_parser_at_punct(self, cnor_punct_lparen))
     {
         return cnor_parser_parenthesized(self);
+    }
+    if (cnor_parser_at_punct(self, cnor_punct_lbracket))
+    {
+        return cnor_parser_array(self);
     }
     if (cnor_parser_at_keyword(self, cnor_keyword_true))
     {

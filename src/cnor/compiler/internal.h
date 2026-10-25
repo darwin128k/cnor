@@ -37,6 +37,7 @@ enum cnor_static_type
     cnor_static_u32,     /**< `u32` */
     cnor_static_f32,     /**< `f32` */
     cnor_static_str,     /**< `str` */
+    cnor_static_array,   /**< An array of values; its elements hold `any`. */
     cnor_static_type_count
 };
 /** @copybrief cnor_static_type */
@@ -143,6 +144,7 @@ struct cnor_binding
     lh_u16_t index;           /**< Slot, global, function or native index. */
     lh_bool_t is_mutable;     /**< For variables: declared with `mut`. */
     cnor_static_type_t type;  /**< For variables: what they hold. */
+    lh_u16_t count;           /**< For an array: how many elements. */
 };
 /** @copybrief cnor_binding */
 typedef struct cnor_binding cnor_binding_t;
@@ -188,6 +190,7 @@ struct cnor_local_decl
     cnor_slot_t slot;
     lh_bool_t is_mutable;
     cnor_static_type_t type;
+    lh_u16_t count; /**< For an array: how many elements. */
 };
 
 /** @brief One top-level name in ::cnor_name_index. */
@@ -441,7 +444,8 @@ cnor_scope_add_module_code(cnor_compiler_t *self, cnor_module_index_t module);
 /** @brief Declare a local in the current block; @p node is for diagnostics. */
 lh_bool_t
 cnor_scope_add_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view_t name,
-                     lh_bool_t is_mutable, cnor_static_type_t type, cnor_slot_t *slot);
+                     lh_bool_t is_mutable, cnor_static_type_t type, lh_u16_t count,
+                     cnor_slot_t *slot);
 /**
  * @brief Resolve @p name: locals, then the current file's functions, natives
  *        and globals, then those of the files it imports, then the host's
@@ -573,6 +577,8 @@ lh_bool_t
 cnor_compile_binary(cnor_compiler_t *self, const cnor_node_t *node);
 lh_bool_t
 cnor_compile_index(cnor_compiler_t *self, const cnor_node_t *node);
+lh_bool_t
+cnor_compile_array(cnor_compiler_t *self, const cnor_node_t *node);
 /** @brief Whether @p node names a local; its slot through @p slot, its type
  *         through @p type (both left alone when it does not). */
 lh_bool_t

@@ -96,9 +96,9 @@ cnor_compile_for_slots(cnor_compiler_t *self, const cnor_node_t *node, cnor_slot
 
     return cnor_compile_for_bound(self, node->data.for_.from, &from)
            && cnor_compile_for_bound(self, node->data.for_.to, &to)
-           && cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false, to, bound)
+           && cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false, to, 0U, bound)
            && cnor_emit_insn(self, cnor_op_store_local, *bound, 0U)
-           && cnor_scope_add_local(self, node, node->name, lh_bool_false, from, var)
+           && cnor_scope_add_local(self, node, node->name, lh_bool_false, from, 0U, var)
            && cnor_emit_insn(self, cnor_op_store_local, *var, 0U);
 }
 

@@ -54,6 +54,7 @@ enum cnor_node_kind
     cnor_node_binary,     /**< `left op right`. */
     cnor_node_unary,      /**< `op operand`. */
     cnor_node_index,      /**< `target[index]`. */
+    cnor_node_array,      /**< `[value; count]`: an array of `count` elements. */
     cnor_node_kind_count  /**< Number of kinds; not a kind itself. */
 };
 /** @copybrief cnor_node_kind */
@@ -212,6 +213,11 @@ union cnor_node_data
         cnor_node_t *target; /**< Indexed value. */
         cnor_node_t *index;  /**< Index. */
     } index;
+    struct
+    {
+        cnor_node_t *value; /**< The value every element holds. */
+        lh_u32_t count;     /**< How many elements. */
+    } array;
 };
 
 /**

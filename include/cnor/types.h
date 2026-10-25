@@ -128,4 +128,13 @@ typedef lh_u32_t cnor_count_t;
  */
 #define CNOR_INDEX_MAX 0xFFFEU
 
+/**
+ * @def CNOR_VALUE_KIND_ARRAY
+ * @brief The value kind of an array: lh's kinds stop at 6, and cnor adds one.
+ *
+ * The storage is lh's string view: `begin` points at the elements (values of
+ * their own) and `size` counts them, not bytes.
+ */
+#define CNOR_VALUE_KIND_ARRAY 7U
+
 #endif /* CNOR_TYPES_H */

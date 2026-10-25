@@ -48,6 +48,33 @@ cnor_compile_let_global(cnor_compiler_t *self, const cnor_node_t *node, cnor_sta
     return cnor_compile_store(self, &binding);
 }
 
+/* `let mut name = [value; count]`: the name takes a slot for the array and a
+ * slot per element, and every element holds the value. */
+static lh_bool_t
+cnor_compile_let_array(cnor_compiler_t *self, const cnor_node_t *node, const cnor_node_t *array)
+{
+    const lh_u32_t count = array->data.array.count;
+    cnor_slot_t slot;
+
+    if (cnor_compile_at_top_level(self))
+    {
+        /* A global array would outlive the frame its elements live in. */
+        return cnor_compile_fail(self, node, cnor_error_not_a_declaration);
+    }
+    if (!cnor_scope_add_local(self, node, node->name, node->data.let.is_mutable,
+                              cnor_static_array, (lh_u16_t) count, &slot))
+    {
+        return lh_bool_false;
+    }
+    /* The value every element holds. */
+    if (!cnor_compile_expr(self, array->data.array.value))
+    {
+        return lh_bool_false;
+    }
+    /* `array_new` fills the elements and writes the array's value. */
+    return cnor_emit_insn(self, cnor_op_array_new, slot, count);
+}
+
 lh_bool_t
 cnor_compile_let(cnor_compiler_t *self, const cnor_node_t *node)
 {
@@ -56,6 +83,17 @@ cnor_compile_let(cnor_compiler_t *self, const cnor_node_t *node)
     cnor_binding_t binding;
     cnor_slot_t slot;
 
+    /* An array initializer: the name takes the slots of the elements. */
+    if (node->data.let.init != lh_null && node->data.let.init->kind == cnor_node_array)
+    {
+        if (annotation != cnor_type_none
+            && !cnor_type_require(self, node, cnor_type_of_annotation(annotation),
+                                  cnor_static_array))
+        {
+            return lh_bool_false;
+        }
+        return cnor_compile_let_array(self, node, node->data.let.init);
+    }
     /* The initializer is compiled before the name exists, so `let x = x + 1`
      * reads the outer `x` (and fails at the top level, where the outer `x`
      * would be this global before its `let`). */
@@ -70,13 +108,44 @@ cnor_compile_let(cnor_compiler_t *self, const cnor_node_t *node)
     {
         return cnor_compile_let_global(self, node, type);
     }
-    if (!cnor_scope_add_local(self, node, node->name, node->data.let.is_mutable, type, &slot))
+    if (!cnor_scope_add_local(self, node, node->name, node->data.let.is_mutable, type, 0U, &slot))
     {
         return lh_bool_false;
     }
     binding.kind = cnor_binding_local;
     binding.index = slot;
     return cnor_compile_store(self, &binding);
+}
+
+/* `scores[i] = value`: an element of the array in a local. */
+static lh_bool_t
+cnor_compile_assign_index(cnor_compiler_t *self, const cnor_node_t *node,
+                           const cnor_node_t *target)
+{
+    const cnor_node_t *const base = target->data.index.target;
+    cnor_binding_t binding;
+
+    if (base->kind != cnor_node_ident)
+    {
+        return cnor_compile_fail(self, target, cnor_error_not_assignable);
+    }
+    binding = cnor_scope_resolve(self, base->name);
+    if (binding.kind != cnor_binding_local || binding.type != cnor_static_array)
+    {
+        return cnor_compile_fail(self, target, cnor_error_not_assignable);
+    }
+    if (!binding.is_mutable)
+    {
+        return cnor_compile_fail_name(self, base, cnor_error_immutable);
+    }
+    /* The index, then the value; `array_set` takes both. */
+    if (!cnor_compile_expr(self, target->data.index.index)
+        || !cnor_type_require(self, target, cnor_static_i32, self->type)
+        || !cnor_compile_expr(self, node->data.assign.value))
+    {
+        return lh_bool_false;
+    }
+    return cnor_emit_insn(self, cnor_op_array_set, binding.index, 0U);
 }
 
 /* -- assignment ------------------------------------------------------------ */
@@ -87,6 +156,10 @@ cnor_compile_assign(cnor_compiler_t *self, const cnor_node_t *node)
     const cnor_node_t *target = node->data.assign.target;
     cnor_binding_t binding;
 
+    if (target->kind == cnor_node_index)
+    {
+        return cnor_compile_assign_index(self, node, target);
+    }
     if (target->kind != cnor_node_ident)
     {
         return cnor_compile_fail(self, target, cnor_error_not_assignable);

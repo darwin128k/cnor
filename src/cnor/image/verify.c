@@ -84,6 +84,18 @@ cnor_verify_slots(const struct cnor_verify *self, const cnor_insn_t *insn)
     return lh_bool_true;
 }
 
+/* An `array_new` writes its elements in the slots after the array's own, so
+ * they must be inside the function's frame. */
+static lh_bool_t
+cnor_verify_array(const struct cnor_verify *self, const cnor_insn_t *insn)
+{
+    const lh_u64_t slot = insn->operands[0];
+    const lh_u64_t count = insn->operands[1];
+
+    return slot + 1U + count <= (lh_u64_t) self->function.slot_count ? lh_bool_true
+                                                                    : lh_bool_false;
+}
+
 static lh_bool_t
 cnor_verify_operands(struct cnor_verify *self, const cnor_insn_t *insn)
 {
@@ -106,6 +118,8 @@ cnor_verify_operands(struct cnor_verify *self, const cnor_insn_t *insn)
         return operand < self->view->native_count;
     case cnor_op_switch:
         return cnor_verify_switch(self, insn);
+    case cnor_op_array_new:
+        return cnor_verify_array(self, insn);
     default:
         return lh_bool_true;
     }

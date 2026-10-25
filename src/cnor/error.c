@@ -38,6 +38,7 @@ static const lh_char_t *const m_messages[cnor_error_count] = {
     "files import each other",
     "imports nested too deep",
     "too many files",
+    "an array is only a declaration",
     "image shorter than its header",
     "bad image signature",
     "unsupported image version",

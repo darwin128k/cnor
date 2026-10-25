@@ -12,21 +12,21 @@
 /* -- natives --------------------------------------------------------------- */
 
 /* Gives its argument back, of whatever kind: a value of type `any`. */
-static lh_value_t
-echo(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, cnor_error_t *error)
+static void
+echo(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, lh_value_t *result, cnor_error_t *error)
 {
     (void) argc;
     (void) ctx;
     (void) error;
-    return args[0];
+    *result = args[0];
 }
 
 /* The notes taken by `note(n)`, in order, to observe when code runs. */
 static long long m_notes[64];
 static size_t m_note_count;
 
-static lh_value_t
-note(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, cnor_error_t *error)
+static void
+note(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, lh_value_t *result, cnor_error_t *error)
 {
     (void) argc;
     (void) ctx;
@@ -35,7 +35,7 @@ note(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, cnor_error_t *error)
     {
         m_notes[m_note_count++] = (long long) lh_value_get_data(&args[0])->i;
     }
-    return args[0];
+    *result = args[0];
 }
 
 static const cnor_native_t m_natives[] = {

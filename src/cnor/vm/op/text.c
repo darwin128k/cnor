@@ -52,3 +52,41 @@ cnor_vm_op_index(cnor_vm_t *vm, const cnor_insn_t *insn)
 
     return error == cnor_error_none ? lh_bool_true : cnor_vm_fail(vm, insn, error);
 }
+
+/*
+ * The index forms (`index_ll`, `index_li`, `index_i`): fetch the text and the
+ * index where the form says, then apply the plain index's rule, so a form
+ * computes and fails exactly as `load_local` / `push_i32` and the plain opcode
+ * would.
+ */
+lh_bool_t
+cnor_vm_op_index_operands(cnor_vm_t *vm, const cnor_insn_t *insn)
+{
+    lh_value_t text;
+    lh_value_t index;
+    cnor_error_t error;
+
+    switch (insn->op)
+    {
+    case cnor_op_index_ll:
+        text = *cnor_vm_stack_at(&vm->stack, vm->fp + insn->operands[0]);
+        index = *cnor_vm_stack_at(&vm->stack, vm->fp + insn->operands[1]);
+        break;
+    case cnor_op_index_li:
+        text = *cnor_vm_stack_at(&vm->stack, vm->fp + insn->operands[0]);
+        index = lh_value_make_sint((lh_sllong_t) (lh_s32_t) insn->operands[1]);
+        break;
+    default:
+        /* `index_i`: the text is on the stack, and the result takes its place. */
+        text = cnor_vm_stack_pop(&vm->stack);
+        index = lh_value_make_sint((lh_sllong_t) (lh_s32_t) insn->operands[0]);
+        break;
+    }
+    error = cnor_vm_text_index(&text, &index);
+    if (error != cnor_error_none)
+    {
+        return cnor_vm_fail(vm, insn, error);
+    }
+    cnor_vm_stack_push(&vm->stack, text);
+    return lh_bool_true;
+}

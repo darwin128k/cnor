@@ -224,7 +224,7 @@ cnor_compile_params(cnor_compiler_t *self, const cnor_node_t *param)
         cnor_slot_t slot;
 
         if (!cnor_scope_add_local(self, param, param->name, lh_bool_false,
-                                  cnor_type_of_annotation(param->data.param.type), &slot))
+                                  cnor_type_of_annotation(param->data.param.type), 0U, &slot))
         {
             return lh_bool_false;
         }
@@ -286,7 +286,7 @@ cnor_compile_entry(cnor_compiler_t *self)
     const cnor_node_t *program = cnor_module_at(self, 0U)->program;
 
     cnor_compile_begin_top_code(self, 0U);
-    if (!cnor_scope_add_local(self, program, lh_str_view_empty(), lh_bool_true, cnor_static_any,
+    if (!cnor_scope_add_local(self, program, lh_str_view_empty(), lh_bool_true, cnor_static_any, 0U,
                               &self->result_slot)
         || !cnor_compile_module_calls(self) || !cnor_compile_statements(self, program))
     {

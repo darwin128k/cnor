@@ -155,13 +155,14 @@ build(program_t *p, lh_u16_t max_stack)
 
 /* -- natives --------------------------------------------------------------- */
 
-static lh_value_t
-double_it(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, cnor_error_t *error)
+static void
+double_it(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, lh_value_t *result,
+         cnor_error_t *error)
 {
     (void) argc;
     (void) ctx;
     (void) error;
-    return lh_value_make_sint(lh_value_get_data(&args[0])->i * 2);
+    *result = lh_value_make_sint(lh_value_get_data(&args[0])->i * 2);
 }
 
 static const cnor_native_t m_natives[] = {
@@ -365,6 +366,23 @@ CNOR_TEST(refuses_a_byte_that_is_not_an_opcode_at_load)
     CHECK_EQ(vm_code(&vm), cnor_error_bad_opcode);
     CHECK_EQ(cnor_diag_get_offset(cnor_vm_get_diag(&vm)), 0U);
     cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
+CNOR_TEST(refuses_an_array_whose_elements_leave_the_frame)
+{
+    program_t p;
+
+    p_init(&p);
+    op_u32(&p, cnor_op_push_i32, 0U);
+    op(&p, cnor_op_array_new);
+    cnor_byte_writer_put_u8(&p.code, 0U);  /* the slot */
+    cnor_byte_writer_put_u16(&p.code, 4U); /* the count */
+    op(&p, cnor_op_halt);
+    /* The frame has one slot, so the four elements are outside it. */
+    end_function(&p, 0U, 0U, 1U, 2U);
+    build(&p, 2U);
+    CHECK_EQ(load_and_run(&p, lh_null), cnor_error_bad_operand);
     p_deinit(&p);
 }
 
@@ -1538,6 +1556,7 @@ static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(mixes_signed_and_unsigned_without_wrapping),
     CNOR_TEST_CASE(reports_division_by_zero_instead_of_trapping),
     CNOR_TEST_CASE(refuses_a_byte_that_is_not_an_opcode_at_load),
+    CNOR_TEST_CASE(refuses_an_array_whose_elements_leave_the_frame),
     CNOR_TEST_CASE(refuses_an_instruction_that_runs_past_the_code),
     CNOR_TEST_CASE(refuses_more_pushes_than_the_declared_depth),
     CNOR_TEST_CASE(overflows_the_stack_it_was_given),

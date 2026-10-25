@@ -161,20 +161,21 @@ cnor_vm_op_native(cnor_vm_t *vm, const cnor_insn_t *insn)
 {
     const cnor_native_t *native = vm->natives[insn->operands[0]];
     const cnor_argc_t argc = (cnor_argc_t) insn->operands[1];
-    const lh_value_t *args = cnor_vm_stack_at(&vm->stack, vm->stack.sp - argc);
+    lh_value_t *const args = cnor_vm_stack_at(&vm->stack, vm->stack.sp - argc);
     cnor_error_t error = cnor_error_none;
-    lh_value_t result;
 
     if (!cnor_native_accepts(native, argc))
     {
         return cnor_vm_fail(vm, insn, cnor_error_bad_arity);
     }
-    result = native->fn(args, argc, vm->config.ctx, &error);
+    /* The result goes into the slot of the arguments: the native writes it
+     * there, and no value is copied. */
+    native->fn(args, argc, vm->config.ctx, args, &error);
     if (error != cnor_error_none)
     {
         return cnor_vm_fail(vm, insn, error);
     }
     vm->stack.sp -= argc;
-    cnor_vm_stack_push(&vm->stack, result);
+    cnor_vm_stack_push(&vm->stack, *args);
     return lh_bool_true;
 }

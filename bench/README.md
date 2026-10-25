@@ -135,26 +135,24 @@ goto, 2026-10-25. Run time, minimum of several interleaved rounds
 
 The same programs in cnor, Pawn 4.1 and Lua 5.4, all built here, all run
 interleaved on the same Windows host (i7-3770K, MinGW GCC 16, 2026-10-25);
-run time, minimum of six interleaved rounds. Pawn's cells are 32 bits, so its
+run time, minimum of five interleaved rounds. Pawn's cells are 32 bits, so its
 `loop` and `native` results overflow where cnor and Lua keep 64.
 
-| Workload | cnor 32-bit | cnor 64-bit | Pawn 32-bit | Pawn 64-bit | Lua 32-bit | Lua 64-bit |
-|---|---|---|---|---|---|---|
-| fib | 6.10 | 4.58 | 6.65 | 7.92 | 10.00 | 6.00 |
-| loop | 103.02 | 79.51 | 120.13 | 110.14 | 232.00 | 126.00 |
-| nested | 21.40 | 21.63 | 31.54 | 25.36 | 26.00 | 22.00 |
-| text | 18.89 | 12.45 | 17.68 | 29.95 | 91.00 | 60.00 |
-| native | 19.36 | 11.95 | 33.00 | 24.93 | 37.00 | 27.00 |
-| match | 24.03 | 19.99 | 33.68 | 30.10 | 44.00 | 41.00 |
+| Workload | cnor 32-bit | Lua 32-bit | Pawn 32-bit | Python 3.14 |
+|---|---|---|---|---|
+| fib | 5.95 | 8.00 | 6.39 | 12.74 |
+| loop | 106.10 | 233.00 | 128.86 | 783.53 |
+| nested | 21.14 | 26.00 | 31.37 | 83.60 |
+| text | 15.84 | 93.00 | 16.71 | 34.52 |
+| native | 19.35 | 38.00 | 36.81 | 90.07 |
+| match | 25.57 | 42.00 | 35.55 | 132.44 |
 
 In milliseconds; lower is better. cnor 32-bit is faster than Pawn 32-bit on
-five of the six workloads (1.1 to 1.7 times) and faster than Lua 32-bit on all
-six (1.3 to 4.8 times). The one that Pawn wins is `text`, by 7%: Pawn keeps one
-character per cell and reads a character with one load, while cnor copies the
-24-byte value of the text onto the stack and then reads the character out of
-it (seven instructions per character, against Pawn's three or four). The way
-out is an operand form for the index, the same trick the arithmetic operators
-already use: `text[i]` would be one instruction instead of three.
+all six workloads (1.1 to 1.9 times) and faster than Lua 32-bit on all six
+(1.2 to 5.9 times). The `text` workload was the one Pawn won until the index
+forms of 2026-10-25 (see below): Pawn keeps one character per cell and reads
+a character with one load, while cnor copied the 24-byte value of the text
+onto the stack first.
 
 ### Build with MinGW GCC, not with MSVC
 
@@ -186,11 +184,24 @@ host carries.
 | Change | 32-bit | 64-bit |
 |---|---|---|
 | A remainder by a power of two is a mask | match -30% | match -33% |
+| The index of a local text is one instruction | text -18% | text -13% |
 | The stack and the string pool survive a load | load 300 to 580 us -> 2.3 to 2.5 us | the same |
 | A native reads the fields of a value directly | native -10% | native -17% |
+| A native writes its result in place | native -1% | native +1% |
 
 The remainder is the one that mattered: `match` over `i % 8` was the only
 workload where Pawn was ahead of cnor.
+
+The index forms are the second: `text[i]` used to copy the text onto the
+stack first, and the forms read it where it lies. The `text` workload's step
+count drops by a quarter (6,620,021 to 4,900,021 steps), and the time by
+18% on 32-bit.
+
+The native's result in place removes a copy of 24 bytes per call, and that is
+all it does: the measured difference is 1%, because what a native call costs
+is the dispatch and the call itself, not the value that comes back. The
+change is worth keeping for the copy it removes and for the simpler
+convention, not for the speed.
 
 The last one is not a change in the VM but in the way a native is written:
 `lh`'s accessors (`lh_value_get_kind`, `lh_value_get_data`) are ordinary
@@ -198,6 +209,23 @@ functions in another library, and a host that reads the arguments of a native
 through them pays a call per field. The fields of a value are public, so a
 native reads `args[0].kind` and `args[0].data` directly, as
 `bench/workloads.c` does.
+
+### The layout of the dispatch loop
+
+Two flags were measured on this host (an Intel i7-3770K, which has the jump
+alignment erratum), both against the same source:
+
+| Flag | 32-bit | 64-bit |
+|---|---|---|
+| `-falign-labels=32` (the computed-goto blocks) | a few percent either way | 21 to 67% slower |
+| `-Wa,-mbranches-within-32B-boundaries` | unchanged | 29 to 75% slower |
+
+Neither is in the build. The computed-goto blocks are reached through an
+indirect jump, and padding them apart only pushes the hot loop out of the
+instruction cache; the assembler flag pads the code after every branch and
+costs the same. The layout sensitivity is therefore answered by the method:
+compare two builds by interleaving their runs (`compare/ab.py`), never one
+after the other.
 
 Static types, global initializers and `import` (image format v4, 2026-10-23)
 change no run-time code: every workload compiles to the same code section

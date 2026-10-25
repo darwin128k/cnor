@@ -108,7 +108,8 @@ functions and no `halt` is needed.
 | `op/compare.c` | `eq` `ne` `lt` `le` `gt` `ge` `not` |
 | `op/operand.c` | The operand forms `<op>_ll` / `_li` / `_i`: fetch the operands, then the same value-level code as `op/arith.c` and `op/compare.c` |
 | `op/control.c` | Jumps, `for_loop`, `switch`, `call`, `ret`, `halt`, `native` |
-| `op/text.c` | String join, `len`, `index` |
+| `op/text.c` | String join, `len`, `index` and the index forms |
+| `op/array.c` | The array instructions: the elements, and the bounds |
 
 ## Extension points
 
@@ -270,6 +271,26 @@ place, the handlers under `src/cnor/vm/op/`:
   runs 30% faster on x86-64, and the 32-bit build gains less, because there a
   64-bit remainder is a call into the compiler's runtime and the mask saves
   that call but the loop is register-starved either way.
+- **The index forms.** `text[i]` used to copy the 24-byte value of the text
+  onto the stack, push the index and index that copy: three instructions and
+  two copies. The forms `index_ll`, `index_li` and `index_i` read the text and
+  the index from the frame or the code, so `text[i]` is one instruction and
+  one copy (of the one-byte result). Measured 2026-10-25 on a Windows host
+  (MinGW GCC): the `text` workload (a character compared in a loop) runs 18%
+  faster on 32-bit and 13% faster on 64-bit, and the step count of that
+  workload drops by a quarter.
+- **Arrays live in the frame.** An array's elements are slots of the frame
+  that declares it, and the array's value (where the elements are and how
+  many) sits in the slot before them. There is no allocation and no
+  ownership: an element is read and written where it lies, and the frame dies
+  with the function. The price is that an array is a local: a global array
+  would outlive the frame its elements live in, and is refused.
+- **A native writes its result in place.** The result shares the slot of the
+  arguments, so the machine copies nothing: a native reads its arguments and
+  writes the result over them. Measured 2026-10-25 on a Windows host: the
+  `native` workload runs 1% faster (32-bit) and 1% slower (64-bit) — the copy
+  was cheap, and what a call costs is the dispatch and the call itself, not
+  the value that comes back.
 - **`for_loop`.** One instruction per `for` step: add one to the variable,
   compare with the hidden bound slot, jump back. Signed integers run inline;
   other kinds run `add` and `lt`'s value-level code, so wrapping, mixed kinds
@@ -421,6 +442,19 @@ place, the handlers under `src/cnor/vm/op/`:
   after it, nor on the size of the blocks before a hot one; the code grows by
   about 1.7 KB. Measured on one machine (bench/README.md); a different core
   may prefer other placements, but none straddles a line.
+- **The computed-goto blocks are not aligned, and must not be.** The blocks
+  are reached through an indirect jump, which `-falign-jumps` does not cover,
+  so `-falign-labels` would be the way to align them. Measured 2026-10-25 on
+  a Windows host (MinGW GCC, an Intel i7-3770K): `-falign-labels=32` makes
+  the 64-bit build 21 to 67% **slower** (the labels move apart, and the hot
+  loop no longer fits in the instruction cache), and the 32-bit build a few
+  percent slower on some workloads and faster on others. The assembler flag
+  for the jump alignment erratum (`-Wa,-mbranches-within-32B-boundaries`)
+  pads the code after every branch and is no better: the 64-bit build runs 29
+  to 75% slower, the 32-bit build is unchanged. So the computed-goto blocks
+  stay where they land, and the answer to the layout sensitivity is the
+  method, not a flag: two builds are compared by interleaving their runs and
+  taking the minimum (`bench/compare/ab.py`), never one after the other.
 
 ## Bounding a run
 

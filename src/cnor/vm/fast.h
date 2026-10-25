@@ -17,6 +17,7 @@
 #include <lh/bool.h>
 #include <lh/byte.h>
 #include <lh/compiler/attribute/force_inline.h>
+#include <cnor/types.h>
 #include <cnor/vm/str_pool.h>
 #include <lh/bit/endian.h>
 #include <lh/compiler/type.h>
@@ -104,7 +105,7 @@ cnor_vm_fast_move(lh_value_t *to, const lh_value_t *from)
 
     to->kind = kind;
     to->data.u = from->data.u;
-    if (kind == lh_value_kind_str)
+    if (kind == lh_value_kind_str || kind == CNOR_VALUE_KIND_ARRAY)
     {
         to->data.s.size = from->data.s.size;
     }
@@ -149,6 +150,29 @@ cnor_vm_fast_set_str(lh_value_t *value, const lh_char_t *data, lh_usize_t size)
     value->kind = lh_value_kind_str;
     value->data.s.begin = data;
     value->data.s.size = size;
+}
+
+/** @brief The elements of the array @p value holds; its kind is known. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_value_t *
+cnor_vm_fast_array_data(const lh_value_t *value)
+{
+    return (lh_value_t *) (void *) (const void *) value->data.s.begin;
+}
+
+/** @brief How many elements the array @p value holds; its kind is known. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_u32_t
+cnor_vm_fast_array_count(const lh_value_t *value)
+{
+    return (lh_u32_t) value->data.s.size;
+}
+
+/** @brief Overwrite @p value with the array of @p count elements at @p data. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE void
+cnor_vm_fast_set_array(lh_value_t *value, lh_value_t *data, lh_u32_t count)
+{
+    value->kind = CNOR_VALUE_KIND_ARRAY;
+    value->data.s.begin = (const lh_char_t *) (const void *) data;
+    value->data.s.size = (lh_usize_t) count;
 }
 
 /** @def CNOR_VM_FAST_LONG_TEXT @brief Beyond this many bytes a call into lh's

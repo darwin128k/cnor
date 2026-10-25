@@ -253,7 +253,7 @@ cnor_compile_match(cnor_compiler_t *self, const cnor_node_t *node)
     cnor_label_init(&end);
     ok = cnor_compile_expr(self, node->data.match.subject)
          && cnor_match_check_patterns(self, node->data.match.arms, self->type)
-         && cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false, self->type,
+         && cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false, self->type, 0U,
                                  &subject)
          && cnor_emit_insn(self, cnor_op_store_local, subject, 0U);
     if (ok && cnor_match_is_dense(node->data.match.arms, &first, &count))

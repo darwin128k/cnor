@@ -30,11 +30,14 @@
  *              stay valid until the machine is reset.
  * @param argc  How many.
  * @param ctx   The host context given in the machine's configuration.
+ * @param[out] result The result; set it to ::lh_value_make_none for "nothing".
  * @param[out] error Set to something other than ::cnor_error_none to fail the run.
- * @return The result; ::lh_value_make_none for "nothing".
+ *
+ * The result shares the slot of the arguments: a native reads its arguments
+ * before it writes the result.
  */
-typedef lh_value_t (*cnor_native_fn_t)(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx,
-                                       cnor_error_t *error);
+typedef void (*cnor_native_fn_t)(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx,
+                                 lh_value_t *result, cnor_error_t *error);
 
 /**
  * @struct cnor_native

@@ -427,19 +427,25 @@ cnor_scope_leave_block(cnor_scope_t *self, cnor_scope_mark_t mark)
 
 lh_bool_t
 cnor_scope_add_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view_t name,
-                     lh_bool_t is_mutable, cnor_static_type_t type, cnor_slot_t *slot)
+                     lh_bool_t is_mutable, cnor_static_type_t type, lh_u16_t count,
+                     cnor_slot_t *slot)
 {
     cnor_scope_t *scope = &self->scope;
     struct cnor_local_decl decl;
+    /* An array takes a slot for its value and a slot per element; the others
+     * take one. */
+    const lh_u32_t slots = (type == cnor_static_array) ? (lh_u32_t) count + 1U : 1U;
 
-    if (scope->next_slot >= CNOR_SLOT_MAX)
+    if ((lh_u32_t) scope->next_slot + slots > CNOR_SLOT_MAX)
     {
         return cnor_compile_fail(self, node, cnor_error_too_many_locals);
     }
     decl.name = name;
-    decl.slot = scope->next_slot++;
+    decl.slot = scope->next_slot;
     decl.is_mutable = is_mutable;
     decl.type = type;
+    decl.count = count;
+    scope->next_slot += (cnor_slot_t) slots;
     lh_array_push_back(&scope->locals, &decl);
     if (scope->next_slot > scope->slot_count)
     {
@@ -490,6 +496,7 @@ cnor_binding_make(cnor_binding_kind_t kind, lh_u16_t index, lh_bool_t is_mutable
     binding.index = index;
     binding.is_mutable = is_mutable;
     binding.type = type;
+    binding.count = 0U;
     return binding;
 }
 
@@ -546,7 +553,11 @@ cnor_scope_resolve(cnor_compiler_t *self, lh_str_view_t name)
 
     if (local != lh_null)
     {
-        return cnor_binding_make(cnor_binding_local, local->slot, local->is_mutable, local->type);
+        cnor_binding_t binding =
+            cnor_binding_make(cnor_binding_local, local->slot, local->is_mutable, local->type);
+
+        binding.count = local->count;
+        return binding;
     }
     name_hash = cnor_name_index_hash_name(name);
     kind = cnor_scope_find_visible(self, name, name_hash, &index);

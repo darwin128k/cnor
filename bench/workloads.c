@@ -11,30 +11,36 @@
  * The fields of a value are read directly, not through lh's accessors: those
  * are ordinary functions in another library, and a host that calls a native
  * in a loop pays a call per field. This is how a native should be written. */
-static lh_value_t
-cnor_bench_native_absval(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx,
+static void
+cnor_bench_native_absval(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, lh_value_t *result,
                          cnor_error_t *error)
 {
-    lh_value_t result;
-
     (void) argc;
     (void) ctx;
-    result.kind = args[0].kind;
-    result.data.u = args[0].data.u;
+    /* The argument is read before the result is written: the result shares the
+     * slot of the arguments. */
     switch (args[0].kind)
     {
     case lh_value_kind_sint:
     {
         const lh_sllong_t x = args[0].data.i;
 
-        result.data.i = x < 0 ? -x : x;
-        return result;
+        result->kind = lh_value_kind_sint;
+        result->data.i = x < 0 ? -x : x;
+        return;
     }
     case lh_value_kind_uint:
-        return result;
+    {
+        const lh_ullong_t x = args[0].data.u;
+
+        result->kind = lh_value_kind_uint;
+        result->data.u = x;
+        return;
+    }
     default:
         *error = cnor_error_type;
-        return lh_value_make_none();
+        *result = lh_value_make_none();
+        return;
     }
 }
 

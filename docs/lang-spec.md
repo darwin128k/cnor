@@ -64,7 +64,13 @@ is needed: `none`, `bool`, `sint`, `uint`, `real`, `str`, `ptr`.
 | `f32` | `lh_value_kind_real` | **only with `LH_REAL_ENABLED`** |
 | `bool` | `lh_value_kind_bool` | |
 | `str` | `lh_value_kind_str` | see ownership below |
+| array | `CNOR_VALUE_KIND_ARRAY` (7) | cnor's own kind; see below |
 | (none) | `lh_value_kind_ptr` | natives only; not reachable from a script |
+
+An array's value is lh's string view: `begin` points at the elements (values
+of their own) and `size` counts them, not bytes. Its elements are slots of the
+frame that declares it, so an array is a local and does not outlive its
+function.
 
 An integer literal up to `0x7FFFFFFF` is an `i32`; a larger one (up to
 `0xFFFFFFFF`) is a `u32`. Arithmetic on two `u32` stays `u32` (a subtraction
@@ -149,7 +155,7 @@ block       := NEWLINE INDENT statement { statement } DEDENT
 statement   := simple end | compound
 simple      := let | assign | expr | "return" [ expr ] | "break" | "continue"
 let         := "let" [ "mut" ] IDENT [ ":" type ] [ "=" expr ]
-assign      := IDENT "=" expr
+assign      := IDENT "=" expr | IDENT "[" expr "]" "=" expr
 compound    := if | while | for | match
 if          := "if" expr ":" block [ "else" ( ":" block | if ) ]
 while       := "while" expr ":" block
@@ -159,9 +165,16 @@ arm         := ( literal | "-" literal | "_" ) "=>" simple [ "," ] end
 end         := [ ";" ] ( NEWLINE | DEDENT | EOF )      (or ";" then more on the line)
 expr        := binary expression, precedence below
 postfix     := primary { "[" expr "]" }
-primary     := literal | IDENT | IDENT "(" [ args ] ")" | "(" expr ")"
+primary     := literal | IDENT | IDENT "(" [ args ] ")" | "(" expr ")" | array
+array       := "[" expr ";" INT "]"
 literal     := INT | REAL | STRING | "true" | "false" | "none"
 ```
+
+**[cnor]** An array literal (`[value; count]`) is a declaration, not a value:
+its elements are slots of the frame that declares it, so it is only a `let`'s
+initializer, in a function. An array is written `let mut scores = [0; 32]`,
+and read and written with the index: `scores[i]` and `scores[i] = v`. The
+bounds are checked when the program runs.
 
 Operator precedence, loosest first; binary operators are left-associative:
 
@@ -209,7 +222,7 @@ ones: an error only where the program is certainly wrong, and nothing at run
 time that was not there before (no casts, no extra instructions).
 
 Every expression has a static type: one of `i32`, `u32`, `f32`, `bool`,
-`str`, the type of the `none` literal, or **`any`** when the compiler cannot
+`str`, the type of the `none` literal, **`array`**, or **`any`** when the compiler cannot
 know (a host native's result, an unannotated function's result, a variable
 that started as `none`). `any` is accepted wherever a type is required, and a
 value of type `any` is accepted where anything is; such values are checked by
@@ -219,7 +232,11 @@ the machine when an operator executes, as before.
   `u32` are one family and accept each other (literals above `0x7FFFFFFF` are
   `u32`, and mixed arithmetic is defined, section 4). `f32` is not an integer:
   an `i32` parameter refuses `1.5`, an `f32` one refuses `1`. `none` is
-  accepted only where no type is declared.
+  accepted only where no type is declared. An `array` is only an array: it is
+  not a number and not text, so it cannot be used as one.
+- **Arrays.** An array's elements hold whatever they were given, so an element
+  is of type `any`. The array itself cannot be read as a value: `scores` is an
+  error, `scores[i]` is the element.
 - **Variables.** `let x: T = e` requires `e` to be a `T`; `let x: T` without
   a value is refused (it would hold `none`). Without an annotation the
   variable takes the type of its initializer, and `let x` or `let x = none`
@@ -355,22 +372,24 @@ closures, a preprocessor, metatables, arrays.
 
 ---
 
-## 7. The `.tbc` image format, v4
+## 7. The `.tbc` image format, v6
 
 **[cnor]** v1 replaced the original header (whose layout used `sizeof` and
 was not portable) and its names section. Every field is a fixed-width
 little-endian integer; nothing depends on the compiler's struct layout. v2
 keeps the v1 layout and adds opcodes (the operand forms and `for_loop`,
 section 8); v3 adds `switch`; v4 gives each function its source file and
-turns the file name into a file table, for `import`. An image of another
-version is refused: v3 images must be compiled again.
+turns the file name into a file table, for `import`; v5 adds the index forms
+(`index_ll`, `index_li`, `index_i`); v6 adds the array instructions
+(`array_new`, `array_get`, `array_set`). An image of another version is
+refused: v5 images must be compiled again.
 
 ### 7.1 Header (68 bytes)
 
 | Offset | Field | Type | Meaning |
 |---|---|---|---|
 | 0 | `magic` | 4 bytes | `"cnor"` |
-| 4 | `version` | u16 | format version, currently 4 |
+| 4 | `version` | u16 | format version, currently 6 |
 | 6 | `flags` | u16 | bit 0: the image carries a line table |
 | 8 | `image_size` | u32 | size of the whole image |
 | 12 | `stack_slots` | u32 | largest frame (slots + operands), **computed by the compiler** |
@@ -425,7 +444,7 @@ relocation pass.
 
 ## 8. Instruction set
 
-The full list is `include/cnor/op.h` and its info table `src/cnor/op.c`: 70
+The full list is `include/cnor/op.h` and its info table `src/cnor/op.c`: 76
 opcodes. An opcode is one byte; operands follow it, little-endian. The info
 table holds each opcode's operands and stack effect; the compiler, the
 verifier and the machine all read it.
@@ -441,7 +460,8 @@ verifier and the machine all read it.
 | Operand forms | `add_ll` .. `ge_ll`, `add_li` .. `ge_li`, `add_i` .. `ge_i` |
 | Jumps | `jmp`, `jmp_if_false`, `jmp_if_true`, `for_loop`, `switch` |
 | Functions | `call`, `ret`, `native` |
-| Text | `len`, `index` |
+| Text | `len`, `index`, `index_ll`, `index_li`, `index_i` |
+| Arrays | `array_new`, `array_get`, `array_set` |
 | Other | `halt` |
 
 Operands: `push_i32` / `push_u32`: 32 bits; `push_const`: u16 ordinal; local
@@ -484,6 +504,30 @@ bodies follow the default code, holes in the range jump to the default. The
 arm that runs is the one the tests in turn would pick, since the patterns
 are distinct; it costs two steps (the `switch` and its `jmp`) to reach.
 
+**The index forms** (format v5) take the text and the index from the frame or
+the code, so `text[i]` does not copy the text onto the stack first:
+
+| Form | Operands | Computes |
+|---|---|---|
+| `index_ll` | slot a, slot b | push the one-byte string at `FRAME.a[FRAME.b]` |
+| `index_li` | slot a, s32 k | push the one-byte string at `FRAME.a[k]` |
+| `index_i` | s32 k | replace the top `t` with the one-byte string at `t[k]` |
+
+A form computes exactly what `index` computes on the same two values: the same
+bounds, the same error.
+
+**The array instructions** (format v6) work on the elements of an array, which
+are slots of the frame that declares it:
+
+| Opcode | Operands | Computes |
+|---|---|---|
+| `array_new` | slot a, u16 count | the `count` elements at `FRAME.a + 1` take the value on the stack; `FRAME.a` becomes the array |
+| `array_get` | slot a | the element of `FRAME.a` at the index on the stack, in its place |
+| `array_set` | slot a | the element of `FRAME.a` at the index on the stack takes the value on top of it |
+
+The bounds are checked at run time: an index outside the array fails the run
+with `index`.
+
 **[cnor]** `concat` is gone (`add` joins two strings); `line` is gone (the
 optional line table replaces it, so line information costs nothing at run
 time); `push_true` / `push_false` replace pushing numbers for booleans.
@@ -495,9 +539,14 @@ Three things are deliberately absent:
   guess where a loop ends. In the condition of `if` or `while`, `and`, `or`
   and `not` jump straight to the branch targets and never build a value.
 - **`else`** is a jump target, not an instruction.
-- **Arrays.** `lh_value_t` has no array kind, and adding one for a container is
-  exactly the kind of abstraction the language stays tiny to avoid. Indexing
-  works on strings.
+
+**[cnor]** Arrays were left out as well ("`lh_value_t` has no array kind"),
+until 2026-10-25: a Half-Life plugin needs a state per player, and an array
+of a fixed size is the natural shape. cnor adds its own value kind (7) rather
+than a kind in `lh`, and keeps the elements in the frame of the function that
+declares the array: no allocation, no ownership, and the elements are read
+and written where they lie. The price is that an array is a local: its
+elements live in a frame, and a frame belongs to a function.
 
 New opcodes are never inserted in the middle of the list: an opcode's number is
 part of the file format.
@@ -528,8 +577,8 @@ struct cnor_native
     cnor_argc_t arity_max;
 };
 
-typedef lh_value_t (*cnor_native_fn_t)(const lh_value_t *args, cnor_argc_t argc,
-                                       lh_ptr ctx, cnor_error_t *error);
+typedef void (*cnor_native_fn_t)(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx,
+                                 lh_value_t *result, cnor_error_t *error);
 ```
 
 The convention:
@@ -537,7 +586,10 @@ The convention:
 - arguments arrive ready in an `lh_value_t` array; a string is an
   `lh_str_view_t` into the image or the string pool, which the native may read
   and keep until the next reset, and never frees;
-- the return value is an `lh_value_t`; `lh_value_make_none()` means "nothing";
+- the result is written to `result`; `lh_value_make_none()` means "nothing".
+  **[cnor]** The result shares the slot of the arguments: the machine writes
+  it there, so nothing is copied, and a native reads its arguments before it
+  writes the result;
 - `ctx` is what the host put in the configuration, so a native needs no global
   state and several machines can run at once;
 - a native's failure is a code written to `error`, **not** an exception and
@@ -639,7 +691,6 @@ compiler's file, or for the machine the source file of the failing code;
 |---|---|
 | Closures | They need environments; in a stack VM that is a subsystem of its own |
 | Structs and classes | Strings, numbers and native calls are enough for scripts |
-| Arrays | `lh_value_t` has no array kind (see section 8) |
 | Exceptions | Determinism matters more than convenience in embedded code |
 | Overloading, generics | They grow both compile time and bytecode size |
 | `f32` without `LH_REAL_ENABLED` | The type is not available on an STM32 by default; a real literal is then a compile error (`no_reals`) |
@@ -655,10 +706,12 @@ line in `tests/cli/`, 50 on Windows):
   tokens, bracket continuations, `#` comments, integers in three bases, reals,
   `;`;
 - [x] parser: functions, `native fn`, `let`, assignments, expressions with
-  precedence, calls, indexing, `if` / `else` chains, `while`, `for`, `match`
-  with literal patterns and `_`;
+  precedence, calls, indexing, array literals, `if` / `else` chains, `while`,
+  `for`, `match` with literal patterns and `_`;
 - [x] compiler: every construct above, two passes (declarations, then bodies),
   computed frame sizes and stack depths, optional line table;
+- [x] arrays: a local array of a fixed size, its elements in the frame,
+  read and written by index, the bounds checked at run time (section 8);
 - [x] static type checking (section 6.3);
 - [x] global initializers in source order, with use-before-`let` errors
   (section 6.4);

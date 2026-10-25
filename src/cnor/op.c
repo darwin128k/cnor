@@ -85,6 +85,12 @@ static const cnor_op_info_t m_ops[cnor_op_count] = {
     CNOR_OP_ROW("ge_i", s32, none, 5U, 1U, 1U, 0U),
     CNOR_OP_ROW3("for_loop", s32, slot, slot, 7U, 0U, 0U, CNOR_OP_FLAG_JUMP),
     CNOR_OP_ROW3("switch", slot, s32, u8, 7U, 0U, 0U, 0U),
+    CNOR_OP_ROW("index_ll", slot, slot, 3U, 0U, 1U, 0U),
+    CNOR_OP_ROW("index_li", slot, s32, 6U, 0U, 1U, 0U),
+    CNOR_OP_ROW("index_i", s32, none, 5U, 1U, 1U, 0U),
+    CNOR_OP_ROW("array_new", slot, u16, 4U, 1U, 0U, 0U),
+    CNOR_OP_ROW("array_get", slot, none, 2U, 1U, 1U, 0U),
+    CNOR_OP_ROW("array_set", slot, none, 2U, 2U, 0U, 0U),
 };
 
 /* The binary operators that have operand forms, in the order of each family. */
@@ -200,6 +206,24 @@ cnor_op_get_binary_base(cnor_op_t op, cnor_operand_form_t *form)
     }
     *form = cnor_operand_form_stack;
     return op;
+}
+
+/* The index operation in each form; the plain opcode is the stack form. */
+static const cnor_op_t m_index_forms[cnor_operand_form_count] = {
+    [cnor_operand_form_stack] = cnor_op_index,
+    [cnor_operand_form_local_local] = cnor_op_index_ll,
+    [cnor_operand_form_local_int] = cnor_op_index_li,
+    [cnor_operand_form_stack_int] = cnor_op_index_i,
+};
+
+cnor_op_t
+cnor_op_get_index_form(cnor_operand_form_t form)
+{
+    if ((lh_uint_t) form >= (lh_uint_t) cnor_operand_form_count)
+    {
+        return cnor_op_count;
+    }
+    return m_index_forms[form];
 }
 
 /* -- decoding -------------------------------------------------------------- */

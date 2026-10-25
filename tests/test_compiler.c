@@ -12,34 +12,36 @@
 
 /* -- helpers --------------------------------------------------------------- */
 
-static lh_value_t
-double_it(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, cnor_error_t *error)
+static void
+double_it(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, lh_value_t *result,
+         cnor_error_t *error)
 {
     (void) argc;
     (void) ctx;
     (void) error;
-    return lh_value_make_sint(lh_value_get_data(&args[0])->i * 2);
+    *result = lh_value_make_sint(lh_value_get_data(&args[0])->i * 2);
 }
 
 /* Counts its calls through the context, to observe short-circuiting. */
-static lh_value_t
-touch(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, cnor_error_t *error)
+static void
+touch(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, lh_value_t *result,
+      cnor_error_t *error)
 {
     (void) args;
     (void) argc;
     (void) error;
     (*(int *) ctx)++;
-    return lh_value_make_bool(lh_bool_true);
+    *result = lh_value_make_bool(lh_bool_true);
 }
 
 /* Gives its argument back, of whatever kind. */
-static lh_value_t
-echo(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, cnor_error_t *error)
+static void
+echo(const lh_value_t *args, cnor_argc_t argc, lh_ptr ctx, lh_value_t *result, cnor_error_t *error)
 {
     (void) argc;
     (void) ctx;
     (void) error;
-    return args[0];
+    *result = args[0];
 }
 
 static const cnor_native_t m_natives[] = {
@@ -1134,6 +1136,155 @@ CNOR_TEST(keeps_the_rule_of_the_remainder_by_a_power_of_two)
     CHECK_EQ(run_sint("let mut n = 0\nfor i in 0..40:\n    n = n + i % 8\nn\n"), 140);
 }
 
+/* The instructions a program executes. */
+static cnor_step_count_t
+steps_of(const char *source)
+{
+    cnor_step_count_t steps = 0U;
+
+    (void) run_with_budget(source, 0U, &steps);
+    return steps;
+}
+
+/*
+ * The index forms and the plain opcode must agree: the text in a local and
+ * the index in a local or a literal take a form, the same through a global
+ * takes the plain opcode.
+ */
+static long long
+index_forms_disagree(const char *text, const char *index)
+{
+    static char src[4096];
+    size_t used = 0U;
+
+    used += (size_t) snprintf(src + used, sizeof(src) - used,
+                              "let gt = echo(%s)\n"
+                              "fn f(t: str, i: i32) -> i32:\n"
+                              "    let mut bad = 0\n"
+                              "    if t[i] != gt[i]:\n        bad = bad + 1\n"
+                              "    if t[2] != gt[2]:\n        bad = bad + 1\n"
+                              "    if echo(%s)[2] != gt[2]:\n        bad = bad + 1\n"
+                              "    return bad\n"
+                              "f(%s, %s)\n",
+                              text, text, text, index);
+    {
+        const long long bad = run_sint(src);
+
+        return bad == -999999 ? -1 : bad;
+    }
+}
+
+CNOR_TEST(computes_index_forms_as_the_stack_does)
+{
+    CHECK_EQ(index_forms_disagree("\"hello\"", "2"), 0);
+    CHECK_EQ(index_forms_disagree("\"hello\"", "0"), 0);
+    CHECK_EQ(index_forms_disagree("\"hello\"", "4"), 0);
+    CHECK_EQ(index_forms_disagree("\"abc\"", "1"), 0);
+    CHECK_EQ(run_text_is("fn f(t: str, i: i32) -> str:\n    return t[i]\nf(\"hello\", 2)\n",
+                         "l"),
+             1);
+}
+
+/* The text in a local is not copied onto the stack first: one instruction
+ * less per index than the same through a global. */
+CNOR_TEST(takes_the_index_of_a_local_in_one_instruction)
+{
+    static const char local_text[] = "fn f(n: i32) -> i32:\n"
+                                     "    let mut s = 0\n"
+                                     "    let t = \"%s\"\n"
+                                     "    for i in 0..n:\n"
+                                     "        if t[i] == \"a\":\n"
+                                     "            s = s + 1\n"
+                                     "    return s\n"
+                                     "f(%d)\n";
+    static const char global_text[] = "let g = \"%s\"\n"
+                                      "fn f(n: i32) -> i32:\n"
+                                      "    let mut s = 0\n"
+                                      "    for i in 0..n:\n"
+                                      "        if g[i] == \"a\":\n"
+                                      "            s = s + 1\n"
+                                      "    return s\n"
+                                      "f(%d)\n";
+    char text[257];
+    char small[512];
+    char large[512];
+    cnor_step_count_t local_small;
+    cnor_step_count_t local_large;
+    cnor_step_count_t global_small;
+    cnor_step_count_t global_large;
+
+    memset(text, 'a', 256U);
+    text[256] = '\0';
+    (void) snprintf(small, sizeof small, local_text, text, 100);
+    (void) snprintf(large, sizeof large, local_text, text, 200);
+    local_small = steps_of(small);
+    local_large = steps_of(large);
+    (void) snprintf(small, sizeof small, global_text, text, 100);
+    (void) snprintf(large, sizeof large, global_text, text, 200);
+    global_small = steps_of(small);
+    global_large = steps_of(large);
+    /* A hundred iterations more: the global text takes two instructions more
+     * per index, because it is loaded onto the stack and the index is pushed
+     * first, while the form reads both from the frame. */
+    CHECK_EQ((global_large - global_small) - (local_large - local_small), 200U);
+    CHECK_EQ(run_sint(large), 200LL);
+}
+
+/* An array is a declaration: its elements are slots of the frame, so it is
+ * only a local, and only in a `let`. */
+CNOR_TEST(makes_an_array_and_writes_its_elements)
+{
+    CHECK_EQ(run_sint("fn f() -> i32:\n"
+                      "    let mut scores = [0; 8]\n"
+                      "    for i in 0..8:\n"
+                      "        scores[i] = i * 2\n"
+                      "    let mut sum = 0\n"
+                      "    for i in 0..8:\n"
+                      "        sum = sum + scores[i]\n"
+                      "    return sum\n"
+                      "f()\n"),
+             56);
+    /* The elements hold what they were given. */
+    CHECK_EQ(run_text_is("fn f() -> str:\n"
+                         "    let mut names = [\"a\"; 3]\n"
+                         "    names[1] = \"bee\"\n"
+                         "    return names[1]\n"
+                         "f()\n",
+                         "bee"),
+             1);
+    /* An array of one element, and an empty one. */
+    CHECK_EQ(run_sint("fn f() -> i32:\n"
+                      "    let mut one = [7; 1]\n"
+                      "    return one[0]\n"
+                      "f()\n"),
+             7);
+    /* An index outside the array fails the run. */
+    CHECK_EQ(run_with_budget("fn f() -> i32:\n"
+                              "    let mut scores = [0; 4]\n"
+                              "    return scores[7]\n"
+                              "f()\n",
+                              0U, lh_null),
+             cnor_error_index);
+    /* The array needs `mut` to be written into. */
+    CHECK_EQ(compile_error("fn f() -> i32:\n"
+                            "    let scores = [0; 4]\n"
+                            "    scores[0] = 1\n"
+                            "    return scores[0]\n"
+                            "f()\n",
+                            lh_null, lh_null),
+             cnor_error_immutable);
+    /* An array is a local: a global one would outlive its frame. */
+    CHECK_EQ(compile_error("let mut top = [0; 4]\n", lh_null, lh_null),
+             cnor_error_not_a_declaration);
+    /* And it is a declaration, not a value. */
+    CHECK_EQ(compile_error("fn f() -> i32:\n"
+                            "    let mut x = [0; 4]\n"
+                            "    return x\n"
+                            "f()\n",
+                            lh_null, lh_null),
+             cnor_error_type_mismatch);
+}
+
 /* One pass of `for` over a local sum is three instructions: add_ll, its
  * store and the for_loop. */
 CNOR_TEST(runs_a_for_step_in_one_instruction)
@@ -2208,6 +2359,9 @@ static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(matches_integer_arms_by_value),
     CNOR_TEST_CASE(counts_ranges_at_their_edges),
     CNOR_TEST_CASE(wraps_a_loop_variable_like_addition),
+    CNOR_TEST_CASE(computes_index_forms_as_the_stack_does),
+    CNOR_TEST_CASE(makes_an_array_and_writes_its_elements),
+    CNOR_TEST_CASE(takes_the_index_of_a_local_in_one_instruction),
     CNOR_TEST_CASE(keeps_the_rule_of_the_remainder_by_a_power_of_two),
     CNOR_TEST_CASE(runs_a_for_step_in_one_instruction),
     CNOR_TEST_CASE(stops_after_exactly_the_budget_inside_for_loops),

@@ -117,6 +117,26 @@ enum cnor_op
      * Operands: slot v, s32 k, u8 count (at least 1).
      */
     cnor_op_switch,
+    /**
+     * The index operation with its operands in the frame or in the code
+     * (format v5): `index_ll` takes a local and a local, `index_li` a local
+     * and an s32, `index_i` the top of the stack and an s32, the same shapes
+     * as the forms of the binary operators. The first two push the one-byte
+     * string; the last one replaces the text on the stack with it.
+     */
+    cnor_op_index_ll, /**< fp[a][fp[b]]. Operands: slot, slot. */
+    cnor_op_index_li, /**< fp[a][k]. Operands: slot, s32. */
+    cnor_op_index_i,  /**< top[k]. Operand: s32. */
+    /**
+     * An array (format v6): the elements are slots of the frame, and the
+     * array's value (where they are and how many) is in the slot before them.
+     * `array_new` fills the elements and writes the array's value;
+     * `array_get` reads an element, `array_set` writes one. The bounds are
+     * checked at run time.
+     */
+    cnor_op_array_new, /**< Make an array of fp[a] and its `count` elements. Operands: slot, u16. */
+    cnor_op_array_get, /**< An element of fp[a]. Operand: slot. */
+    cnor_op_array_set, /**< Write an element of fp[a]. Operand: slot. */
     cnor_op_count /**< Number of opcodes; any byte at or above is invalid. */
 };
 /** @copybrief cnor_op */
@@ -250,6 +270,13 @@ cnor_op_get_operand_form(cnor_op_t op, cnor_operand_form_t form);
  */
 cnor_op_t
 cnor_op_get_binary_base(cnor_op_t op, cnor_operand_form_t *form);
+
+/**
+ * @brief The opcode for the index operation with its operands in @p form.
+ * @return ::cnor_op_count when @p form is not one of the three.
+ */
+cnor_op_t
+cnor_op_get_index_form(cnor_operand_form_t form);
 
 LH_COMPILER_EXTERN_C_END
 

@@ -217,17 +217,93 @@ cnor_compile_binary(cnor_compiler_t *self, const cnor_node_t *node)
            && cnor_type_binary(self, node, left, right, &self->type);
 }
 
-/* `text[i]`: a one-character string of a string, at an integer. */
+/* An array literal is only a declaration: its elements are slots of a frame,
+ * and a frame belongs to a function. */
+lh_bool_t
+cnor_compile_array(cnor_compiler_t *self, const cnor_node_t *node)
+{
+    return cnor_compile_fail(self, node, cnor_error_not_a_declaration);
+}
+
+/* `scores[i]`: an element of the array in a local. The elements are slots of
+ * the frame, so the array is not copied onto the stack first. */
+static lh_bool_t
+cnor_compile_index_array(cnor_compiler_t *self, const cnor_node_t *node,
+                          const cnor_binding_t *binding)
+{
+    if (!cnor_compile_expr(self, node->data.index.index)
+        || !cnor_type_require(self, node, cnor_static_i32, self->type))
+    {
+        return lh_bool_false;
+    }
+    /* The elements hold whatever they were given. */
+    self->type = cnor_static_any;
+    return cnor_emit_insn(self, cnor_op_array_get, binding->index, 0U);
+}
+
+/* `text[i]`: a one-character string of a string, at an integer.
+ *
+ * The text and the index come from the frame or the code when they can
+ * (`index_ll`, `index_li`, `index_i`), so the text is not copied onto the
+ * stack first. Reading a local or a literal has no effect of its own, so the
+ * order of evaluation is unchanged. */
 lh_bool_t
 cnor_compile_index(cnor_compiler_t *self, const cnor_node_t *node)
 {
-    cnor_static_type_t target = cnor_static_any;
-    cnor_static_type_t index = cnor_static_any;
+    const cnor_node_t *const target = node->data.index.target;
+    const cnor_node_t *const index = node->data.index.index;
+    cnor_static_type_t target_type = cnor_static_any;
+    cnor_static_type_t index_type = cnor_static_any;
+    cnor_slot_t a;
+    cnor_slot_t b;
+    lh_u32_t k;
 
-    if (!cnor_compile_typed(self, node->data.index.target, &target)
-        || !cnor_type_require(self, node, cnor_static_str, target)
-        || !cnor_compile_typed(self, node->data.index.index, &index)
-        || !cnor_type_require(self, node, cnor_static_i32, index))
+    if (target->kind == cnor_node_ident)
+    {
+        const cnor_binding_t binding = cnor_scope_resolve(self, target->name);
+
+        if (binding.kind == cnor_binding_local && binding.type == cnor_static_array)
+        {
+            return cnor_compile_index_array(self, node, &binding);
+        }
+    }
+    if (cnor_compile_local_operand(self, target, &a, &target_type))
+    {
+        if (cnor_compile_local_operand(self, index, &b, &index_type))
+        {
+            if (!cnor_type_require(self, node, cnor_static_str, target_type)
+                || !cnor_type_require(self, node, cnor_static_i32, index_type))
+            {
+                return lh_bool_false;
+            }
+            self->type = cnor_static_str;
+            return cnor_emit_insn(self, cnor_op_index_ll, a, b);
+        }
+        if (cnor_compile_int_operand(index, &k))
+        {
+            if (!cnor_type_require(self, node, cnor_static_str, target_type))
+            {
+                return lh_bool_false;
+            }
+            self->type = cnor_static_str;
+            return cnor_emit_insn(self, cnor_op_index_li, a, k);
+        }
+    }
+    else if (cnor_compile_int_operand(index, &k))
+    {
+        /* The text on the stack, the index in the code. */
+        if (!cnor_compile_typed(self, target, &target_type)
+            || !cnor_type_require(self, node, cnor_static_str, target_type))
+        {
+            return lh_bool_false;
+        }
+        self->type = cnor_static_str;
+        return cnor_emit_insn(self, cnor_op_index_i, k, 0U);
+    }
+    if (!cnor_compile_typed(self, target, &target_type)
+        || !cnor_type_require(self, node, cnor_static_str, target_type)
+        || !cnor_compile_typed(self, index, &index_type)
+        || !cnor_type_require(self, node, cnor_static_i32, index_type))
     {
         return lh_bool_false;
     }

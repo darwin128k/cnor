@@ -21,7 +21,7 @@
 static const lh_char_t *const m_type_names[cnor_static_type_count] = {
     [cnor_static_any] = "any",   [cnor_static_none] = "none", [cnor_static_bool] = "bool",
     [cnor_static_i32] = "i32",   [cnor_static_u32] = "u32",   [cnor_static_f32] = "f32",
-    [cnor_static_str] = "str",
+    [cnor_static_str] = "str",   [cnor_static_array] = "array",
 };
 
 static const lh_char_t *const m_binary_spellings[cnor_binary_count] = {

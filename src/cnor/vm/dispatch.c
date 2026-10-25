@@ -39,7 +39,7 @@
 #    endif
 #endif
 
-_Static_assert(cnor_op_count == 70, "a new opcode needs a handler and a dispatch label below");
+_Static_assert(cnor_op_count == 76, "a new opcode needs a handler and a dispatch label below");
 
 /* The three operand forms of binary operator @p name share one handler. */
 #define CNOR_VM_FORM_HANDLERS(name)                                                                \
@@ -84,6 +84,12 @@ static const cnor_vm_handler_t m_handlers[cnor_op_count] = {
     [cnor_op_native] = cnor_vm_op_native,
     [cnor_op_len] = cnor_vm_op_len,
     [cnor_op_index] = cnor_vm_op_index,
+    [cnor_op_index_ll] = cnor_vm_op_index_operands,
+    [cnor_op_index_li] = cnor_vm_op_index_operands,
+    [cnor_op_index_i] = cnor_vm_op_index_operands,
+    [cnor_op_array_new] = cnor_vm_op_array_new,
+    [cnor_op_array_get] = cnor_vm_op_array_get,
+    [cnor_op_array_set] = cnor_vm_op_array_set,
     CNOR_VM_FORM_HANDLERS(add),
     CNOR_VM_FORM_HANDLERS(sub),
     CNOR_VM_FORM_HANDLERS(mul),
@@ -516,6 +522,12 @@ cnor_vm_dispatch(cnor_vm_t *vm)
         CNOR_VM_FORM_LABELS(ge),
         [cnor_op_for_loop] = &&cnor_vm_label_for_loop,
         [cnor_op_switch] = &&cnor_vm_label_switch,
+        [cnor_op_index_ll] = &&cnor_vm_label_index_ll,
+        [cnor_op_index_li] = &&cnor_vm_label_index_li,
+        [cnor_op_index_i] = &&cnor_vm_label_index_i,
+        [cnor_op_array_new] = &&cnor_vm_label_array_new,
+        [cnor_op_array_get] = &&cnor_vm_label_array_get,
+        [cnor_op_array_set] = &&cnor_vm_label_array_set,
     };
 #endif
     const lh_byte_t *const code = vm->code;
@@ -862,21 +874,23 @@ cnor_vm_switch:
         const cnor_native_t *native = vm->natives[cnor_vm_fast_u16(pc + 1)];
         const cnor_argc_t argc = (cnor_argc_t) pc[3];
         cnor_error_t error = cnor_error_none;
-        lh_value_t result;
 
         if (argc < native->arity_min || argc > native->arity_max)
         {
             CNOR_VM_SLOW();
         }
-        /* A native cannot reach the machine, so the locals stay valid. */
-        result = native->fn(sp - argc, argc, vm->config.ctx, &error);
+        /* A native cannot reach the machine, so the locals stay valid. The
+         * result goes into the slot of the arguments: the native writes it
+         * there, and no value is copied. */
+        native->fn(sp - argc, argc, vm->config.ctx, &sp[-argc], &error);
         if (error != cnor_error_none)
         {
             CNOR_VM_SAVE();
             return cnor_vm_fail_at(vm, vm->ip, error);
         }
+        /* The result takes the place of the arguments, and is on the stack. */
         sp -= argc;
-        cnor_vm_fast_move(sp++, &result);
+        ++sp;
         pc += 4;
         CNOR_VM_NEXT();
     }
@@ -1043,6 +1057,111 @@ cnor_vm_switch:
                 cnor_vm_fast_set_str(&sp[-2], cnor_vm_fast_str_data(&sp[-2]) + at, 1U);
                 --sp;
                 pc += 1;
+                CNOR_VM_NEXT();
+            }
+        }
+        CNOR_VM_SLOW();
+    }
+    /* The index forms: the text and the index come from the frame or the code,
+     * so the text is not copied onto the stack first. */
+    CNOR_VM_OP(index_ll)
+    {
+        const lh_value_t *const text = &fp[pc[1]];
+        const lh_value_t *const index = &fp[pc[2]];
+
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(text) == lh_value_kind_str
+                           && cnor_vm_fast_kind(index) == lh_value_kind_sint))
+        {
+            const lh_sllong_t at = cnor_vm_fast_sint(index);
+
+            if (at >= 0 && (lh_ullong_t) at < (lh_ullong_t) cnor_vm_fast_str_size(text))
+            {
+                cnor_vm_fast_set_str(&sp[0], cnor_vm_fast_str_data(text) + at, 1U);
+                ++sp;
+                pc += 3;
+                CNOR_VM_NEXT();
+            }
+        }
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(index_li)
+    {
+        const lh_value_t *const text = &fp[pc[1]];
+        const lh_s32_t at = (lh_s32_t) cnor_vm_fast_s32(pc + 2);
+
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(text) == lh_value_kind_str) && at >= 0
+            && (lh_u32_t) at < (lh_u32_t) cnor_vm_fast_str_size(text))
+        {
+            cnor_vm_fast_set_str(&sp[0], cnor_vm_fast_str_data(text) + at, 1U);
+            ++sp;
+            pc += 6;
+            CNOR_VM_NEXT();
+        }
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(index_i)
+    {
+        const lh_s32_t at = (lh_s32_t) cnor_vm_fast_s32(pc + 1);
+
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_str) && at >= 0
+            && (lh_u32_t) at < (lh_u32_t) cnor_vm_fast_str_size(&sp[-1]))
+        {
+            cnor_vm_fast_set_str(&sp[-1], cnor_vm_fast_str_data(&sp[-1]) + at, 1U);
+            pc += 5;
+            CNOR_VM_NEXT();
+        }
+        CNOR_VM_SLOW();
+    }
+    /* The array forms: the elements are slots of the frame, and the array's
+     * value is in the slot before them. */
+    CNOR_VM_OP(array_new)
+    {
+        const cnor_slot_t slot = (cnor_slot_t) pc[1];
+        const lh_u16_t count = (lh_u16_t) cnor_vm_fast_u16(pc + 2);
+        lh_value_t *const elements = &fp[slot + 1U];
+        lh_u16_t i;
+
+        for (i = 0U; i < count; ++i)
+        {
+            cnor_vm_fast_move(&elements[i], &sp[-1]);
+        }
+        cnor_vm_fast_set_array(&fp[slot], elements, count);
+        --sp;
+        pc += 4;
+        CNOR_VM_NEXT();
+    }
+    CNOR_VM_OP(array_get)
+    {
+        const lh_value_t *const array = &fp[pc[1]];
+
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(array) == CNOR_VALUE_KIND_ARRAY
+                           && cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_sint))
+        {
+            const lh_sllong_t at = cnor_vm_fast_sint(&sp[-1]);
+
+            if (at >= 0 && (lh_u32_t) at < cnor_vm_fast_array_count(array))
+            {
+                cnor_vm_fast_move(&sp[-1], &cnor_vm_fast_array_data(array)[at]);
+                pc += 2;
+                CNOR_VM_NEXT();
+            }
+        }
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(array_set)
+    {
+        const lh_value_t *const array = &fp[pc[1]];
+
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(array) == CNOR_VALUE_KIND_ARRAY
+                           && cnor_vm_fast_kind(&sp[-2]) == lh_value_kind_sint))
+        {
+            const lh_sllong_t at = cnor_vm_fast_sint(&sp[-2]);
+
+            if (at >= 0 && (lh_u32_t) at < cnor_vm_fast_array_count(array))
+            {
+                cnor_vm_fast_move(&cnor_vm_fast_array_data(array)[at], &sp[-1]);
+                sp -= 2;
+                pc += 2;
                 CNOR_VM_NEXT();
             }
         }
