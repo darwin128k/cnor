@@ -41,7 +41,13 @@ static const cnor_op_info_t m_ops[cnor_op_count] = {
     CNOR_OP_ROW("le", none, none, 1U, 2U, 1U, 0U),
     CNOR_OP_ROW("gt", none, none, 1U, 2U, 1U, 0U),
     CNOR_OP_ROW("ge", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("band", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("bor", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("bxor", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("shl", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("shr", none, none, 1U, 2U, 1U, 0U),
     CNOR_OP_ROW("not", none, none, 1U, 1U, 1U, 0U),
+    CNOR_OP_ROW("bnot", none, none, 1U, 1U, 1U, 0U),
     CNOR_OP_ROW("jmp", s32, none, 5U, 0U, 0U, CNOR_OP_FLAG_JUMP | CNOR_OP_FLAG_TERMINATOR),
     CNOR_OP_ROW("jmp_if_false", s32, none, 5U, 1U, 0U, CNOR_OP_FLAG_JUMP),
     CNOR_OP_ROW("jmp_if_true", s32, none, 5U, 1U, 0U, CNOR_OP_FLAG_JUMP),
@@ -61,6 +67,11 @@ static const cnor_op_info_t m_ops[cnor_op_count] = {
     CNOR_OP_ROW("le_ll", slot, slot, 3U, 0U, 1U, 0U),
     CNOR_OP_ROW("gt_ll", slot, slot, 3U, 0U, 1U, 0U),
     CNOR_OP_ROW("ge_ll", slot, slot, 3U, 0U, 1U, 0U),
+    CNOR_OP_ROW("band_ll", slot, slot, 3U, 0U, 1U, 0U),
+    CNOR_OP_ROW("bor_ll", slot, slot, 3U, 0U, 1U, 0U),
+    CNOR_OP_ROW("bxor_ll", slot, slot, 3U, 0U, 1U, 0U),
+    CNOR_OP_ROW("shl_ll", slot, slot, 3U, 0U, 1U, 0U),
+    CNOR_OP_ROW("shr_ll", slot, slot, 3U, 0U, 1U, 0U),
     CNOR_OP_ROW("add_li", slot, s32, 6U, 0U, 1U, 0U),
     CNOR_OP_ROW("sub_li", slot, s32, 6U, 0U, 1U, 0U),
     CNOR_OP_ROW("mul_li", slot, s32, 6U, 0U, 1U, 0U),
@@ -72,6 +83,11 @@ static const cnor_op_info_t m_ops[cnor_op_count] = {
     CNOR_OP_ROW("le_li", slot, s32, 6U, 0U, 1U, 0U),
     CNOR_OP_ROW("gt_li", slot, s32, 6U, 0U, 1U, 0U),
     CNOR_OP_ROW("ge_li", slot, s32, 6U, 0U, 1U, 0U),
+    CNOR_OP_ROW("band_li", slot, s32, 6U, 0U, 1U, 0U),
+    CNOR_OP_ROW("bor_li", slot, s32, 6U, 0U, 1U, 0U),
+    CNOR_OP_ROW("bxor_li", slot, s32, 6U, 0U, 1U, 0U),
+    CNOR_OP_ROW("shl_li", slot, s32, 6U, 0U, 1U, 0U),
+    CNOR_OP_ROW("shr_li", slot, s32, 6U, 0U, 1U, 0U),
     CNOR_OP_ROW("add_i", s32, none, 5U, 1U, 1U, 0U),
     CNOR_OP_ROW("sub_i", s32, none, 5U, 1U, 1U, 0U),
     CNOR_OP_ROW("mul_i", s32, none, 5U, 1U, 1U, 0U),
@@ -83,6 +99,11 @@ static const cnor_op_info_t m_ops[cnor_op_count] = {
     CNOR_OP_ROW("le_i", s32, none, 5U, 1U, 1U, 0U),
     CNOR_OP_ROW("gt_i", s32, none, 5U, 1U, 1U, 0U),
     CNOR_OP_ROW("ge_i", s32, none, 5U, 1U, 1U, 0U),
+    CNOR_OP_ROW("band_i", s32, none, 5U, 1U, 1U, 0U),
+    CNOR_OP_ROW("bor_i", s32, none, 5U, 1U, 1U, 0U),
+    CNOR_OP_ROW("bxor_i", s32, none, 5U, 1U, 1U, 0U),
+    CNOR_OP_ROW("shl_i", s32, none, 5U, 1U, 1U, 0U),
+    CNOR_OP_ROW("shr_i", s32, none, 5U, 1U, 1U, 0U),
     CNOR_OP_ROW3("for_loop", s32, slot, slot, 7U, 0U, 0U, CNOR_OP_FLAG_JUMP),
     CNOR_OP_ROW3("switch", slot, s32, u8, 7U, 0U, 0U, 0U),
     CNOR_OP_ROW("index_ll", slot, slot, 3U, 0U, 1U, 0U),
@@ -101,6 +122,7 @@ static const cnor_op_info_t m_ops[cnor_op_count] = {
 static const cnor_op_t m_binary_ops[] = {
     cnor_op_add, cnor_op_sub, cnor_op_mul, cnor_op_div, cnor_op_mod, cnor_op_eq,
     cnor_op_ne,  cnor_op_lt,  cnor_op_le,  cnor_op_gt,  cnor_op_ge,
+    cnor_op_band, cnor_op_bor, cnor_op_bxor, cnor_op_shl, cnor_op_shr,
 };
 #define CNOR_OP_BINARY_COUNT (sizeof(m_binary_ops) / sizeof(m_binary_ops[0]))
 
@@ -112,8 +134,8 @@ static const cnor_op_t m_form_first[cnor_operand_form_count] = {
     [cnor_operand_form_stack_int] = cnor_op_add_i,
 };
 
-_Static_assert(cnor_op_add_li - cnor_op_add_ll == 11 && cnor_op_add_i - cnor_op_add_li == 11
-                   && cnor_op_for_loop - cnor_op_add_i == 11,
+_Static_assert(cnor_op_add_li - cnor_op_add_ll == 16 && cnor_op_add_i - cnor_op_add_li == 16
+                   && cnor_op_for_loop - cnor_op_add_i == 16,
                "each operand-form family has one opcode per binary operator, in order");
 
 /* -- queries --------------------------------------------------------------- */

@@ -98,6 +98,11 @@ enum cnor_binary_op
     cnor_binary_ge,      /**< `>=` */
     cnor_binary_and,     /**< `and`, short-circuit */
     cnor_binary_or,      /**< `or`, short-circuit */
+    cnor_binary_band,    /**< `&`, bitwise and */
+    cnor_binary_bor,     /**< `|`, bitwise or */
+    cnor_binary_bxor,    /**< `^`, bitwise exclusive or */
+    cnor_binary_shl,     /**< `<<`, shift left */
+    cnor_binary_shr,     /**< `>>`, shift right */
     cnor_binary_count
 };
 /** @copybrief cnor_binary_op */
@@ -111,6 +116,7 @@ enum cnor_unary_op
 {
     cnor_unary_neg = 0, /**< `-x` */
     cnor_unary_not,     /**< `not x` */
+    cnor_unary_bnot,    /**< `~x`, bitwise not */
     cnor_unary_count
 };
 /** @copybrief cnor_unary_op */

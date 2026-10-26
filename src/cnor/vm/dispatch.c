@@ -39,7 +39,7 @@
 #    endif
 #endif
 
-_Static_assert(cnor_op_count == 80, "a new opcode needs a handler and a dispatch label below");
+_Static_assert(cnor_op_count == 101, "a new opcode needs a handler and a dispatch label below");
 
 /* The three operand forms of binary operator @p name share one handler. */
 #define CNOR_VM_FORM_HANDLERS(name)                                                                \
@@ -76,6 +76,12 @@ static const cnor_vm_handler_t m_handlers[cnor_op_count] = {
     [cnor_op_gt] = cnor_vm_op_order,
     [cnor_op_ge] = cnor_vm_op_order,
     [cnor_op_not] = cnor_vm_op_not,
+    [cnor_op_bnot] = cnor_vm_op_bnot,
+    [cnor_op_band] = cnor_vm_op_arith,
+    [cnor_op_bor] = cnor_vm_op_arith,
+    [cnor_op_bxor] = cnor_vm_op_arith,
+    [cnor_op_shl] = cnor_vm_op_arith,
+    [cnor_op_shr] = cnor_vm_op_arith,
     [cnor_op_jmp] = cnor_vm_op_jmp,
     [cnor_op_jmp_if_false] = cnor_vm_op_jmp_if,
     [cnor_op_jmp_if_true] = cnor_vm_op_jmp_if,
@@ -105,6 +111,11 @@ static const cnor_vm_handler_t m_handlers[cnor_op_count] = {
     CNOR_VM_FORM_HANDLERS(le),
     CNOR_VM_FORM_HANDLERS(gt),
     CNOR_VM_FORM_HANDLERS(ge),
+    CNOR_VM_FORM_HANDLERS(band),
+    CNOR_VM_FORM_HANDLERS(bor),
+    CNOR_VM_FORM_HANDLERS(bxor),
+    CNOR_VM_FORM_HANDLERS(shl),
+    CNOR_VM_FORM_HANDLERS(shr),
     [cnor_op_for_loop] = cnor_vm_op_for_loop,
     [cnor_op_switch] = cnor_vm_op_switch,
 };
@@ -526,6 +537,12 @@ cnor_vm_dispatch(cnor_vm_t *vm)
         [cnor_op_gt] = &&cnor_vm_label_gt,
         [cnor_op_ge] = &&cnor_vm_label_ge,
         [cnor_op_not] = &&cnor_vm_label_not,
+        [cnor_op_bnot] = &&cnor_vm_label_bnot,
+        [cnor_op_band] = &&cnor_vm_label_band,
+        [cnor_op_bor] = &&cnor_vm_label_bor,
+        [cnor_op_bxor] = &&cnor_vm_label_bxor,
+        [cnor_op_shl] = &&cnor_vm_label_shl,
+        [cnor_op_shr] = &&cnor_vm_label_shr,
         [cnor_op_jmp] = &&cnor_vm_label_jmp,
         [cnor_op_jmp_if_false] = &&cnor_vm_label_jmp_if_false,
         [cnor_op_jmp_if_true] = &&cnor_vm_label_jmp_if_true,
@@ -545,6 +562,11 @@ cnor_vm_dispatch(cnor_vm_t *vm)
         CNOR_VM_FORM_LABELS(le),
         CNOR_VM_FORM_LABELS(gt),
         CNOR_VM_FORM_LABELS(ge),
+        CNOR_VM_FORM_LABELS(band),
+        CNOR_VM_FORM_LABELS(bor),
+        CNOR_VM_FORM_LABELS(bxor),
+        CNOR_VM_FORM_LABELS(shl),
+        CNOR_VM_FORM_LABELS(shr),
         [cnor_op_for_loop] = &&cnor_vm_label_for_loop,
         [cnor_op_switch] = &&cnor_vm_label_switch,
         [cnor_op_index_ll] = &&cnor_vm_label_index_ll,
@@ -763,6 +785,69 @@ cnor_vm_switch:
         }
         CNOR_VM_SLOW();
     }
+    /* The bitwise operators: whole numbers, bit by bit. */
+    CNOR_VM_OP(band)
+    {
+        if (cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_sint)
+        {
+            CNOR_VM_SINT_PAIR(CNOR_VM_STORE_OR_SET, a & b);
+        }
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(bor)
+    {
+        if (cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_sint)
+        {
+            CNOR_VM_SINT_PAIR(CNOR_VM_STORE_OR_SET, a | b);
+        }
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(bxor)
+    {
+        if (cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_sint)
+        {
+            CNOR_VM_SINT_PAIR(CNOR_VM_STORE_OR_SET, a ^ b);
+        }
+        CNOR_VM_SLOW();
+    }
+    /* A shift of more than the width of the number has no answer, so the
+     * amount is checked before the shift. */
+    CNOR_VM_OP(shl)
+    {
+        if (cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_sint)
+        {
+            const lh_sllong_t amount = cnor_vm_fast_sint(&sp[-1]);
+
+            if (amount >= 0 && amount <= 63)
+            {
+                CNOR_VM_SINT_PAIR(CNOR_VM_STORE_OR_SET, a << amount);
+            }
+        }
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(shr)
+    {
+        if (cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_sint)
+        {
+            const lh_sllong_t amount = cnor_vm_fast_sint(&sp[-1]);
+
+            if (amount >= 0 && amount <= 63)
+            {
+                CNOR_VM_SINT_PAIR(CNOR_VM_STORE_OR_SET, a >> amount);
+            }
+        }
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(bnot)
+    {
+        if (cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_sint)
+        {
+            cnor_vm_fast_set_sint(&sp[-1], ~sp[-1].data.i);
+            pc += 1;
+            CNOR_VM_NEXT();
+        }
+        CNOR_VM_SLOW();
+    }
 
     /* -- comparisons ------------------------------------------------------ */
 
@@ -956,6 +1041,12 @@ cnor_vm_switch:
     CNOR_VM_FORMS(sub, CNOR_VM_STORE_OR_SET, 1, CNOR_VM_WRAP(a, -, b))
     CNOR_VM_FORMS(mul, CNOR_VM_STORE_OR_SET, 1, CNOR_VM_WRAP(a, *, b))
     CNOR_VM_FORMS(div, CNOR_VM_STORE_OR_SET, b != 0 && b != -1, CNOR_VM_DIV(a, b))
+    /* The bitwise operators, whole numbers only. */
+    CNOR_VM_FORMS(band, CNOR_VM_STORE_OR_SET, 1, a & b)
+    CNOR_VM_FORMS(bor, CNOR_VM_STORE_OR_SET, 1, a | b)
+    CNOR_VM_FORMS(bxor, CNOR_VM_STORE_OR_SET, 1, a ^ b)
+    CNOR_VM_FORMS(shl, CNOR_VM_STORE_OR_SET, b >= 0 && b <= 63, a << b)
+    CNOR_VM_FORMS(shr, CNOR_VM_STORE_OR_SET, b >= 0 && b <= 63, a >> b)
     /* The remainder by a power of two is a mask; only the forms with an
      * immediate divisor are worth the test, the other two pay for it on every
      * remainder. */

@@ -29,7 +29,8 @@ static const lh_char_t *const m_binary_spellings[cnor_binary_count] = {
     [cnor_binary_div] = "/",  [cnor_binary_mod] = "%",  [cnor_binary_eq] = "==",
     [cnor_binary_ne] = "!=",  [cnor_binary_lt] = "<",   [cnor_binary_le] = "<=",
     [cnor_binary_gt] = ">",   [cnor_binary_ge] = ">=",  [cnor_binary_and] = "and",
-    [cnor_binary_or] = "or",
+    [cnor_binary_or] = "or",  [cnor_binary_band] = "&", [cnor_binary_bor] = "|",
+    [cnor_binary_bxor] = "^", [cnor_binary_shl] = "<<", [cnor_binary_shr] = ">>",
 };
 
 const lh_char_t *
@@ -106,6 +107,13 @@ static lh_bool_t
 cnor_type_is_number(cnor_static_type_t type)
 {
     return (cnor_type_is_integer(type) || type == cnor_static_f32) ? lh_bool_true : lh_bool_false;
+}
+
+/* `any` or a whole number: what the bitwise operators may get. */
+static lh_bool_t
+cnor_type_may_be_integer(cnor_static_type_t type)
+{
+    return (type == cnor_static_any || cnor_type_is_integer(type)) ? lh_bool_true : lh_bool_false;
 }
 
 /* `any` or a number: what arithmetic and ordering may get. */
@@ -262,10 +270,19 @@ cnor_type_of_binary(cnor_binary_op_t op, cnor_static_type_t left, cnor_static_ty
         *out = cnor_type_of_arithmetic(left, right);
         return (cnor_type_may_be_number(left) && cnor_type_may_be_number(right)) ? lh_bool_true
                                                                                   : lh_bool_false;
+    case cnor_binary_band:
+    case cnor_binary_bor:
+    case cnor_binary_bxor:
+    case cnor_binary_shl:
+    case cnor_binary_shr:
+        /* The bitwise operators work on whole numbers. */
+        *out = cnor_static_i32;
+        return (cnor_type_may_be_integer(left) && cnor_type_may_be_integer(right))
+                   ? lh_bool_true
+                   : lh_bool_false;
     case cnor_binary_eq:
     case cnor_binary_ne:
-        *out = cnor_static_bool;
-        return cnor_type_comparable(left, right);
+        *out = cnor_static_bool;        return cnor_type_comparable(left, right);
     case cnor_binary_lt:
     case cnor_binary_le:
     case cnor_binary_gt:

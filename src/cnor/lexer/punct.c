@@ -14,12 +14,14 @@ static const struct cnor_punct_spelling m_spellings[] = {
     {'.', '.', cnor_punct_range},  {'=', '=', cnor_punct_eq},      {'!', '=', cnor_punct_ne},
     {'<', '=', cnor_punct_le},     {'>', '=', cnor_punct_ge},      {'-', '>', cnor_punct_arrow},
     {'=', '>', cnor_punct_fat_arrow},
+    {'<', '<', cnor_punct_shift_left}, {'>', '>', cnor_punct_shift_right},
     {'(', 0, cnor_punct_lparen},   {')', 0, cnor_punct_rparen},    {'[', 0, cnor_punct_lbracket},
     {']', 0, cnor_punct_rbracket}, {':', 0, cnor_punct_colon},     {';', 0, cnor_punct_semicolon},
     {',', 0, cnor_punct_comma},    {'.', 0, cnor_punct_dot},       {'+', 0, cnor_punct_plus},
     {'-', 0, cnor_punct_minus},    {'*', 0, cnor_punct_star},      {'/', 0, cnor_punct_slash},
     {'%', 0, cnor_punct_percent},  {'=', 0, cnor_punct_assign},    {'<', 0, cnor_punct_lt},
-    {'>', 0, cnor_punct_gt},
+    {'>', 0, cnor_punct_gt},       {'&', 0, cnor_punct_amp},       {'|', 0, cnor_punct_pipe},
+    {'^', 0, cnor_punct_caret},    {'~', 0, cnor_punct_tilde},
 };
 
 #define CNOR_PUNCT_SPELLING_COUNT (sizeof(m_spellings) / sizeof(m_spellings[0]))

@@ -29,6 +29,14 @@ cnor_vm_value_is_number(const lh_value_t *value)
 }
 
 lh_bool_t
+cnor_vm_value_is_integer(const lh_value_t *value)
+{
+    const lh_value_kind_t kind = lh_value_get_kind(value);
+
+    return (kind == lh_value_kind_sint || kind == lh_value_kind_uint) ? lh_bool_true : lh_bool_false;
+}
+
+lh_bool_t
 cnor_vm_value_is_truthy(const lh_value_t *value)
 {
     switch (lh_value_get_kind(value))

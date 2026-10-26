@@ -87,6 +87,7 @@ enum cnor_error
     cnor_error_stack_overflow,   /**< A call frame does not fit the stack. */
     cnor_error_type,             /**< An operator got a value of the wrong kind. */
     cnor_error_div_by_zero,      /**< `/` or `%` by zero. */
+    cnor_error_shift_out_of_range, /**< A shift of more than 63 bits, or a negative one. */
     cnor_error_index,            /**< Indexing past the end of a string. */
     cnor_error_no_such_native,   /**< A native the host did not provide. */
     cnor_error_bad_arity,        /**< A native called with an argument count it rejects. */

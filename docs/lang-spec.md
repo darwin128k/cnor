@@ -194,14 +194,23 @@ Operator precedence, loosest first; binary operators are left-associative:
 | 1 | `or` |
 | 2 | `and` |
 | 3 | `==` `!=` `<` `<=` `>` `>=` |
-| 4 | `+` `-` |
-| 5 | `*` `/` `%` |
-| unary | `-x`, `not x` |
+| 4 | `|` |
+| 5 | `^` |
+| 6 | `&` |
+| 7 | `<<` `>>` |
+| 8 | `+` `-` |
+| 9 | `*` `/` `%` |
+| unary | `-x`, `not x`, `~x` |
 | postfix | call `f(...)`, index `s[i]` |
 
 `and` / `or` short-circuit and produce the operand that decided (`0 or 5` is
 `5`). `not` produces a `bool`. Truthiness: `none`, `false`, `0`, `0.0` and `""`
 are false; everything else is true.
+
+**[cnor]** The bitwise operators work on whole numbers: `&` is the bitwise and,
+`|` the bitwise or, `^` the exclusive or, `~` the negation of the bits, `<<`
+and `>>` the shifts. A shift of more than 63 bits, or a negative one, has no
+answer and fails the run. `>>` keeps the sign of a signed number.
 
 ### 6.2 Names and scope
 
@@ -378,12 +387,12 @@ use lets two unrelated libraries be imported together. Running each file's
 code once, imported files first, extends the global-initialization rule of
 section 6.4 across files unchanged.
 
-Not in the language: `&`, `*`, lifetimes, `trait`, `impl`, inheritance,
-closures, a preprocessor, metatables, arrays.
+Not in the language: `*`, lifetimes, `trait`, `impl`, inheritance,
+closures, a preprocessor, metatables.
 
 ---
 
-## 7. The `.tbc` image format, v8
+## 7. The `.tbc` image format, v9
 
 **[cnor]** v1 replaced the original header (whose layout used `sizeof` and
 was not portable) and its names section. Every field is a fixed-width
@@ -392,16 +401,19 @@ keeps the v1 layout and adds opcodes (the operand forms and `for_loop`,
 section 8); v3 adds `switch`; v4 gives each function its source file and
 turns the file name into a file table, for `import`; v5 adds the index forms
 (`index_ll`, `index_li`, `index_i`); v6 adds the array instructions
-(`array_new`, `array_get`, `array_set`); v7 adds `call_builtin`, which calls
-a function of the language itself (section 9.2). An image of another
-version is refused: v6 images must be compiled again.
+(`array_new`, `array_get_l`, `array_set_l`); v7 adds `call_builtin`, which calls
+a function of the language itself (section 9.2); v8 adds the array of an
+array that is not a local (`array_get`, `array_set`) and the array in the
+globals (`array_new_global`); v9 adds the bitwise operators (`band`, `bor`,
+`bxor`, `shl`, `shr`, `bnot`). An image of another version is refused: v8
+images must be compiled again.
 
 ### 7.1 Header (68 bytes)
 
 | Offset | Field | Type | Meaning |
 |---|---|---|---|
 | 0 | `magic` | 4 bytes | `"cnor"` |
-| 4 | `version` | u16 | format version, currently 8 |
+| 4 | `version` | u16 | format version, currently 9 |
 | 6 | `flags` | u16 | bit 0: the image carries a line table |
 | 8 | `image_size` | u32 | size of the whole image |
 | 12 | `stack_slots` | u32 | largest frame (slots + operands), **computed by the compiler** |
@@ -456,7 +468,7 @@ relocation pass.
 
 ## 8. Instruction set
 
-The full list is `include/cnor/op.h` and its info table `src/cnor/op.c`: 76
+The full list is `include/cnor/op.h` and its info table `src/cnor/op.c`: 101
 opcodes. An opcode is one byte; operands follow it, little-endian. The info
 table holds each opcode's operands and stack effect; the compiler, the
 verifier and the machine all read it.
@@ -467,6 +479,7 @@ verifier and the machine all read it.
 | Variables | `load_local`, `store_local`, `load_global`, `store_global` |
 | Stack | `dup`, `swap`, `pop` |
 | Arithmetic | `add`, `sub`, `mul`, `div`, `mod`, `neg` |
+| Bitwise | `band`, `bor`, `bxor`, `shl`, `shr`, `bnot` |
 | Comparison | `eq`, `ne`, `lt`, `le`, `gt`, `ge` |
 | Logic | `not` |
 | Operand forms | `add_ll` .. `ge_ll`, `add_li` .. `ge_li`, `add_i` .. `ge_i` |
@@ -772,6 +785,8 @@ line in `tests/cli/`, 50 on Windows):
   checked at run time; a local one keeps its elements in the frame, a global one in
   the globals; an array may be a parameter (a reference to the elements), `len(a)` is
   its size and `for v in a` walks them (section 8);
+- [x] the bitwise operators: `&` `|` `^` `~` `<<` `>>` on whole
+  numbers, with the shift checked (section 6.1);
 - [x] the language's own functions: `len`, `find`, `contains`, `replace`,
   `trim`, `upper`, `lower`, `starts_with`, `ends_with`, `substr`, `ord`,
   `char`, `str`, `parse_int` (section 9.2);

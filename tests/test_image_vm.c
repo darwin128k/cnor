@@ -977,7 +977,8 @@ CNOR_TEST(describes_every_operand_form_in_the_op_table)
             CHECK_EQ(base, (cnor_op_t) code);
         }
     }
-    CHECK_EQ(forms, 33);
+    /* Sixteen binary operators, three forms each. */
+    CHECK_EQ(forms, 48);
     CHECK_EQ(cnor_op_get_operand_form(cnor_op_add, cnor_operand_form_stack), cnor_op_add);
     CHECK_EQ(cnor_op_get_operand_form(cnor_op_ge, cnor_operand_form_local_int), cnor_op_ge_li);
     CHECK_EQ(cnor_op_get_operand_form(cnor_op_neg, cnor_operand_form_local_local), cnor_op_count);

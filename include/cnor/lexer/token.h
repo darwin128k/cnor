@@ -98,6 +98,12 @@ enum cnor_punct
     cnor_punct_ge,        /**< `>=` */
     cnor_punct_arrow,     /**< `->` */
     cnor_punct_fat_arrow, /**< `=>` */
+    cnor_punct_amp,       /**< `&` */
+    cnor_punct_pipe,      /**< `|` */
+    cnor_punct_caret,     /**< `^` */
+    cnor_punct_tilde,     /**< `~` */
+    cnor_punct_shift_left,  /**< `<<` */
+    cnor_punct_shift_right, /**< `>>` */
     cnor_punct_count
 };
 /** @copybrief cnor_punct */

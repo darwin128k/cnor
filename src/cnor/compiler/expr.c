@@ -93,6 +93,16 @@ cnor_compile_unary(cnor_compiler_t *self, const cnor_node_t *node)
         self->type = cnor_static_bool;
         return cnor_emit_op(self, cnor_op_not);
     }
+    if (node->data.unary.op == cnor_unary_bnot)
+    {
+        /* `~x`: the bits of a whole number, turned around. */
+        if (!cnor_type_require(self, node, cnor_static_i32, self->type))
+        {
+            return lh_bool_false;
+        }
+        self->type = cnor_static_i32;
+        return cnor_emit_op(self, cnor_op_bnot);
+    }
     return cnor_type_negate(self, node, self->type, &self->type)
            && cnor_emit_op(self, cnor_op_neg);
 }
@@ -104,7 +114,9 @@ static const cnor_op_t m_binary_ops[cnor_binary_count] = {
     [cnor_binary_mod] = cnor_op_mod, [cnor_binary_eq] = cnor_op_eq,
     [cnor_binary_ne] = cnor_op_ne,   [cnor_binary_lt] = cnor_op_lt,
     [cnor_binary_le] = cnor_op_le,   [cnor_binary_gt] = cnor_op_gt,
-    [cnor_binary_ge] = cnor_op_ge,
+    [cnor_binary_ge] = cnor_op_ge,   [cnor_binary_band] = cnor_op_band,
+    [cnor_binary_bor] = cnor_op_bor, [cnor_binary_bxor] = cnor_op_bxor,
+    [cnor_binary_shl] = cnor_op_shl, [cnor_binary_shr] = cnor_op_shr,
 };
 
 /* -- operand forms --------------------------------------------------------- */

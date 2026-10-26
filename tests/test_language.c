@@ -274,6 +274,16 @@ error_of(const char *text, cnor_line_t *line)
     return out.compiled ? cnor_error_none : out.code;
 }
 
+/* The error the program fails with, whether the compiler or the machine
+ * refused it. */
+static cnor_error_t
+failure_of(const char *text)
+{
+    const outcome_t out = run_source(text);
+
+    return out.code;
+}
+
 /* The text the program returns. */
 static lh_bool_t
 text_of(const char *text, char *to, size_t capacity)
@@ -303,6 +313,39 @@ bool_of(const char *text, lh_bool_t truth)
         return lh_bool_false;
     }
     return out.truth == truth ? lh_bool_true : lh_bool_false;
+}
+
+/* -- the bitwise operators --------------------------------------------------- */
+
+CNOR_TEST(has_the_bitwise_operators)
+{
+    cnor_line_t line = 0U;
+
+    /* The bits of a whole number. */
+    CHECK_EQ(value_of("fn f() -> i32:\n    return 0xF0 & 0x3C\nf()\n"), 0x30);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return 0xF0 | 0x0F\nf()\n"), 0xFF);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return 0xFF ^ 0x0F\nf()\n"), 0xF0);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return 1 << 10\nf()\n"), 1024);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return 1024 >> 3\nf()\n"), 128);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return ~0\nf()\n"), -1);
+    /* The flags of a player, as a script would hold them. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut flags = 0\n"
+                      "    flags = flags | 1\n"
+                      "    flags = flags | 4\n"
+                      "    if (flags & 1) != 0:\n"
+                      "        return 1\n"
+                      "    return 0\n"
+                      "f()\n"),
+             1);
+    /* A shift of more than the width of the number has no answer. */
+    CHECK_EQ(failure_of("fn f() -> i32:\n    return 1 << 64\nf()\n"),
+             cnor_error_shift_out_of_range);
+    CHECK_EQ(failure_of("fn f() -> i32:\n    return 1 >> -1\nf()\n"),
+             cnor_error_shift_out_of_range);
+    /* The bitwise operators work on whole numbers, not on text. */
+    CHECK_EQ(error_of("fn f() -> i32:\n    return \"a\" & 1\nf()\n", &line),
+             cnor_error_operand_type);
 }
 
 /* -- arrays ------------------------------------------------------------------ */
@@ -1067,6 +1110,7 @@ CNOR_TEST(points_runtime_errors_at_the_imported_file)
 }
 
 static const cnor_test_case_t m_cases[] = {
+    CNOR_TEST_CASE(has_the_bitwise_operators),
     CNOR_TEST_CASE(passes_an_array_to_a_function_and_walks_it),
     CNOR_TEST_CASE(keeps_a_global_array_whole),
     CNOR_TEST_CASE(refuses_an_array_where_it_does_not_fit),

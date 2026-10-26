@@ -54,6 +54,10 @@ cnor_vm_value_is_truthy(const lh_value_t *value);
 lh_bool_t
 cnor_vm_value_is_number(const lh_value_t *value);
 
+/** @brief Whether @p value is a signed or unsigned number. */
+lh_bool_t
+cnor_vm_value_is_integer(const lh_value_t *value);
+
 /** @brief A signed or unsigned number as a signed one. */
 lh_sllong_t
 cnor_vm_value_to_sint(const lh_value_t *value);
@@ -98,6 +102,7 @@ lh_bool_t cnor_vm_op_swap(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_pop(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_arith(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_neg(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_bnot(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_equality(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_order(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_not(cnor_vm_t *vm, const cnor_insn_t *insn);

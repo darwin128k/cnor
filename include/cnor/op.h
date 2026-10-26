@@ -55,7 +55,13 @@ enum cnor_op
     cnor_op_le,           /**< left <= right, numbers. */
     cnor_op_gt,           /**< left > right, numbers. */
     cnor_op_ge,           /**< left >= right, numbers. */
+    cnor_op_band,         /**< left & right, bitwise. */
+    cnor_op_bor,          /**< left | right, bitwise. */
+    cnor_op_bxor,         /**< left ^ right, bitwise. */
+    cnor_op_shl,          /**< left << right. */
+    cnor_op_shr,          /**< left >> right. */
     cnor_op_not,          /**< Boolean negation of truthiness. */
+    cnor_op_bnot,         /**< ~value, bitwise not. */
     cnor_op_jmp,          /**< Jump. Operand: s32 relative to the next instruction. */
     cnor_op_jmp_if_false, /**< Pop; jump when falsy. Operand: s32. */
     cnor_op_jmp_if_true,  /**< Pop; jump when truthy. Operand: s32. */
@@ -82,6 +88,11 @@ enum cnor_op
     cnor_op_le_ll,  /**< fp[a] <= fp[b]. */
     cnor_op_gt_ll,  /**< fp[a] > fp[b]. */
     cnor_op_ge_ll,  /**< fp[a] >= fp[b]. */
+    cnor_op_band_ll, /**< fp[a] & fp[b]. Operands: slot, slot. */
+    cnor_op_bor_ll,  /**< fp[a] | fp[b]. */
+    cnor_op_bxor_ll, /**< fp[a] ^ fp[b]. */
+    cnor_op_shl_ll,  /**< fp[a] << fp[b]. */
+    cnor_op_shr_ll,  /**< fp[a] >> fp[b]. */
     cnor_op_add_li, /**< fp[a] + k. Operands: slot, s32. */
     cnor_op_sub_li, /**< fp[a] - k. */
     cnor_op_mul_li, /**< fp[a] * k. */
@@ -93,6 +104,11 @@ enum cnor_op
     cnor_op_le_li,  /**< fp[a] <= k. */
     cnor_op_gt_li,  /**< fp[a] > k. */
     cnor_op_ge_li,  /**< fp[a] >= k. */
+    cnor_op_band_li, /**< fp[a] & k. Operands: slot, s32. */
+    cnor_op_bor_li,  /**< fp[a] | k. */
+    cnor_op_bxor_li, /**< fp[a] ^ k. */
+    cnor_op_shl_li,  /**< fp[a] << k. */
+    cnor_op_shr_li,  /**< fp[a] >> k. */
     cnor_op_add_i,  /**< top + k, in place. Operand: s32. */
     cnor_op_sub_i,  /**< top - k. */
     cnor_op_mul_i,  /**< top * k. */
@@ -104,6 +120,11 @@ enum cnor_op
     cnor_op_le_i,   /**< top <= k. */
     cnor_op_gt_i,   /**< top > k. */
     cnor_op_ge_i,   /**< top >= k. */
+    cnor_op_band_i,  /**< top & k. Operand: s32. */
+    cnor_op_bor_i,   /**< top | k. */
+    cnor_op_bxor_i,  /**< top ^ k. */
+    cnor_op_shl_i,   /**< top << k. */
+    cnor_op_shr_i,   /**< top >> k. */
     /**
      * One step of `for v in a..b`: fp[v] = fp[v] + 1, then jump when
      * fp[v] < fp[b]; both by the rules of `add` and `lt`. Operands: s32 jump,

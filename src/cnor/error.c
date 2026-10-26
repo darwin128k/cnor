@@ -56,6 +56,7 @@ static const lh_char_t *const m_messages[cnor_error_count] = {
     "stack overflow",
     "wrong value kind",
     "division by zero",
+    "shift out of range",
     "index out of range",
     "native not provided by the host",
     "native called with a wrong argument count",

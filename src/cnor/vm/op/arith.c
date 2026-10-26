@@ -83,6 +83,21 @@ cnor_vm_arith_uint(cnor_op_t op, lh_ullong_t a, lh_ullong_t b)
     case cnor_op_div:
         value = a / b;
         break;
+    case cnor_op_band:
+        value = a & b;
+        break;
+    case cnor_op_bor:
+        value = a | b;
+        break;
+    case cnor_op_bxor:
+        value = a ^ b;
+        break;
+    case cnor_op_shl:
+        value = a << (unsigned) b;
+        break;
+    case cnor_op_shr:
+        value = a >> (unsigned) b;
+        break;
     default:
         value = a % b;
         break;
@@ -112,6 +127,22 @@ cnor_vm_arith_sint(cnor_op_t op, lh_sllong_t a, lh_sllong_t b)
     case cnor_op_div:
         value = b == -1 ? (lh_sllong_t) (0U - ua) : a / b;
         break;
+    case cnor_op_band:
+        value = (lh_sllong_t) (ua & ub);
+        break;
+    case cnor_op_bor:
+        value = (lh_sllong_t) (ua | ub);
+        break;
+    case cnor_op_bxor:
+        value = (lh_sllong_t) (ua ^ ub);
+        break;
+    case cnor_op_shl:
+        value = (lh_sllong_t) (ua << (unsigned) ub);
+        break;
+    case cnor_op_shr:
+        /* A signed value shifts right with its sign kept. */
+        value = a >> (unsigned) ub;
+        break;
     default:
         value = b == -1 ? 0 : a % b;
         break;
@@ -135,6 +166,16 @@ cnor_vm_arith_numbers(cnor_vm_t *vm, const cnor_insn_t *insn, cnor_op_t op,
     {
         return cnor_vm_fail(vm, insn, cnor_error_div_by_zero);
     }
+    if (op == cnor_op_shl || op == cnor_op_shr)
+    {
+        /* A shift of more than the width of the number has no answer. */
+        const lh_sllong_t amount = cnor_vm_value_to_sint(right);
+
+        if (amount < 0 || amount > 63)
+        {
+            return cnor_vm_fail(vm, insn, cnor_error_shift_out_of_range);
+        }
+    }
     if (lh_value_get_kind(left) == lh_value_kind_uint
         && lh_value_get_kind(right) == lh_value_kind_uint)
     {
@@ -154,6 +195,16 @@ cnor_vm_arith_values(cnor_vm_t *vm, const cnor_insn_t *insn, cnor_op_t op,
         && lh_value_get_kind(right) == lh_value_kind_str)
     {
         return cnor_vm_text_join(vm, insn, left, right, out);
+    }
+    if (op == cnor_op_band || op == cnor_op_bor || op == cnor_op_bxor || op == cnor_op_shl
+        || op == cnor_op_shr)
+    {
+        /* The bitwise operators work on whole numbers. */
+        if (!cnor_vm_value_is_integer(left) || !cnor_vm_value_is_integer(right))
+        {
+            return cnor_vm_fail(vm, insn, cnor_error_type);
+        }
+        return cnor_vm_arith_numbers(vm, insn, op, left, right, out);
     }
     if (!cnor_vm_value_is_number(left) || !cnor_vm_value_is_number(right))
     {
@@ -179,10 +230,28 @@ cnor_vm_op_arith(cnor_vm_t *vm, const cnor_insn_t *insn)
     return lh_bool_true;
 }
 
+/* `~x`: the bits of a whole number, turned around. */
 lh_bool_t
-cnor_vm_op_neg(cnor_vm_t *vm, const cnor_insn_t *insn)
+cnor_vm_op_bnot(cnor_vm_t *vm, const cnor_insn_t *insn)
 {
     lh_value_t *top = cnor_vm_stack_peek(&vm->stack, 0U);
+
+    switch (lh_value_get_kind(top))
+    {
+    case lh_value_kind_sint:
+        *top = lh_value_make_sint(~lh_value_get_data(top)->i);
+        return lh_bool_true;
+    case lh_value_kind_uint:
+        *top = lh_value_make_uint(~lh_value_get_data(top)->u);
+        return lh_bool_true;
+    default:
+        return cnor_vm_fail(vm, insn, cnor_error_type);
+    }
+}
+
+lh_bool_t
+cnor_vm_op_neg(cnor_vm_t *vm, const cnor_insn_t *insn)
+{    lh_value_t *top = cnor_vm_stack_peek(&vm->stack, 0U);
 
     switch (lh_value_get_kind(top))
     {

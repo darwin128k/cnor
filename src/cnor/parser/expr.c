@@ -24,11 +24,16 @@ static const struct cnor_parser_binary_rule m_binary_rules[] = {
     {cnor_token_punct, cnor_punct_le, cnor_binary_le, 3U},
     {cnor_token_punct, cnor_punct_gt, cnor_binary_gt, 3U},
     {cnor_token_punct, cnor_punct_ge, cnor_binary_ge, 3U},
-    {cnor_token_punct, cnor_punct_plus, cnor_binary_add, 4U},
-    {cnor_token_punct, cnor_punct_minus, cnor_binary_sub, 4U},
-    {cnor_token_punct, cnor_punct_star, cnor_binary_mul, 5U},
-    {cnor_token_punct, cnor_punct_slash, cnor_binary_div, 5U},
-    {cnor_token_punct, cnor_punct_percent, cnor_binary_mod, 5U},
+    {cnor_token_punct, cnor_punct_pipe, cnor_binary_bor, 4U},
+    {cnor_token_punct, cnor_punct_caret, cnor_binary_bxor, 5U},
+    {cnor_token_punct, cnor_punct_amp, cnor_binary_band, 6U},
+    {cnor_token_punct, cnor_punct_shift_left, cnor_binary_shl, 7U},
+    {cnor_token_punct, cnor_punct_shift_right, cnor_binary_shr, 7U},
+    {cnor_token_punct, cnor_punct_plus, cnor_binary_add, 8U},
+    {cnor_token_punct, cnor_punct_minus, cnor_binary_sub, 8U},
+    {cnor_token_punct, cnor_punct_star, cnor_binary_mul, 9U},
+    {cnor_token_punct, cnor_punct_slash, cnor_binary_div, 9U},
+    {cnor_token_punct, cnor_punct_percent, cnor_binary_mod, 9U},
 };
 
 #define CNOR_PARSER_BINARY_RULE_COUNT (sizeof(m_binary_rules) / sizeof(m_binary_rules[0]))
@@ -260,6 +265,10 @@ cnor_parser_unary(cnor_parser_t *self)
     if (cnor_parser_at_punct(self, cnor_punct_minus))
     {
         op = cnor_unary_neg;
+    }
+    else if (cnor_parser_at_punct(self, cnor_punct_tilde))
+    {
+        op = cnor_unary_bnot;
     }
     else if (cnor_parser_at_keyword(self, cnor_keyword_not))
     {
