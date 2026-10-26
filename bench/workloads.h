@@ -38,6 +38,15 @@ cnor_bench_workloads(size_t *count);
 const cnor_native_table_t *
 cnor_bench_natives(void);
 
+/*
+ * The sources of the workloads the tree-walker benchmark runs as well: the
+ * two benchmarks must run the very same text, or the comparison is about two
+ * different programs.
+ */
+extern const char cnor_bench_fib[];
+extern const char cnor_bench_loop[];
+extern const char cnor_bench_nested[];
+
 /**
  * @brief Build the large generated program: @p functions functions with an
  *        if, a while and a match each, and a top level calling every one.

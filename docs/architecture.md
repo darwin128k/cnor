@@ -263,6 +263,21 @@ place, the handlers under `src/cnor/vm/op/`:
   signed integers (with `eq` / `ne` also comparing any two values in place);
   anything else, and a `div` / `mod` by 0 or -1, defers to `op/operand.c`,
   which fetches the operands and runs the plain operator's value-level code.
+- **The machine runs bytecode, not the tree.** A tree-walker would read the
+  program into a tree and walk it; the machine compiles it to instructions
+  and runs those. The difference was measured, not guessed: `bench/tree/` holds
+  a tree-walker (cnor's own parser, the names resolved once, the same values
+  and the same rules) and runs the same programs as the machine, in one
+  process, with the rounds interleaved. Measured 2026-10-26 on a Windows host
+  (MinGW GCC): the tree-walker is 2 to 4 times slower on `fib` (19 ns a call
+  against 46), 7 to 10 times on the hot `loop` (8.2 ns an iteration against
+  86) and 3 to 5 times on `nested` (15 ns an iteration against 47); on
+  32-bit, 2 to 3, 7 to 9 and 3. The hotter the loop, the worse it gets: the
+  dispatch (a call and a switch per node) is what the machine's computed goto
+  does not pay, and the tree visits one and a half to one and a half and three
+  quarters times as many nodes as the machine executes instructions. So the
+  bytecode is not ceremony: it is the speed, and it is worth the compiler it
+  needs.
 - **A remainder by a power of two is a mask.** The rule of `%` for integers is
   the C rule (truncated toward zero), so a positive dividend and a power of
   two leave the low bits: `x % 8` is `x & 7`. Only the two forms with an

@@ -126,6 +126,22 @@ jump back out of line, behind a taken branch, and merged it with the exit
 into one indirect jump. Marking the jump back likely and giving it its own
 dispatch fixed it (see docs/architecture.md, win #6).
 
+### The tree-walker: what an interpreter would cost
+
+`tree/` holds a tree-walker: it reads a program with cnor's own parser,
+resolves the names once, and walks the tree. `tree/README.md` has how it is
+built and what is fair about the comparison; the short version:
+
+| Workload | Machine | Tree-walker | Slower |
+|---|---:|---:|---:|
+| `fib` (recursive) | 19 ns a call | 46 ns | 2–4x |
+| `loop` (a hot while loop) | 8.2 ns an iteration | 86 ns | 7–10x |
+| `nested` (1000 x 1000 for) | 15 ns an iteration | 47 ns | 3–5x |
+
+(64-bit, the minimum of nine rounds, 2026-10-26; on 32-bit: 2–3x, 7–9x and
+3x.) So an interpreter that walks the tree would be two to ten times slower,
+and the hotter the loop, the worse it gets.
+
 ## Windows: the Half-Life 1.6 target
 
 Half-Life 1.6 runs on 32-bit x86, so for a plugin the 32-bit numbers are the

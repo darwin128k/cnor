@@ -59,28 +59,28 @@ cnor_bench_natives(void)
 
 /* -- programs -------------------------------------------------------------- */
 
-static const char m_fib[] = "fn fib(n: i32) -> i32:\n"
-                            "    if n < 2:\n"
-                            "        return n\n"
-                            "    return fib(n - 1) + fib(n - 2)\n"
-                            "fib(25)\n";
+const char cnor_bench_fib[] = "fn fib(n: i32) -> i32:\n"
+                             "    if n < 2:\n"
+                             "        return n\n"
+                             "    return fib(n - 1) + fib(n - 2)\n"
+                             "fib(25)\n";
 
-static const char m_loop[] = "fn sum(n: i32) -> i32:\n"
-                             "    let mut s = 0\n"
-                             "    let mut i = 0\n"
-                             "    while i < n:\n"
-                             "        s = s + i\n"
-                             "        i = i + 1\n"
-                             "    return s\n"
-                             "sum(10000000)\n";
+const char cnor_bench_loop[] = "fn sum(n: i32) -> i32:\n"
+                              "    let mut s = 0\n"
+                              "    let mut i = 0\n"
+                              "    while i < n:\n"
+                              "        s = s + i\n"
+                              "        i = i + 1\n"
+                              "    return s\n"
+                              "sum(10000000)\n";
 
-static const char m_nested[] = "fn nested(n: i32) -> i32:\n"
-                               "    let mut s = 0\n"
-                               "    for i in 0..n:\n"
-                               "        for j in 0..n:\n"
-                               "            s = s + (i * j) % 7\n"
-                               "    return s\n"
-                               "nested(1000)\n";
+const char cnor_bench_nested[] = "fn nested(n: i32) -> i32:\n"
+                                "    let mut s = 0\n"
+                                "    for i in 0..n:\n"
+                                "        for j in 0..n:\n"
+                                "            s = s + (i * j) % 7\n"
+                                "    return s\n"
+                                "nested(1000)\n";
 
 static const char m_text[] = "fn scan(text: str, rounds: i32) -> i32:\n"
                              "    let mut hits = 0\n"
@@ -140,9 +140,11 @@ static const char m_try[] = "fn guarded(rounds: i32) -> i32:\n"
                             "guarded(1000000)\n";
 
 static const cnor_bench_workload_t m_workloads[] = {
-    {"fib", "recursive fib(25)", m_fib, 75025, 242785U, "call"},
-    {"loop", "while loop summing 0..10M", m_loop, 49999995000000LL, 10000000U, "iteration"},
-    {"nested", "1000 x 1000 nested for, (i*j)%7", m_nested, 2570569, 1000000U, "iteration"},
+    {"fib", "recursive fib(25)", cnor_bench_fib, 75025, 242785U, "call"},
+    {"loop", "while loop summing 0..10M", cnor_bench_loop, 49999995000000LL, 10000000U,
+     "iteration"},
+    {"nested", "1000 x 1000 nested for, (i*j)%7", cnor_bench_nested, 2570569, 1000000U,
+     "iteration"},
     {"text", "index/compare 43-char text 20000x, join+len", m_text, 120000, 860000U, "char"},
     {"native", "1M native calls absval(i - 500000)", m_native, 250000000000LL, 1000000U, "call"},
     {"match", "1M iterations of a 7-arm match", m_match, 1750000, 1000000U, "iteration"},
