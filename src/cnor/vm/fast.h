@@ -25,6 +25,7 @@
 #include <lh/null.h>
 #include <lh/numeric/fixed/types.h>
 #include <lh/value.h>
+#include <string.h>
 
 /**
  * @def CNOR_VM_LIKELY(cond)
@@ -93,10 +94,12 @@ cnor_vm_fast_set_sint(lh_value_t *value, lh_sllong_t number)
 /**
  * @brief Copy @p from into @p to, field by field: the kind, the first word of
  *        the storage, and for a string its length, the only storage beyond
- *        8 bytes. A value is usually read back right after an instruction
- *        wrote it the same way (a kind, an 8-byte number); loads no wider than
- *        those stores are forwarded from them, while the 16-byte block loads
- *        of a struct copy wait for the stores to retire.
+ *        8 bytes. An array counts its elements there too; a dictionary keeps
+ *        its count in its header and has none of its own. A value is usually
+ *        read back right after an instruction wrote it the same way (a kind,
+ *        an 8-byte number); loads no wider than those stores are forwarded
+ *        from them, while the 16-byte block loads of a struct copy wait for
+ *        the stores to retire.
  */
 LH_COMPILER_ATTRIBUTE_FORCE_INLINE void
 cnor_vm_fast_move(lh_value_t *to, const lh_value_t *from)
@@ -105,7 +108,8 @@ cnor_vm_fast_move(lh_value_t *to, const lh_value_t *from)
 
     to->kind = kind;
     to->data.u = from->data.u;
-    if (kind == lh_value_kind_str || kind == CNOR_VALUE_KIND_ARRAY)
+    if (kind == lh_value_kind_str || kind == CNOR_VALUE_KIND_ARRAY
+        || kind == CNOR_VALUE_KIND_DICT)
     {
         to->data.s.size = from->data.s.size;
     }
@@ -173,6 +177,88 @@ cnor_vm_fast_set_array(lh_value_t *value, lh_value_t *data, lh_u32_t count)
     value->kind = CNOR_VALUE_KIND_ARRAY;
     value->data.s.begin = (const lh_char_t *) (const void *) data;
     value->data.s.size = (lh_usize_t) count;
+}
+
+/**
+ * @brief The header of the dictionary @p value: the count of its pairs and the
+ *        room it has. The pairs follow it.
+ *
+ * The header is not in the value but where the dictionary was made, so a
+ * dictionary that was copied elsewhere (into a parameter, say) still shares
+ * the count with the one it came from: what a function writes into it, the
+ * caller sees.
+ */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_value_t *
+cnor_vm_fast_dict_header(const lh_value_t *value)
+{
+    return (lh_value_t *) (void *) (const void *) value->data.s.begin;
+}
+
+/** @brief The pairs of the dictionary @p value holds; its kind is known. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_value_t *
+cnor_vm_fast_dict_data(const lh_value_t *value)
+{
+    return cnor_vm_fast_dict_header(value) + 2;
+}
+
+/** @brief How many pairs the dictionary @p value holds; its kind is known. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_u32_t
+cnor_vm_fast_dict_count(const lh_value_t *value)
+{
+    return (lh_u32_t) cnor_vm_fast_sint(&cnor_vm_fast_dict_header(value)[0]);
+}
+
+/** @brief How many pairs the dictionary @p value may hold; its kind is known. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_u32_t
+cnor_vm_fast_dict_room(const lh_value_t *value)
+{
+    return (lh_u32_t) cnor_vm_fast_sint(&cnor_vm_fast_dict_header(value)[1]);
+}
+
+/** @brief Overwrite @p value with the dictionary whose header is @p header. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE void
+cnor_vm_fast_set_dict(lh_value_t *value, lh_value_t *header)
+{
+    value->kind = CNOR_VALUE_KIND_DICT;
+    value->data.s.begin = (const lh_char_t *) (const void *) header;
+    value->data.s.size = 0U;
+}
+
+/** @brief Make the dictionary @p value hold @p count pairs. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE void
+cnor_vm_fast_dict_set_count(const lh_value_t *value, lh_u32_t count)
+{
+    cnor_vm_fast_set_sint(&cnor_vm_fast_dict_header(value)[0], (lh_sllong_t) count);
+}
+
+/**
+ * @brief The value of the key @p key in the dictionary @p dictionary, or
+ *        ::lh_null when the dictionary has no such key.
+ *
+ * The dictionary is known to be one and the key a text; a key that is not a
+ * text is never found.
+ */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_value_t *
+cnor_vm_fast_dict_find(const lh_value_t *dictionary, const lh_value_t *key)
+{
+    lh_value_t *const pairs = cnor_vm_fast_dict_data(dictionary);
+    const lh_u32_t count = cnor_vm_fast_dict_count(dictionary);
+    lh_u32_t i;
+
+    for (i = 0U; i < count; ++i)
+    {
+        const lh_value_t *const candidate = &pairs[i * 2U];
+
+        if (cnor_vm_fast_kind(candidate) == lh_value_kind_str
+            && cnor_vm_fast_str_size(candidate) == cnor_vm_fast_str_size(key)
+            && memcmp(cnor_vm_fast_str_data(candidate), cnor_vm_fast_str_data(key),
+                      cnor_vm_fast_str_size(key))
+                   == 0)
+        {
+            return &pairs[i * 2U + 1U];
+        }
+    }
+    return lh_null;
 }
 
 /** @def CNOR_VM_FAST_LONG_TEXT @brief Beyond this many bytes a call into lh's

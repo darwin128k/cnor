@@ -22,6 +22,7 @@ static const lh_char_t *const m_type_names[cnor_static_type_count] = {
     [cnor_static_any] = "any",   [cnor_static_none] = "none", [cnor_static_bool] = "bool",
     [cnor_static_i32] = "i32",   [cnor_static_u32] = "u32",   [cnor_static_f32] = "f32",
     [cnor_static_str] = "str",   [cnor_static_array] = "array",
+    [cnor_static_dict] = "dict",
 };
 
 static const lh_char_t *const m_binary_spellings[cnor_binary_count] = {
@@ -56,6 +57,8 @@ cnor_type_of_annotation(cnor_type_t annotation)
         return cnor_static_str;
     case cnor_type_array:
         return cnor_static_array;
+    case cnor_type_dict:
+        return cnor_static_dict;
     default:
         return cnor_static_any;
     }
@@ -145,6 +148,21 @@ cnor_type_require(cnor_compiler_t *self, const cnor_node_t *node, cnor_static_ty
     detail.size = 0U;
     cnor_type_detail_put(&detail, "expected ");
     cnor_type_detail_put(&detail, cnor_type_name(wanted));
+    cnor_type_detail_put(&detail, ", found ");
+    cnor_type_detail_put(&detail, cnor_type_name(found));
+    return cnor_type_fail(self, node, cnor_error_type_mismatch, &detail);
+}
+
+/* The same, for a wanted type that has no name of its own ("array or dict"). */
+lh_bool_t
+cnor_type_require_text(cnor_compiler_t *self, const cnor_node_t *node, const lh_char_t *wanted,
+                       cnor_static_type_t found)
+{
+    cnor_type_detail_t detail;
+
+    detail.size = 0U;
+    cnor_type_detail_put(&detail, "expected ");
+    cnor_type_detail_put(&detail, wanted);
     cnor_type_detail_put(&detail, ", found ");
     cnor_type_detail_put(&detail, cnor_type_name(found));
     return cnor_type_fail(self, node, cnor_error_type_mismatch, &detail);

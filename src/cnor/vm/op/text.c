@@ -25,6 +25,11 @@ cnor_vm_op_len(cnor_vm_t *vm, const cnor_insn_t *insn)
         cnor_vm_fast_set_sint(top, (lh_sllong_t) cnor_vm_fast_array_count(top));
         return lh_bool_true;
     }
+    if (cnor_vm_fast_kind(top) == CNOR_VALUE_KIND_DICT)
+    {
+        cnor_vm_fast_set_sint(top, (lh_sllong_t) cnor_vm_fast_dict_count(top));
+        return lh_bool_true;
+    }
     return cnor_vm_fail(vm, insn, cnor_error_type);
 }
 

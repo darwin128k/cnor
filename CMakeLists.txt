@@ -82,6 +82,7 @@ set(CNOR_SOURCES
         ${CNOR_SRC_PATH}/cnor/compiler/control_if.c
         ${CNOR_SRC_PATH}/cnor/compiler/control_loop.c
         ${CNOR_SRC_PATH}/cnor/compiler/control_match.c
+        ${CNOR_SRC_PATH}/cnor/compiler/control_try.c
         ${CNOR_SRC_PATH}/cnor/compiler/function.c
         ${CNOR_SRC_PATH}/cnor/compiler/path.c
         ${CNOR_SRC_PATH}/cnor/compiler/module.c
@@ -99,6 +100,9 @@ set(CNOR_SOURCES
         ${CNOR_SRC_PATH}/cnor/vm/op/control.c
         ${CNOR_SRC_PATH}/cnor/vm/op/text.c
         ${CNOR_SRC_PATH}/cnor/vm/op/array.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/dict.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/collection.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/error.c
         ${CNOR_SRC_PATH}/cnor/vm/op/builtin.c
         ${CNOR_SRC_PATH}/cnor/vm/op/operand.c
 )

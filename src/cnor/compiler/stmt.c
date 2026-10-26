@@ -31,6 +31,52 @@ cnor_compile_store(cnor_compiler_t *self, const cnor_binding_t *binding)
     return cnor_emit_insn(self, op, binding->index, 0U);
 }
 
+/* -- dictionaries ----------------------------------------------------------- */
+
+/*
+ * `dict(n)` is a declaration, like an array literal: it names the room the
+ * dictionary has, and the room is a whole number the compiler knows, since
+ * the dictionary takes its slots.
+ */
+
+cnor_dict_form_t
+cnor_compiler_dict_form(const cnor_node_t *init, lh_u32_t *room)
+{
+    const lh_str_view_t dict = lh_str_view_lit("dict");
+    const cnor_node_t *arg;
+
+    if (init == lh_null || init->kind != cnor_node_call
+        || !lh_str_view_equals(&init->name, &dict, lh_bool_false))
+    {
+        return cnor_dict_not_a_dict;
+    }
+    if (init->data.call.argc != 1U)
+    {
+        return cnor_dict_malformed;
+    }
+    arg = init->data.call.args;
+    if (arg->kind != cnor_node_int)
+    {
+        return cnor_dict_malformed;
+    }
+    *room = arg->data.int_.value;
+    return cnor_dict_declared;
+}
+
+/* Whether the script names a function or native of its own `dict`: such a
+ * name wins, as it does for `len`. */
+lh_bool_t
+cnor_compiler_names_its_own_dict(cnor_compiler_t *self)
+{
+    const lh_str_view_t dict = lh_str_view_lit("dict");
+    const cnor_binding_t binding = cnor_scope_resolve(self, dict);
+
+    return (binding.kind == cnor_binding_function || binding.kind == cnor_binding_native
+            || binding.kind == cnor_binding_ambiguous)
+               ? lh_bool_true
+               : lh_bool_false;
+}
+
 /* -- let ------------------------------------------------------------------- */
 
 /* A top-level `let`: the global was declared by the declaration pass, so
@@ -97,6 +143,38 @@ cnor_compile_let_array(cnor_compiler_t *self, const cnor_node_t *node, const cno
     return cnor_emit_insn(self, cnor_op_array_new, slot, count);
 }
 
+/* A top-level dictionary: its pairs live in the globals, so they outlive the
+ * frame of the top-level code that makes them. */
+static lh_bool_t
+cnor_compile_let_global_dict(cnor_compiler_t *self, const cnor_node_t *node, lh_u32_t room)
+{
+    const cnor_binding_t binding = cnor_scope_resolve(self, node->name);
+    const lh_u32_t slots = room * 2U + 3U;
+
+    cnor_scope_global_at(&self->scope, binding.index)->type = cnor_static_dict;
+    if (binding.index + slots > self->globals_ready)
+    {
+        self->globals_ready = binding.index + slots;
+    }
+    return cnor_emit_insn(self, cnor_op_dict_new_global, binding.index, room);
+}
+
+/* `let mut name = dict(n)`: the name takes a slot for the dictionary, two
+ * for its header and two per key and value. */
+static lh_bool_t
+cnor_compile_let_dict(cnor_compiler_t *self, const cnor_node_t *node, lh_u32_t room)
+{
+    cnor_slot_t slot;
+
+    if (!cnor_scope_add_dict_local(self, node, node->name, node->data.let.is_mutable,
+                                   (lh_u16_t) room, &slot))
+    {
+        return lh_bool_false;
+    }
+    /* `dict_new` writes the room and the dictionary's value. */
+    return cnor_emit_insn(self, cnor_op_dict_new, slot, room);
+}
+
 lh_bool_t
 cnor_compile_let(cnor_compiler_t *self, const cnor_node_t *node)
 {
@@ -119,6 +197,31 @@ cnor_compile_let(cnor_compiler_t *self, const cnor_node_t *node)
             return cnor_compile_let_global_array(self, node);
         }
         return cnor_compile_let_array(self, node, node->data.let.init);
+    }
+    /* A dictionary initializer: `dict(n)` names the room the dictionary has.
+     * A name of the script's own wins, as it does for `len`. */
+    {
+        lh_u32_t room = 0U;
+        const cnor_dict_form_t form = cnor_compiler_dict_form(node->data.let.init, &room);
+
+        if (form != cnor_dict_not_a_dict && !cnor_compiler_names_its_own_dict(self))
+        {
+            if (form == cnor_dict_malformed || room > CNOR_DICT_ROOM_MAX)
+            {
+                return cnor_compile_fail(self, node, cnor_error_dict_room);
+            }
+            if (annotation != cnor_type_none
+                && !cnor_type_require(self, node, cnor_type_of_annotation(annotation),
+                                      cnor_static_dict))
+            {
+                return lh_bool_false;
+            }
+            if (cnor_compile_at_top_level(self))
+            {
+                return cnor_compile_let_global_dict(self, node, room);
+            }
+            return cnor_compile_let_dict(self, node, room);
+        }
     }
     /* The initializer is compiled before the name exists, so `let x = x + 1`
      * reads the outer `x` (and fails at the top level, where the outer `x`
@@ -143,6 +246,41 @@ cnor_compile_let(cnor_compiler_t *self, const cnor_node_t *node)
     return cnor_compile_store(self, &binding);
 }
 
+/* `settings["key"] = value`: a pair of the dictionary in @p binding. */
+static lh_bool_t
+cnor_compile_assign_dict(cnor_compiler_t *self, const cnor_node_t *node,
+                          const cnor_node_t *target, const cnor_binding_t *binding)
+{
+    const cnor_node_t *const base = target->data.index.target;
+
+    if (binding->kind != cnor_binding_local)
+    {
+        /* A global dictionary: its value goes on the stack, then the key and
+         * the value. */
+        if (!cnor_compile_expr(self, base)
+            || !cnor_type_require(self, target, cnor_static_dict, self->type)
+            || !cnor_compile_expr(self, target->data.index.index)
+            || !cnor_type_require(self, target, cnor_static_str, self->type)
+            || !cnor_compile_expr(self, node->data.assign.value))
+        {
+            return lh_bool_false;
+        }
+        return cnor_emit_op(self, cnor_op_dict_set);
+    }
+    if (!binding->is_mutable)
+    {
+        return cnor_compile_fail_name(self, base, cnor_error_immutable);
+    }
+    /* The key, then the value; `dict_set_l` takes both. */
+    if (!cnor_compile_expr(self, target->data.index.index)
+        || !cnor_type_require(self, target, cnor_static_str, self->type)
+        || !cnor_compile_expr(self, node->data.assign.value))
+    {
+        return lh_bool_false;
+    }
+    return cnor_emit_insn(self, cnor_op_dict_set_l, binding->index, 0U);
+}
+
 /* `scores[i] = value`: an element of the array in a local. */
 static lh_bool_t
 cnor_compile_assign_index(cnor_compiler_t *self, const cnor_node_t *node,
@@ -156,6 +294,10 @@ cnor_compile_assign_index(cnor_compiler_t *self, const cnor_node_t *node,
         return cnor_compile_fail(self, target, cnor_error_not_assignable);
     }
     binding = cnor_scope_resolve(self, base->name);
+    if (binding.type == cnor_static_dict)
+    {
+        return cnor_compile_assign_dict(self, node, target, &binding);
+    }
     if (binding.kind != cnor_binding_local || binding.type != cnor_static_array)
     {
         if (binding.type != cnor_static_array)
@@ -257,6 +399,12 @@ cnor_compile_return(cnor_compiler_t *self, const cnor_node_t *node)
         /* The elements of an array live in a frame or in the globals: a
          * returned array would point at a frame that is gone. */
         return cnor_compile_fail(self, node, cnor_error_array_returned);
+    }
+    if (self->type == cnor_static_dict)
+    {
+        /* The pairs of a dictionary live in a frame or in the globals: a
+         * returned dictionary would point at a frame that is gone. */
+        return cnor_compile_fail(self, node, cnor_error_dict_returned);
     }
     return cnor_emit_op(self, cnor_op_ret);
 }

@@ -127,6 +127,8 @@ cnor_vm_op_ret(cnor_vm_t *vm, const cnor_insn_t *insn)
     const cnor_vm_frame_t *frame;
 
     (void) insn;
+    /* The `try` blocks of this frame are gone with it. */
+    cnor_vm_tries_leave(vm);
     vm->stack.sp = vm->fp;
     if (vm->depth == 0U)
     {

@@ -137,4 +137,22 @@ typedef lh_u32_t cnor_count_t;
  */
 #define CNOR_VALUE_KIND_ARRAY 7U
 
+/**
+ * @def CNOR_VALUE_KIND_DICT
+ * @brief The value kind of a dictionary: pairs of a key and a value.
+ *
+ * The storage is lh's string view as well: `begin` points at the header (the
+ * count of the pairs and the room the dictionary has) and `size` is unused.
+ * The pairs follow the header, two values each.
+ */
+#define CNOR_VALUE_KIND_DICT 8U
+
+/**
+ * @def CNOR_DICT_ROOM_MAX
+ * @brief Largest room a dictionary may have: a dictionary takes three slots
+ *        and two per pair, and the slots of the globals are counted by a
+ *        16-bit index.
+ */
+#define CNOR_DICT_ROOM_MAX 32766U
+
 #endif /* CNOR_TYPES_H */

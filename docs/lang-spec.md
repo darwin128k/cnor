@@ -65,12 +65,21 @@ is needed: `none`, `bool`, `sint`, `uint`, `real`, `str`, `ptr`.
 | `bool` | `lh_value_kind_bool` | |
 | `str` | `lh_value_kind_str` | see ownership below |
 | array | `CNOR_VALUE_KIND_ARRAY` (7) | cnor's own kind; see below |
+| dict | `CNOR_VALUE_KIND_DICT` (8) | cnor's own kind; see below |
 | (none) | `lh_value_kind_ptr` | natives only; not reachable from a script |
 
 An array's value is lh's string view: `begin` points at the elements (values
 of their own) and `size` counts them, not bytes. Its elements are slots of the
 frame that declares it, so an array is a local and does not outlive its
 function.
+
+A dictionary's value is a pointer to its **header**: the count of its pairs and
+the room it has. The pairs follow the header, two values each (a key and a
+value). The header is not in the value but where the dictionary was made, so a
+dictionary that was copied elsewhere (into a parameter, say) shares the count
+with the one it came from: what a function writes into it, the caller sees. The
+pairs are slots of the frame that declares it, so a dictionary is a local and
+does not outlive its function.
 
 An integer literal up to `0x7FFFFFFF` is an `i32`; a larger one (up to
 `0xFFFFFFFF`) is a `u32`. Arithmetic on two `u32` stays `u32` (a subtraction
@@ -156,12 +165,13 @@ statement   := simple end | compound
 simple      := let | assign | expr | "return" [ expr ] | "break" | "continue"
 let         := "let" [ "mut" ] IDENT [ ":" type ] [ "=" expr ]
 assign      := IDENT "=" expr | IDENT "[" expr "]" "=" expr
-compound    := if | while | for | match
+compound    := if | while | for | match | try
 if          := "if" expr ":" block [ "else" ( ":" block | if ) ]
 while       := "while" expr ":" block
 for         := "for" IDENT "in" ( expr ".." expr | expr ) ":" block
 match       := "match" expr ":" NEWLINE INDENT arm { arm } DEDENT
 arm         := ( literal | "-" literal | "_" ) "=>" simple [ "," ] end
+try         := "try" ":" block "catch" [ IDENT ] ":" block
 end         := [ ";" ] ( NEWLINE | DEDENT | EOF )      (or ";" then more on the line)
 expr        := binary expression, precedence below
 postfix     := primary { "[" expr "]" }
@@ -186,6 +196,56 @@ element.
 
 `for v in a` walks the elements of an array, and `len(a)` is how many there
 are.
+
+**[cnor]** A dictionary (`dict(n)`) is a declaration as well: it names the room
+it has — how many keys it may take — and that number is a whole number the
+compiler knows, since the dictionary takes its slots. A dictionary is written
+`let mut settings = dict(8)`, and read and written with a key:
+`settings["hp"]` and `settings["hp"] = 100`. A key that is not there reads as
+`none`, and the run goes on; a key that is not a text is an error.
+
+A dictionary may be a parameter (`fn f(d: dict)`) and a global (`let mut
+settings = dict(8)` at the top level). A parameter is a **reference** to the
+pairs: what the function writes, the caller sees. A global dictionary keeps its
+pairs in the globals, so they outlive the frame that made them. A dictionary
+cannot be returned (its pairs would outlive the frame they live in) and cannot
+be read as a value: `settings` is an error, `settings["hp"]` is the value.
+
+`for k in d` walks the **keys** of a dictionary, and `len(d)` is how many pairs
+it holds. A dictionary with no room for another key fails the run. A `for` over
+a collection whose kind the compiler does not know walks the elements of an
+array or the keys of a dictionary, whichever it is.
+
+**[cnor]** A `try` guards a block, and its `catch` handles what goes wrong
+there:
+
+```
+try:
+    let settings = load("hp.cfg")
+catch e:
+    print(e["message"], "on line", e["line"])
+```
+
+The catch is not optional: a `try` without one would only repeat what the
+machine does anyway. The name is optional too: `catch:` handles the failure
+and throws the error away.
+
+The error is a **dictionary** of four pairs: `message` (the text of the
+failure), `line` (the line it happened on), `code` (the number of the failure,
+the `cnor_error_t` of the machine) and `file` (the file it happened in). It is
+a value like any other: it may be passed to a function, put in a dictionary or
+left alone.
+
+The failure flies through the calls of the script and through the host's
+functions, and the first `catch` above it takes it. Everything the machine
+fails at may be caught, except the failures that leave the machine in no
+usable state (the stack overflowing, the memory running out). An error nobody
+catches ends the run, as it did before: the host sees the code, the line and
+the file.
+
+A `try` costs three instructions when it begins and when it ends, and nothing
+at all inside it: the machine does not look for handlers while the program
+runs.
 
 Operator precedence, loosest first; binary operators are left-associative:
 
@@ -242,7 +302,7 @@ ones: an error only where the program is certainly wrong, and nothing at run
 time that was not there before (no casts, no extra instructions).
 
 Every expression has a static type: one of `i32`, `u32`, `f32`, `bool`,
-`str`, the type of the `none` literal, **`array`**, or **`any`** when the compiler cannot
+`str`, the type of the `none` literal, **`array`**, **`dict`**, or **`any`** when the compiler cannot
 know (a host native's result, an unannotated function's result, a variable
 that started as `none`). `any` is accepted wherever a type is required, and a
 value of type `any` is accepted where anything is; such values are checked by
@@ -257,6 +317,10 @@ the machine when an operator executes, as before.
 - **Arrays.** An array's elements hold whatever they were given, so an element
   is of type `any`. The array itself cannot be read as a value: `scores` is an
   error, `scores[i]` is the element.
+- **Dictionaries.** A dictionary's pairs hold whatever they were given, so a
+  value is of type `any`. The dictionary itself cannot be read as a value:
+  `settings` is an error, `settings["hp"]` is the value. A key is a text: a
+  number where one is required is an error.
 - **Variables.** `let x: T = e` requires `e` to be a `T`; `let x: T` without
   a value is refused (it would hold `none`). Without an annotation the
   variable takes the type of its initializer, and `let x` or `let x = none`
@@ -392,7 +456,7 @@ closures, a preprocessor, metatables.
 
 ---
 
-## 7. The `.tbc` image format, v9
+## 7. The `.tbc` image format, v11
 
 **[cnor]** v1 replaced the original header (whose layout used `sizeof` and
 was not portable) and its names section. Every field is a fixed-width
@@ -405,7 +469,13 @@ turns the file name into a file table, for `import`; v5 adds the index forms
 a function of the language itself (section 9.2); v8 adds the array of an
 array that is not a local (`array_get`, `array_set`) and the array in the
 globals (`array_new_global`); v9 adds the bitwise operators (`band`, `bor`,
-`bxor`, `shl`, `shr`, `bnot`). An image of another version is refused: v8
+`bxor`, `shl`, `shr`, `bnot`); v10 adds the dictionary instructions
+(`dict_new`, `dict_new_global`, `dict_get_l`, `dict_set_l`, `dict_get`,
+`dict_set`, `dict_key_l`) and the collection of an unknown kind
+(`collection_get_l`), and gives the global instructions (`array_new_global`,
+`dict_new_global`) a u16 index, for the globals may be more than a frame's
+slots hold; v11 adds the error handling (`try_push`, `try_pop`). An image of
+another version is refused: v10
 images must be compiled again.
 
 ### 7.1 Header (68 bytes)
@@ -413,7 +483,7 @@ images must be compiled again.
 | Offset | Field | Type | Meaning |
 |---|---|---|---|
 | 0 | `magic` | 4 bytes | `"cnor"` |
-| 4 | `version` | u16 | format version, currently 9 |
+| 4 | `version` | u16 | format version, currently 11 |
 | 6 | `flags` | u16 | bit 0: the image carries a line table |
 | 8 | `image_size` | u32 | size of the whole image |
 | 12 | `stack_slots` | u32 | largest frame (slots + operands), **computed by the compiler** |
@@ -446,11 +516,12 @@ version, and an image produced by a newer version is rejected rather than
 
 ```
 fn let mut if else match for in while return break continue
-true false none and or not import native
+true false none and or not import native try catch
 ```
 
 **[cnor]** `in` (for `for`) and `none` (the literal) were missing from the
-original list. `import` is section 6.5.
+original list. `import` is section 6.5. `try` and `catch` are the error
+handling of section 6.1.
 
 ### 7.3 Addressing
 
@@ -468,7 +539,7 @@ relocation pass.
 
 ## 8. Instruction set
 
-The full list is `include/cnor/op.h` and its info table `src/cnor/op.c`: 101
+The full list is `include/cnor/op.h` and its info table `src/cnor/op.c`: 111
 opcodes. An opcode is one byte; operands follow it, little-endian. The info
 table holds each opcode's operands and stack effect; the compiler, the
 verifier and the machine all read it.
@@ -487,6 +558,9 @@ verifier and the machine all read it.
 | Functions | `call`, `ret`, `native` |
 | Text | `len`, `index`, `index_ll`, `index_li`, `index_i` |
 | Arrays | `array_new`, `array_new_global`, `array_get_l`, `array_set_l`, `array_get`, `array_set` |
+| Dictionaries | `dict_new`, `dict_new_global`, `dict_get_l`, `dict_set_l`, `dict_get`, `dict_set`, `dict_key_l` |
+| Collections of an unknown kind | `collection_get_l` |
+| Errors | `try_push`, `try_pop` |
 | The language's own functions | `call_builtin` |
 | Other | `halt` |
 
@@ -548,7 +622,7 @@ an array, which are slots of a frame or of the globals:
 | Opcode | Operands | Computes |
 |---|---|---|
 | `array_new` | slot a, u16 count | the `count` elements at `FRAME.a + 1` take the value on the stack; `FRAME.a` becomes the array |
-| `array_new_global` | slot a, u16 count | the same, in the globals: the elements at `GLOBALS.a + 1`, and `GLOBALS.a` becomes the array |
+| `array_new_global` | u16 index, u16 count | the same, in the globals: the elements at `GLOBALS.index + 1`, and `GLOBALS.index` becomes the array |
 | `array_get_l` | slot a | the element of `FRAME.a` at the index on the stack, in its place |
 | `array_set_l` | slot a | the element of `FRAME.a` at the index on the stack takes the value on top of it |
 | `array_get` | none | the element of the array on the stack, at the index above it, in the index's place |
@@ -561,6 +635,52 @@ with `index`.
 local array is not copied onto the stack. `array_get` and `array_set` take the
 array as a value, and are how an array that is not a local is read: a
 parameter is a local, a global array is not.
+
+**[cnor]** A dictionary holds pairs of a key and a value. The pairs are slots of
+a frame or of the globals, two per pair, and the dictionary's value points at
+its **header**: the count of the pairs and the room the dictionary has. The
+header is not in the value but where the dictionary was made, so a dictionary
+that was copied elsewhere shares the count with the one it came from.
+
+| Opcode | Operands | Computes |
+|---|---|---|
+| `dict_new` | slot a, u16 room | the dictionary of `room` pairs at `FRAME.a + 3`: `FRAME.a + 1` becomes its header (the count and the room), `FRAME.a` becomes the dictionary |
+| `dict_new_global` | u16 index, u16 room | the same, in the globals: the header at `GLOBALS.index + 1`, and `GLOBALS.index` becomes the dictionary |
+| `dict_get_l` | slot a | the value of the key on the stack in the dictionary of `FRAME.a`, in the key's place; a key that is not there gives `none` |
+| `dict_set_l` | slot a | the value on the stack goes under the key below it in the dictionary of `FRAME.a` |
+| `dict_get` | none | the value of the key on the stack in the dictionary below it, in the key's place |
+| `dict_set` | none | the value on the stack goes under the key below it in the dictionary below that |
+| `dict_key_l` | slot a | the key at the index on the stack in the dictionary of `FRAME.a`, in the index's place |
+
+The keys are texts, and one is found by comparing them. A key that is not a
+text fails the run; a dictionary with no room for another key fails it too.
+`dict_get_l` and `dict_set_l` read the dictionary out of a local slot, so a
+local dictionary is not copied onto the stack. `dict_get` and `dict_set` take
+the dictionary as a value, and are how a dictionary that is not a local is
+read: a parameter is a local, a global dictionary is not.
+
+**[cnor]** `collection_get_l` (format v10) is what a `for` over a collection
+of an unknown kind uses: an element of an array, or a key of a dictionary, and
+the machine tells them apart. The compiler picks `array_get_l` or `dict_key_l`
+when it knows the kind.
+
+**[cnor]** The error handling (format v11) is the machine's own: a `try` marks
+a catch block, and the machine unwinds to it when something fails inside the
+`try`. There is no `longjmp` and no unwinder table: the handlers are a stack
+of the machine's own, and the hot path does not know they exist.
+
+| Opcode | Operands | Computes |
+|---|---|---|
+| `try_push` | s32 catch, u8 slot | the catch block at the distance from the next instruction, and the slot the error's dictionary goes into, are marked as a handler |
+| `try_pop` | none | the `try` ended without an error: its handler is gone |
+
+The error's dictionary is written into the slots the compiler reserved for it
+(the value, the header and the four pairs), so catching an error allocates
+nothing. When a failure happens, the machine walks the handlers from the top:
+the ones whose frame is gone are dropped, the ones in a frame deeper than the
+failure's are left for the frame that holds them, and the first one in the
+frame the failure happened in takes it. The frames in between are left as a
+`ret` would leave them.
 
 **`call_builtin`** (u8 ordinal, u8 argument count; format v7) calls a
 function of the language itself (section 9.2). The arguments are on the
@@ -731,14 +851,17 @@ slots, call depth, pool size) are chosen by the host in advance.
 
 ## 11. Errors
 
-Consistent with `lh`: no exceptions, no `longjmp`. Codes are the
-`cnor_error_t` enum in `include/cnor/error.h`, with `cnor_error_get_message()`
-for logs. Every stage reports through one type, `cnor_diag_t`: a code, a line,
-an offset (a source offset for the front end, a code address for the verifier
-and the machine), when the failure is about a name, a copy of that name (or a
-detail such as "expected i32, found str"), and the file it happened in (the
-compiler's file, or for the machine the source file of the failing code;
-`cnor_vm_get_file_at` answers it for any code address).
+Consistent with `lh`: the host API has no exceptions and no `longjmp` — a
+failure is a code and a place, never a throw across the host's boundary.
+**[cnor]** Inside a script, a `try` catches what the machine fails at (section
+6.1): the machine unwinds to the catch block itself, with no unwinder table and
+no C++ runtime. Codes are the `cnor_error_t` enum in `include/cnor/error.h`,
+with `cnor_error_get_message()` for logs. Every stage reports through one type,
+`cnor_diag_t`: a code, a line, an offset (a source offset for the front end, a
+code address for the verifier and the machine), when the failure is about a
+name, a copy of that name (or a detail such as "expected i32, found str"), and
+the file it happened in (the compiler's file, or for the machine the source file
+of the failing code; `cnor_vm_get_file_at` answers it for any code address).
 
 - `cnor_vm_load` and `cnor_vm_run` return `lh_bool_t`; the reason is in
   `cnor_vm_get_diag()`, the line comes from the line table (0 without one).
@@ -762,7 +885,7 @@ compiler's file, or for the machine the source file of the failing code;
 |---|---|
 | Closures | They need environments; in a stack VM that is a subsystem of its own |
 | Structs and classes | Strings, numbers and native calls are enough for scripts |
-| Exceptions | Determinism matters more than convenience in embedded code |
+| **[cnor]** C++-style exceptions | The machine unwinds a `try` itself (section 6.1): no unwinder tables, no `longjmp`, and the hot path does not look for handlers |
 | Overloading, generics | They grow both compile time and bytecode size |
 | `f32` without `LH_REAL_ENABLED` | The type is not available on an STM32 by default; a real literal is then a compile error (`no_reals`) |
 | Module objects, qualified names (`math.f`), selective imports | A file's names are what it imports directly (section 6.5); one level of names is enough for scripts |
@@ -770,21 +893,28 @@ compiler's file, or for the machine the source file of the failing code;
 
 ## 14. Status
 
-Done and covered by tests (`tests/`, 196 cases, and 49 runs of the command
-line in `tests/cli/`, 50 on Windows):
+Done and covered by tests (`tests/`, 217 cases, and 50 runs of the command
+line in `tests/cli/`):
 
 - [x] lexer: tokens, keywords, indentation as `indent` / `dedent`, newline
   tokens, bracket continuations, `#` comments, integers in three bases, reals,
   `;`;
 - [x] parser: functions, `native fn`, `let`, assignments, expressions with
   precedence, calls, indexing, array literals, `if` / `else` chains, `while`,
-  `for`, `match` with literal patterns and `_`;
+  `for`, `match` with literal patterns and `_`, `try` / `catch`;
 - [x] compiler: every construct above, two passes (declarations, then bodies),
   computed frame sizes and stack depths, optional line table;
 - [x] arrays: an array of a fixed size, read and written by index, the bounds
   checked at run time; a local one keeps its elements in the frame, a global one in
   the globals; an array may be a parameter (a reference to the elements), `len(a)` is
   its size and `for v in a` walks them (section 8);
+- [x] dictionaries: a dictionary with a fixed room, read and written by key, the
+  key found by comparing texts; a local one keeps its pairs in the frame, a
+  global one in the globals; a dictionary may be a parameter (a reference to the
+  pairs), `len(d)` is its size and `for k in d` walks the keys (section 8);
+- [x] the error handling: `try` / `catch`, the machine unwinding to the catch
+  block itself, the error a dictionary of a message, a line, a code and a file
+  (section 6.1);
 - [x] the bitwise operators: `&` `|` `^` `~` `<<` `>>` on whole
   numbers, with the shift checked (section 6.1);
 - [x] the language's own functions: `len`, `find`, `contains`, `replace`,

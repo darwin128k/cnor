@@ -14,12 +14,26 @@ cnor_compile_declaration(cnor_compiler_t *self, const cnor_node_t *node)
         return cnor_scope_add_native(self, node);
     case cnor_node_let:
     {
-        /* An array takes a slot for itself and a slot per element. */
         const cnor_node_t *const init = node->data.let.init;
-        const lh_u16_t count = (init != lh_null && init->kind == cnor_node_array)
-                                   ? (lh_u16_t) (init->data.array.count + 1U)
-                                   : 1U;
+        lh_u32_t room = 0U;
+        lh_u16_t count;
 
+        if (init != lh_null && init->kind == cnor_node_array)
+        {
+            /* An array takes a slot for itself and a slot per element. */
+            count = (lh_u16_t) (init->data.array.count + 1U);
+        }
+        else if (cnor_compiler_dict_form(init, &room) == cnor_dict_declared
+                 && room <= CNOR_DICT_ROOM_MAX)
+        {
+            /* A dictionary takes a slot for itself, two for its header and
+             * two per pair. */
+            count = (lh_u16_t) (room * 2U + 3U);
+        }
+        else
+        {
+            count = 1U;
+        }
         return cnor_scope_add_global(self, node, count);
     }
     default:
@@ -112,6 +126,13 @@ cnor_compile_list_breaks(const cnor_node_t *body)
                 }
             }
             break;
+        case cnor_node_try:
+            if (cnor_compile_list_breaks(body->data.try_.body)
+                || cnor_compile_list_breaks(body->data.try_.catch_body))
+            {
+                return lh_bool_true;
+            }
+            break;
         default:
             /* A `break` in an inner loop ends that loop. */
             break;
@@ -154,6 +175,12 @@ cnor_compile_stmt_returns(const cnor_node_t *node)
                    : lh_bool_false;
     case cnor_node_match:
         return cnor_compile_match_returns(node);
+    case cnor_node_try:
+        /* The try may fail and go to the catch: both must return. */
+        return (cnor_compile_list_returns(node->data.try_.body)
+                && cnor_compile_list_returns(node->data.try_.catch_body))
+                   ? lh_bool_true
+                   : lh_bool_false;
     case cnor_node_while:
         /* Only `while true` without a `break` never ends; any other loop may. */
         return (node->data.while_.cond->kind == cnor_node_true
@@ -233,11 +260,15 @@ cnor_compile_params(cnor_compiler_t *self, const cnor_node_t *param)
         const cnor_static_type_t type = cnor_type_of_annotation(param->data.param.type);
 
         /* An array parameter is a reference to the elements, so it is mutable:
-         * writing into it is what it is for. The other parameters hold a
-         * value, and writing to one changes nothing outside. */
+         * writing into it is what it is for. A dictionary parameter is a
+         * reference to its pairs, and the same goes for it. The other
+         * parameters hold a value, and writing to one changes nothing
+         * outside. */
         if (!cnor_scope_add_local(self, param, param->name,
-                                  type == cnor_static_array ? lh_bool_true : lh_bool_false, type,
-                                  0U, &slot))
+                                  (type == cnor_static_array || type == cnor_static_dict)
+                                      ? lh_bool_true
+                                      : lh_bool_false,
+                                  type, 0U, &slot))
         {
             return lh_bool_false;
         }

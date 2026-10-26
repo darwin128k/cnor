@@ -114,8 +114,15 @@ static lh_bool_t
 cnor_compile_call_builtin(cnor_compiler_t *self, const cnor_node_t *node)
 {
     const lh_str_view_t len = lh_str_view_lit("len");
+    const lh_str_view_t dict = lh_str_view_lit("dict");
     cnor_builtin_t builtin;
 
+    if (lh_str_view_equals(&node->name, &dict, lh_bool_false))
+    {
+        /* `dict(n)` is a declaration: it makes a dictionary, and only a `let`
+         * may make one. */
+        return cnor_compile_fail_name(self, node, cnor_error_not_a_declaration);
+    }
     if (!lh_str_view_equals(&node->name, &len, lh_bool_false))
     {
         if (!cnor_compiler_builtin_find(node->name, &builtin))
@@ -132,8 +139,9 @@ cnor_compile_call_builtin(cnor_compiler_t *self, const cnor_node_t *node)
     {
         return lh_bool_false;
     }
-    /* The length of a text or of an array. */
+    /* The length of a text, of an array or of a dictionary. */
     if (self->type != cnor_static_str && self->type != cnor_static_array
+        && self->type != cnor_static_dict
         && !cnor_type_require(self, node->data.call.args, cnor_static_str, self->type))
     {
         return lh_bool_false;

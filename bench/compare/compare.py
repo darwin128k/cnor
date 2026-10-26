@@ -37,9 +37,12 @@ WORKLOADS = {
     "text": 120000,
     "native": 250000000000,
     "match": 1750000,
+    "dict": 132000000,
 }
 # Pawn's cells are 32 bits, so these two overflow where cnor and Lua keep 64.
 PAWN_WRAPS = ("loop", "native")
+# Pawn has no maps, so it has no dictionary workload.
+NO_PAWN = ("dict",)
 
 
 def find(*names):
@@ -100,6 +103,8 @@ def run_pawn(harness, program, name, iterations, warmup):
 def compile_pawn(pawncc, folder):
     """Compile every Pawn workload into `folder`; returns the folder."""
     for name in WORKLOADS:
+        if name in NO_PAWN:
+            continue
         source = os.path.join(HERE, "pawn", name + ".p")
         shutil.copyfile(source, os.path.join(folder, name + ".p"))
         result = subprocess.run([pawncc, "-O2", "-d0", name + ".p"], cwd=folder,
@@ -163,7 +168,7 @@ def main():
                 lua_builds, lambda path: run_script(path, "workloads.lua", name,
                                                    args.iterations, args.warmup))))
         if pawn_builds and pawncc:
-            languages.append(("pawn", lambda name: median_of(
+            languages.append(("pawn", lambda name: None if name in NO_PAWN else median_of(
                 pawn_builds, lambda path: run_pawn(path, os.path.join(pawn_dir, name + ".amx"),
                                                    name, args.iterations, args.warmup))))
         if python_builds:
@@ -183,11 +188,14 @@ def main():
                 for index in order:
                     label, run = languages[index]
                     value = run(name)
+                    if value is None:
+                        continue
                     if best[label] is None or value < best[label]:
                         best[label] = value
                 time.sleep(args.pause)
-            print(f"{name:9}" + "".join(f"{best[label] / 1e6:>12.2f}"
-                                        for label, _ in languages), flush=True)
+            print(f"{name:9}" + "".join(
+                "{:>12}".format("-" if best[label] is None else f"{best[label] / 1e6:.2f}")
+                for label, _ in languages), flush=True)
 
 
 if __name__ == "__main__":

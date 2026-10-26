@@ -7,7 +7,7 @@ static const lh_str_view_t m_type_names[cnor_type_count] = {
     lh_str_view_empty_initializer(),  lh_str_view_initializer_lit("i32"),
     lh_str_view_initializer_lit("u32"), lh_str_view_initializer_lit("f32"),
     lh_str_view_initializer_lit("bool"), lh_str_view_initializer_lit("str"),
-    lh_str_view_initializer_lit("array"),
+    lh_str_view_initializer_lit("array"), lh_str_view_initializer_lit("dict"),
 };
 
 cnor_type_t
@@ -217,6 +217,7 @@ static const struct cnor_parser_stmt_rule m_stmt_rules[] = {
     {cnor_keyword_while, cnor_parser_while, lh_bool_true},
     {cnor_keyword_for, cnor_parser_for, lh_bool_true},
     {cnor_keyword_match, cnor_parser_match, lh_bool_true},
+    {cnor_keyword_try, cnor_parser_try, lh_bool_true},
     {cnor_keyword_import, cnor_parser_misplaced_import, lh_bool_false},
 };
 

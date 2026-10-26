@@ -13,6 +13,8 @@ cnor_loop_push(cnor_compiler_t *self, const cnor_node_t *node, cnor_label_t *bre
     }
     self->loops[self->loop_depth].break_label = break_label;
     self->loops[self->loop_depth].continue_label = continue_label;
+    /* A `break` or a `continue` out of a `try` closes the handlers it opened. */
+    self->loops[self->loop_depth].try_depth = self->try_depth;
     self->loop_depth++;
     return lh_bool_true;
 }
@@ -139,42 +141,66 @@ cnor_compile_for_loop(cnor_compiler_t *self, const cnor_node_t *node, cnor_slot_
 }
 
 /*
- * `for v in a`: the elements of the array, one by one. The array's value, the
- * index and the number of elements live in slots of their own; the variable
- * takes each element in turn:
+ * `for v in a`: the elements of the array, or the keys of the dictionary, one
+ * by one. The collection's value, the index and the number of elements live in
+ * slots of their own; the variable takes each element in turn:
  *
- *     a -> array; len(array) -> bound; 0 -> index
+ *     a -> collection; len(collection) -> bound; 0 -> index
  *     lt_ll index, bound; jmp_if_false end
  *   body:
- *     index; array_get_l array; v
+ *     index; array_get_l collection; v
  *     body                      (continue -> step, break -> end)
  *   step:
  *     for_loop body, index, bound
  *   end:
  */
 static lh_bool_t
-cnor_compile_for_array(cnor_compiler_t *self, const cnor_node_t *node)
+cnor_compile_for_collection(cnor_compiler_t *self, const cnor_node_t *node)
 {
-    cnor_slot_t array = 0U;
+    cnor_slot_t collection = 0U;
     cnor_slot_t index = 0U;
     cnor_slot_t bound = 0U;
     cnor_slot_t var = 0U;
     cnor_label_t body;
     cnor_label_t step;
     cnor_label_t end;
+    cnor_static_type_t type = cnor_static_any;
+    cnor_op_t element;
 
     cnor_label_init(&body);
     cnor_label_init(&step);
     cnor_label_init(&end);
     self->emit.line = node->line;
-    /* The array's value, in a slot of its own: it is read every time. */
-    if (!cnor_compile_expr(self, node->data.for_.from)
-        || !cnor_type_require(self, node->data.for_.from, cnor_static_array, self->type)
-        || !cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false,
-                                 cnor_static_array, 0U, &array)
-        || !cnor_emit_insn(self, cnor_op_store_local, array, 0U)
+    if (!cnor_compile_expr(self, node->data.for_.from))
+    {
+        return lh_bool_false;
+    }
+    type = self->type;
+    if (type == cnor_static_array)
+    {
+        element = cnor_op_array_get_l;
+    }
+    else if (type == cnor_static_dict)
+    {
+        /* A dictionary is walked by its keys. */
+        element = cnor_op_dict_key_l;
+    }
+    else if (type == cnor_static_any)
+    {
+        /* The kind is not known: the machine tells an array from a
+         * dictionary. */
+        element = cnor_op_collection_get_l;
+    }
+    else
+    {
+        return cnor_type_require_text(self, node->data.for_.from, "array or dict", type);
+    }
+    /* The collection's value, in a slot of its own: it is read every time. */
+    if (!cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false, cnor_static_any,
+                              0U, &collection)
+        || !cnor_emit_insn(self, cnor_op_store_local, collection, 0U)
         /* The number of elements. */
-        || !cnor_emit_insn(self, cnor_op_load_local, array, 0U)
+        || !cnor_emit_insn(self, cnor_op_load_local, collection, 0U)
         || !cnor_emit_op(self, cnor_op_len)
         || !cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false,
                                  cnor_static_i32, 0U, &bound)
@@ -193,7 +219,7 @@ cnor_compile_for_array(cnor_compiler_t *self, const cnor_node_t *node)
         || !cnor_emit_jump(self, cnor_op_jmp_if_false, &end) || !cnor_emit_bind(self, &body)
         /* The element takes the variable's place. */
         || !cnor_emit_insn(self, cnor_op_load_local, index, 0U)
-        || !cnor_emit_insn(self, cnor_op_array_get_l, array, 0U)
+        || !cnor_emit_insn(self, element, collection, 0U)
         || !cnor_emit_insn(self, cnor_op_store_local, var, 0U)
         || !cnor_loop_body(self, node, node->data.for_.body, &end, &step))
     {
@@ -215,8 +241,8 @@ cnor_compile_for(cnor_compiler_t *self, const cnor_node_t *node)
 
     if (node->data.for_.to == lh_null)
     {
-        /* The elements of an array. */
-        ok = cnor_compile_for_array(self, node);
+        /* The elements of an array, or the keys of a dictionary. */
+        ok = cnor_compile_for_collection(self, node);
     }
     else
     {
@@ -229,22 +255,46 @@ cnor_compile_for(cnor_compiler_t *self, const cnor_node_t *node)
 
 /* -- break and continue ---------------------------------------------------- */
 
+/* Close the `try` blocks between here and the loop: the handler of a `try`
+ * that has been left must not catch what happens after it. */
+static lh_bool_t
+cnor_compile_close_tries(cnor_compiler_t *self, const struct cnor_loop *loop)
+{
+    while (self->try_depth > loop->try_depth)
+    {
+        if (!cnor_emit_op(self, cnor_op_try_pop))
+        {
+            return lh_bool_false;
+        }
+        --self->try_depth;
+    }
+    return lh_bool_true;
+}
+
 lh_bool_t
 cnor_compile_break(cnor_compiler_t *self, const cnor_node_t *node)
 {
+    const struct cnor_loop *loop;
+
     if (self->loop_depth == 0U)
     {
         return cnor_compile_fail(self, node, cnor_error_outside_loop);
     }
-    return cnor_emit_jump(self, cnor_op_jmp, self->loops[self->loop_depth - 1U].break_label);
+    loop = &self->loops[self->loop_depth - 1U];
+    return cnor_compile_close_tries(self, loop)
+           && cnor_emit_jump(self, cnor_op_jmp, loop->break_label);
 }
 
 lh_bool_t
 cnor_compile_continue(cnor_compiler_t *self, const cnor_node_t *node)
 {
+    const struct cnor_loop *loop;
+
     if (self->loop_depth == 0U)
     {
         return cnor_compile_fail(self, node, cnor_error_outside_loop);
     }
-    return cnor_emit_jump(self, cnor_op_jmp, self->loops[self->loop_depth - 1U].continue_label);
+    loop = &self->loops[self->loop_depth - 1U];
+    return cnor_compile_close_tries(self, loop)
+           && cnor_emit_jump(self, cnor_op_jmp, loop->continue_label);
 }

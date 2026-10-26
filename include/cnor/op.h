@@ -156,7 +156,7 @@ enum cnor_op
      * writes one. The bounds are checked at run time.
      */
     cnor_op_array_new, /**< Make an array of fp[a] and its `count` elements. Operands: slot, u16. */
-    cnor_op_array_new_global, /**< The same, in the globals. Operands: slot, u16. */
+    cnor_op_array_new_global, /**< The same, in the globals. Operands: u16 index, u16. */
     cnor_op_array_get_l, /**< An element of fp[a]. Operand: slot. */
     cnor_op_array_set_l, /**< Write an element of fp[a]. Operand: slot. */
     /**
@@ -166,6 +166,41 @@ enum cnor_op
      */
     cnor_op_array_get, /**< An element of the array below the index. Operands: none. */
     cnor_op_array_set, /**< Write an element of the array below the index. Operands: none. */
+    /**
+     * A dictionary (format v10): the pairs are slots of the frame, two per
+     * pair (the key and the value), and the dictionary's value (where they are
+     * and how many) is in the slot before them. The room the dictionary has is
+     * in the slot before that, so a dictionary carries its room wherever it
+     * goes. `dict_new` makes one, `dict_get_l` reads a value, `dict_set_l`
+     * writes one, `dict_key_l` reads a key. The key is found by comparing the
+     * texts.
+     */
+    cnor_op_dict_new, /**< A dictionary in fp[a] with room for `count` pairs. Operands: slot, u16. */
+    cnor_op_dict_new_global, /**< The same, in the globals. Operands: u16 index, u16. */
+    cnor_op_dict_get_l, /**< The value of a key of the dictionary in fp[a]. Operand: slot. */
+    cnor_op_dict_set_l, /**< Write the value of a key of the dictionary in fp[a]. Operand: slot. */
+    /**
+     * A dictionary that is a value (format v10): `dict_get` reads a value of
+     * the dictionary on the stack, `dict_set` writes one. They are how a
+     * dictionary that is not a local is read: a global.
+     */
+    cnor_op_dict_get, /**< The value of a key of the dictionary below the key. Operands: none. */
+    cnor_op_dict_set, /**< Write the value of a key of the dictionary below the key. Operands: none. */
+    cnor_op_dict_key_l, /**< The key at an index of the dictionary in fp[a]. Operand: slot. */
+    /**
+     * A collection whose kind is not known when the code is written (format
+     * v10): `collection_get_l` reads an element of an array or a key of a
+     * dictionary, and the machine tells them apart.
+     */
+    cnor_op_collection_get_l, /**< An element of the array or key of the dictionary in fp[a]. Operand: slot. */
+    /**
+     * Error handling (format v11): `try_push` marks a catch block, and the
+     * machine unwinds to it when an error happens inside the `try`. The
+     * operand is the address of the catch block, relative to the next
+     * instruction, and the slot the error's dictionary goes into.
+     */
+    cnor_op_try_push, /**< Mark the catch block. Operands: s32, u8. */
+    cnor_op_try_pop,  /**< The `try` ended without an error. Operands: none. */
     /**
      * Call a function of the language itself (format v7): the operand is the
      * ordinal of the function (`include/cnor/builtin.h`). The arguments are on

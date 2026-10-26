@@ -71,6 +71,14 @@ def match(n):
     return s
 
 
+def dictwork(rounds):
+    settings = {"hp": 100, "armor": 25, "name": "Egor", "weapon": "ak47", "flags": 7}
+    s = 0
+    for _ in range(rounds):
+        s = s + settings["hp"] + settings["armor"] + settings["flags"]
+    return s
+
+
 WORK = {
     "fib": lambda: fib(25),
     "loop": lambda: loop(10000000),
@@ -78,6 +86,7 @@ WORK = {
     "text": lambda: text("the quick brown fox jumps over the lazy dog", 20000),
     "native": lambda: native(1000000),
     "match": lambda: match(1000000),
+    "dict": lambda: dictwork(1000000),
 }
 
 

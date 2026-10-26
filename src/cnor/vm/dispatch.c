@@ -39,7 +39,7 @@
 #    endif
 #endif
 
-_Static_assert(cnor_op_count == 101, "a new opcode needs a handler and a dispatch label below");
+_Static_assert(cnor_op_count == 111, "a new opcode needs a handler and a dispatch label below");
 
 /* The three operand forms of binary operator @p name share one handler. */
 #define CNOR_VM_FORM_HANDLERS(name)                                                                \
@@ -99,6 +99,16 @@ static const cnor_vm_handler_t m_handlers[cnor_op_count] = {
     [cnor_op_array_set_l] = cnor_vm_op_array_set_l,
     [cnor_op_array_get] = cnor_vm_op_array_get,
     [cnor_op_array_set] = cnor_vm_op_array_set,
+    [cnor_op_dict_new] = cnor_vm_op_dict_new,
+    [cnor_op_dict_new_global] = cnor_vm_op_dict_new_global,
+    [cnor_op_dict_get_l] = cnor_vm_op_dict_get_l,
+    [cnor_op_dict_set_l] = cnor_vm_op_dict_set_l,
+    [cnor_op_dict_get] = cnor_vm_op_dict_get,
+    [cnor_op_dict_set] = cnor_vm_op_dict_set,
+    [cnor_op_dict_key_l] = cnor_vm_op_dict_key_l,
+    [cnor_op_collection_get_l] = cnor_vm_op_collection_get_l,
+    [cnor_op_try_push] = cnor_vm_op_try_push,
+    [cnor_op_try_pop] = cnor_vm_op_try_pop,
     [cnor_op_call_builtin] = cnor_vm_op_call_builtin,
     CNOR_VM_FORM_HANDLERS(add),
     CNOR_VM_FORM_HANDLERS(sub),
@@ -199,14 +209,19 @@ cnor_vm_slow(cnor_vm_t *vm)
 #    define CNOR_VM_NEXT() goto cnor_vm_next
 #endif
 
-/* Hand the current instruction to the slow path and carry on after it. */
+/* Hand the current instruction to the slow path and carry on after it. A
+ * failure a `try` wants is caught: the machine unwinds to the catch block and
+ * carries on there. */
 #define CNOR_VM_SLOW()                                                                             \
     do                                                                                             \
     {                                                                                              \
         CNOR_VM_SAVE();                                                                            \
         if (!cnor_vm_slow(vm))                                                                     \
         {                                                                                          \
-            return lh_bool_false;                                                                  \
+            if (!cnor_vm_catch(vm))                                                                \
+            {                                                                                      \
+                return lh_bool_false;                                                              \
+            }                                                                                      \
         }                                                                                          \
         if (!vm->running)                                                                          \
         {                                                                                          \
@@ -578,6 +593,16 @@ cnor_vm_dispatch(cnor_vm_t *vm)
         [cnor_op_array_set_l] = &&cnor_vm_label_array_set_l,
         [cnor_op_array_get] = &&cnor_vm_label_array_get,
         [cnor_op_array_set] = &&cnor_vm_label_array_set,
+        [cnor_op_dict_new] = &&cnor_vm_label_dict_new,
+        [cnor_op_dict_new_global] = &&cnor_vm_label_dict_new_global,
+        [cnor_op_dict_get_l] = &&cnor_vm_label_dict_get_l,
+        [cnor_op_dict_set_l] = &&cnor_vm_label_dict_set_l,
+        [cnor_op_dict_get] = &&cnor_vm_label_dict_get,
+        [cnor_op_dict_set] = &&cnor_vm_label_dict_set,
+        [cnor_op_dict_key_l] = &&cnor_vm_label_dict_key_l,
+        [cnor_op_collection_get_l] = &&cnor_vm_label_collection_get_l,
+        [cnor_op_try_push] = &&cnor_vm_label_try_push,
+        [cnor_op_try_pop] = &&cnor_vm_label_try_pop,
         [cnor_op_call_builtin] = &&cnor_vm_label_call_builtin,
     };
 #endif
@@ -1305,6 +1330,142 @@ cnor_vm_switch:
                 CNOR_VM_NEXT();
             }
         }
+        CNOR_VM_SLOW();
+    }
+    /* The dictionary forms: the pairs are slots of the frame, and the header
+     * is in the slot before them. */
+    CNOR_VM_OP(dict_new)
+    {
+        const cnor_slot_t slot = (cnor_slot_t) pc[1];
+        const lh_u16_t room = (lh_u16_t) cnor_vm_fast_u16(pc + 2);
+
+        cnor_vm_fast_set_sint(&fp[slot + 1U], 0);
+        cnor_vm_fast_set_sint(&fp[slot + 2U], (lh_sllong_t) room);
+        cnor_vm_fast_set_dict(&fp[slot], &fp[slot + 1U]);
+        pc += 4;
+        CNOR_VM_NEXT();
+    }
+    /* The same, in the globals: they outlive the frame that made them. */
+    CNOR_VM_OP(dict_new_global)
+    {
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(dict_get_l)
+    {
+        const lh_value_t *const dictionary = &fp[pc[1]];
+
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(dictionary) == CNOR_VALUE_KIND_DICT
+                           && cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_str))
+        {
+            lh_value_t *const found = cnor_vm_fast_dict_find(dictionary, &sp[-1]);
+
+            if (found != lh_null)
+            {
+                cnor_vm_fast_move(&sp[-1], found);
+            }
+            else
+            {
+                /* No such key: `none`, and the run goes on. */
+                cnor_vm_fast_set_none(&sp[-1]);
+            }
+            pc += 2;
+            CNOR_VM_NEXT();
+        }
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(dict_set_l)
+    {
+        lh_value_t *const dictionary = &fp[pc[1]];
+
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(dictionary) == CNOR_VALUE_KIND_DICT
+                           && cnor_vm_fast_kind(&sp[-2]) == lh_value_kind_str))
+        {
+            lh_value_t *const found = cnor_vm_fast_dict_find(dictionary, &sp[-2]);
+
+            if (found != lh_null)
+            {
+                cnor_vm_fast_move(found, &sp[-1]);
+                sp -= 2;
+                pc += 2;
+                CNOR_VM_NEXT();
+            }
+            if (cnor_vm_fast_dict_count(dictionary) < cnor_vm_fast_dict_room(dictionary))
+            {
+                lh_value_t *const pairs = cnor_vm_fast_dict_data(dictionary);
+                const lh_u32_t count = cnor_vm_fast_dict_count(dictionary);
+
+                cnor_vm_fast_move(&pairs[count * 2U], &sp[-2]);
+                cnor_vm_fast_move(&pairs[count * 2U + 1U], &sp[-1]);
+                cnor_vm_fast_dict_set_count(dictionary, count + 1U);
+                sp -= 2;
+                pc += 2;
+                CNOR_VM_NEXT();
+            }
+            /* The dictionary is full: the slow path reports it. */
+        }
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(dict_key_l)
+    {
+        const lh_value_t *const dictionary = &fp[pc[1]];
+
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(dictionary) == CNOR_VALUE_KIND_DICT
+                           && cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_sint))
+        {
+            const lh_sllong_t at = cnor_vm_fast_sint(&sp[-1]);
+
+            if (at >= 0 && (lh_u32_t) at < cnor_vm_fast_dict_count(dictionary))
+            {
+                cnor_vm_fast_move(&sp[-1], &cnor_vm_fast_dict_data(dictionary)[at * 2]);
+                pc += 2;
+                CNOR_VM_NEXT();
+            }
+        }
+        CNOR_VM_SLOW();
+    }
+    /* A collection whose kind is not known when the code is written: the
+     * machine tells an array from a dictionary. */
+    CNOR_VM_OP(collection_get_l)
+    {
+        CNOR_VM_SLOW();
+    }
+    /* The error handlers: the catch block, and the end of the `try`. */
+    CNOR_VM_OP(try_push)
+    {
+        if (CNOR_VM_LIKELY(vm->try_count < (cnor_count_t) vm->config.max_depth))
+        {
+            cnor_vm_try_t *const entry = &vm->tries[vm->try_count];
+
+            /* The catch block, as the jump operand says: the next instruction
+             * plus the distance. */
+            entry->catch_addr =
+                (cnor_code_addr_t) ((pc - code) + 6 + cnor_vm_fast_s32(pc + 1));
+            entry->fp = (cnor_stack_slots_t) (fp - values);
+            entry->depth = (cnor_call_depth_t) (frame_top - vm->frames);
+            entry->slot = (lh_u8_t) pc[5];
+            ++vm->try_count;
+            pc += 6;
+            CNOR_VM_NEXT();
+        }
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(try_pop)
+    {
+        if (vm->try_count > 0U)
+        {
+            --vm->try_count;
+        }
+        pc += 1;
+        CNOR_VM_NEXT();
+    }
+    /* A dictionary that is a value on the stack: the slow path knows where it
+     * is. */
+    CNOR_VM_OP(dict_get)
+    {
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(dict_set)
+    {
         CNOR_VM_SLOW();
     }
 

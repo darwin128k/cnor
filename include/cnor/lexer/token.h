@@ -63,6 +63,8 @@ enum cnor_keyword
     cnor_keyword_not,      /**< `not` */
     cnor_keyword_import,   /**< `import` */
     cnor_keyword_native,   /**< `native` */
+    cnor_keyword_try,      /**< `try` */
+    cnor_keyword_catch,    /**< `catch` */
     cnor_keyword_count
 };
 /** @copybrief cnor_keyword */

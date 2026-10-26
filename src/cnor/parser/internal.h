@@ -136,6 +136,10 @@ cnor_parser_for(cnor_parser_t *self);
 cnor_node_t *
 cnor_parser_match(cnor_parser_t *self);
 
+/** @brief `try:` block `catch [name]:` block. */
+cnor_node_t *
+cnor_parser_try(cnor_parser_t *self);
+
 /* -- declarations (fn.c) --------------------------------------------------- */
 
 /** @brief `fn` or `native fn` declaration. */

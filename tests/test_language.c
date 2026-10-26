@@ -348,6 +348,178 @@ CNOR_TEST(has_the_bitwise_operators)
              cnor_error_operand_type);
 }
 
+/* -- the error handling -------------------------------------------------------- */
+
+CNOR_TEST(catches_an_error)
+{
+    char text[256];
+
+    /* The error is caught, and the run goes on. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut caught = 0\n"
+                      "    try:\n"
+                      "        caught = 10 / 0\n"
+                      "    catch e:\n"
+                      "        caught = 1\n"
+                      "    return caught\n"
+                      "f()\n"),
+             1);
+    /* What the catch gets is a dictionary: the message, the line, the code and
+     * the file. */
+    REQUIRE(text_of("fn f() -> str:\n"
+                    "    try:\n"
+                    "        let x = 10 / 0\n"
+                    "    catch e:\n"
+                    "        return e[\"message\"]\n"
+                    "    return \"no\"\n"
+                    "f()\n",
+                    text, sizeof(text)));
+    CHECK_EQ(strcmp(text, "division by zero"), 0);
+    /* The line the failure happened on. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    try:\n"
+                      "        let x = 10 / 0\n"
+                      "    catch e:\n"
+                      "        return e[\"line\"]\n"
+                      "    return 0\n"
+                      "f()\n"),
+             3);
+    /* The code of the failure. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    try:\n"
+                      "        let x = 10 / 0\n"
+                      "    catch e:\n"
+                      "        return e[\"code\"]\n"
+                      "    return 0\n"
+                      "f()\n"),
+             (lh_u32_t) cnor_error_div_by_zero);
+    /* The file it happened in. */
+    REQUIRE(text_of("fn f() -> str:\n"
+                    "    try:\n"
+                    "        let x = 10 / 0\n"
+                    "    catch e:\n"
+                    "        return e[\"file\"]\n"
+                    "    return \"no\"\n"
+                    "f()\n",
+                    text, sizeof(text)));
+    CHECK_EQ(strcmp(text, "main.cn"), 0);
+    /* The catch may leave the name out: the error is then ignored. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut caught = 0\n"
+                      "    try:\n"
+                      "        let x = 10 / 0\n"
+                      "    catch:\n"
+                      "        caught = 1\n"
+                      "    return caught\n"
+                      "f()\n"),
+             1);
+    /* A `try` that does not fail runs its block and skips the catch. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut caught = 0\n"
+                      "    try:\n"
+                      "        caught = 10 / 2\n"
+                      "    catch e:\n"
+                      "        caught = 1\n"
+                      "    return caught\n"
+                      "f()\n"),
+             5);
+}
+
+CNOR_TEST(catches_an_error_from_a_function)
+{
+    /* The failure flies through the call and is caught above it. */
+    CHECK_EQ(value_of("fn boom() -> i32:\n"
+                      "    return 10 / 0\n"
+                      "fn f() -> i32:\n"
+                      "    try:\n"
+                      "        let x = boom()\n"
+                      "    catch e:\n"
+                      "        return e[\"line\"]\n"
+                      "    return 0\n"
+                      "f()\n"),
+             2);
+    /* A `try` inside a function catches what the function does. */
+    CHECK_EQ(value_of("fn boom() -> i32:\n"
+                      "    try:\n"
+                      "        let x = 10 / 0\n"
+                      "    catch e:\n"
+                      "        return 1\n"
+                      "    return 0\n"
+                      "fn f() -> i32:\n"
+                      "    return boom()\n"
+                      "f()\n"),
+             1);
+}
+
+CNOR_TEST(leaves_a_try_when_the_code_goes_away)
+{
+    /* A `break` out of a `try` closes its handler: what happens after the
+     * loop is not caught by it. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut total = 0\n"
+                      "    for i in 0..5:\n"
+                      "        try:\n"
+                      "            if i == 2:\n"
+                      "                break\n"
+                      "            total = total + i\n"
+                      "        catch e:\n"
+                      "            total = total + 100\n"
+                      "    return total\n"
+                      "f()\n"),
+             1);
+    /* A `return` out of a `try` closes its handler too. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    try:\n"
+                      "        return 7\n"
+                      "    catch e:\n"
+                      "        return 9\n"
+                      "    return 0\n"
+                      "f()\n"),
+             7);
+    /* A `try` inside a `try`: the inner one takes the failure first. */
+    CHECK_EQ(value_of("fn boom() -> i32:\n"
+                      "    return 10 / 0\n"
+                      "fn f() -> i32:\n"
+                      "    let mut n = 0\n"
+                      "    try:\n"
+                      "        try:\n"
+                      "            boom()\n"
+                      "        catch inner:\n"
+                      "            n = n + 1\n"
+                      "            boom()\n"
+                      "    catch outer:\n"
+                      "        n = n + 10\n"
+                      "    return n\n"
+                      "f()\n"),
+             11);
+}
+
+CNOR_TEST(refuses_a_try_where_it_does_not_fit)
+{
+    cnor_line_t line = 0U;
+
+    /* A `try` needs a catch. */
+    CHECK_EQ(error_of("fn f() -> i32:\n"
+                      "    try:\n"
+                      "        let x = 1\n"
+                      "    return 0\n"
+                      "f()\n",
+                      &line),
+             cnor_error_unexpected_token);
+    /* An error nobody catches still fails the run. */
+    CHECK_EQ(failure_of("fn f() -> i32:\n    return 10 / 0\nf()\n"),
+             cnor_error_div_by_zero);
+    /* And the error is not caught by a `try` that has already ended. */
+    CHECK_EQ(failure_of("fn f() -> i32:\n"
+                        "    try:\n"
+                        "        let x = 1\n"
+                        "    catch e:\n"
+                        "        let y = 2\n"
+                        "    return 10 / 0\n"
+                        "f()\n"),
+             cnor_error_div_by_zero);
+}
+
 /* -- arrays ------------------------------------------------------------------ */
 
 CNOR_TEST(passes_an_array_to_a_function_and_walks_it)
@@ -430,6 +602,205 @@ CNOR_TEST(refuses_an_array_where_it_does_not_fit)
                       "f()\n",
                       &line),
              cnor_error_type_mismatch);
+}
+
+/* -- dictionaries ------------------------------------------------------------ */
+
+CNOR_TEST(has_dictionaries)
+{
+    char text[256];
+
+    /* A dictionary holds a value under a key. */
+    CHECK_EQ(value_of("fn main() -> i32:\n"
+                      "    let mut settings = dict(4)\n"
+                      "    settings[\"hp\"] = 100\n"
+                      "    return settings[\"hp\"]\n"
+                      "main()\n"),
+             100);
+    /* A key that is not there is `none`, and the run goes on. */
+    CHECK(bool_of("fn main() -> bool:\n"
+                  "    let mut settings = dict(4)\n"
+                  "    return settings[\"hp\"] == none\n"
+                  "main()\n",
+                  lh_bool_true));
+    /* Writing under a key again replaces the value. */
+    CHECK_EQ(value_of("fn main() -> i32:\n"
+                      "    let mut settings = dict(4)\n"
+                      "    settings[\"hp\"] = 100\n"
+                      "    settings[\"hp\"] = 50\n"
+                      "    return settings[\"hp\"]\n"
+                      "main()\n"),
+             50);
+    /* How many pairs it holds. */
+    CHECK_EQ(value_of("fn main() -> i32:\n"
+                      "    let mut settings = dict(4)\n"
+                      "    settings[\"a\"] = 1\n"
+                      "    settings[\"b\"] = 2\n"
+                      "    return len(settings)\n"
+                      "main()\n"),
+             2);
+    /* The values may be of any kind. */
+    REQUIRE(text_of("fn main() -> str:\n"
+                    "    let mut settings = dict(4)\n"
+                    "    settings[\"name\"] = \"Egor\"\n"
+                    "    return settings[\"name\"]\n"
+                    "main()\n",
+                    text, sizeof(text)));
+    CHECK_EQ(strcmp(text, "Egor"), 0);
+    /* A dictionary starts empty. */
+    CHECK_EQ(value_of("fn main() -> i32:\n"
+                      "    let mut settings = dict(4)\n"
+                      "    return len(settings)\n"
+                      "main()\n"),
+             0);
+}
+
+CNOR_TEST(walks_the_keys_of_a_dictionary)
+{
+    char text[256];
+
+    /* The keys, one by one. */
+    REQUIRE(text_of("fn main() -> str:\n"
+                    "    let mut settings = dict(4)\n"
+                    "    settings[\"hp\"] = 100\n"
+                    "    settings[\"armor\"] = 25\n"
+                    "    let mut keys = \"\"\n"
+                    "    for k in settings:\n"
+                    "        keys = keys + k + \";\"\n"
+                    "    return keys\n"
+                    "main()\n",
+                    text, sizeof(text)));
+    CHECK_EQ(strcmp(text, "hp;armor;"), 0);
+    /* An empty dictionary has no keys. */
+    CHECK_EQ(value_of("fn main() -> i32:\n"
+                      "    let mut settings = dict(4)\n"
+                      "    let mut count = 0\n"
+                      "    for k in settings:\n"
+                      "        count = count + 1\n"
+                      "    return count\n"
+                      "main()\n"),
+             0);
+    /* A collection whose kind is not known is walked as it is: the elements
+     * of an array, the keys of a dictionary. */
+    CHECK_EQ(value_of("fn main() -> i32:\n"
+                      "    let mut numbers = [1; 3]\n"
+                      "    let mut x = none\n"
+                      "    x = numbers\n"
+                      "    let mut count = 0\n"
+                      "    for k in x:\n"
+                      "        count = count + 1\n"
+                      "    return count\n"
+                      "main()\n"),
+             3);
+    CHECK_EQ(value_of("fn main() -> i32:\n"
+                      "    let mut settings = dict(4)\n"
+                      "    settings[\"a\"] = 1\n"
+                      "    let mut x = none\n"
+                      "    x = settings\n"
+                      "    let mut count = 0\n"
+                      "    for k in x:\n"
+                      "        count = count + 1\n"
+                      "    return count\n"
+                      "main()\n"),
+             1);
+}
+
+CNOR_TEST(shares_a_dictionary_with_a_function)
+{
+    /* The pairs are shared: what the function writes, the caller sees. */
+    CHECK_EQ(value_of("fn put(d: dict, k: str, v: i32) -> i32:\n"
+                      "    d[k] = v\n"
+                      "    return d[k]\n"
+                      "fn main() -> i32:\n"
+                      "    let mut settings = dict(4)\n"
+                      "    put(settings, \"hp\", 100)\n"
+                      "    return settings[\"hp\"]\n"
+                      "main()\n"),
+             100);
+    /* The count is shared too. */
+    CHECK_EQ(value_of("fn put(d: dict, k: str, v: i32) -> i32:\n"
+                      "    d[k] = v\n"
+                      "    return len(d)\n"
+                      "fn main() -> i32:\n"
+                      "    let mut settings = dict(4)\n"
+                      "    put(settings, \"hp\", 100)\n"
+                      "    return len(settings)\n"
+                      "main()\n"),
+             1);
+}
+
+CNOR_TEST(keeps_a_global_dictionary_whole)
+{
+    /* The pairs of a global dictionary live in the globals: a function writes
+     * them, and the top-level code sees it. */
+    CHECK_EQ(value_of("let mut config = dict(4)\n"
+                      "fn set(k: str, v: i32) -> i32:\n"
+                      "    config[k] = v\n"
+                      "    return len(config)\n"
+                      "set(\"hp\", 100)\n"
+                      "set(\"armor\", 25)\n"
+                      "config[\"hp\"] + config[\"armor\"]\n"),
+             125);
+    /* A global dictionary that follows another one: its index is past the
+     * frame of the top-level code, and it lives in the globals all the same. */
+    CHECK_EQ(value_of("let mut first = dict(4)\n"
+                      "first[\"a\"] = 1\n"
+                      "let mut second = dict(4)\n"
+                      "second[\"b\"] = 2\n"
+                      "first[\"a\"] + second[\"b\"]\n"),
+             3);
+}
+
+CNOR_TEST(refuses_a_dictionary_where_it_does_not_fit)
+{
+    cnor_line_t line = 0U;
+
+    /* The room must be a whole number the compiler knows. */
+    CHECK_EQ(error_of("fn f() -> i32:\n"
+                      "    let n = 4\n"
+                      "    let mut d = dict(n)\n"
+                      "    return 0\n"
+                      "f()\n",
+                      &line),
+             cnor_error_dict_room);
+    /* `dict(n)` is a declaration: it may not stand anywhere else. */
+    CHECK_EQ(error_of("fn f() -> i32:\n    return dict(4)\nf()\n", &line),
+             cnor_error_not_a_declaration);
+    /* A dictionary cannot be returned: it would point at a frame that is
+     * gone. */
+    CHECK_EQ(error_of("fn f() -> dict:\n"
+                      "    let mut d = dict(4)\n"
+                      "    return d\n"
+                      "f()\n",
+                      &line),
+             cnor_error_dict_returned);
+    /* The key is a text. */
+    CHECK_EQ(error_of("fn f() -> i32:\n"
+                      "    let mut d = dict(4)\n"
+                      "    d[1] = 2\n"
+                      "    return 0\n"
+                      "f()\n",
+                      &line),
+             cnor_error_type_mismatch);
+    /* Writing into a dictionary needs `mut`. */
+    CHECK_EQ(error_of("fn f() -> i32:\n"
+                      "    let d = dict(4)\n"
+                      "    d[\"a\"] = 1\n"
+                      "    return 0\n"
+                      "f()\n",
+                      &line),
+             cnor_error_immutable);
+    /* The argument of a function that takes a dictionary must be one. */
+    CHECK_EQ(error_of("fn f(d: dict) -> i32:\n    return len(d)\nf(3)\n", &line),
+             cnor_error_type_mismatch);
+    /* A dictionary with no room for another key says so. */
+    CHECK_EQ(failure_of("fn f() -> i32:\n"
+                        "    let mut d = dict(1)\n"
+                        "    d[\"a\"] = 1\n"
+                        "    d[\"b\"] = 2\n"
+                        "    return 0\n"
+                        "f()\n"),
+             cnor_error_dict_full);
 }
 
 /* -- the string functions of the language ------------------------------------ */
@@ -1111,9 +1482,18 @@ CNOR_TEST(points_runtime_errors_at_the_imported_file)
 
 static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(has_the_bitwise_operators),
+CNOR_TEST_CASE(catches_an_error),
+CNOR_TEST_CASE(catches_an_error_from_a_function),
+CNOR_TEST_CASE(leaves_a_try_when_the_code_goes_away),
+CNOR_TEST_CASE(refuses_a_try_where_it_does_not_fit),
     CNOR_TEST_CASE(passes_an_array_to_a_function_and_walks_it),
     CNOR_TEST_CASE(keeps_a_global_array_whole),
     CNOR_TEST_CASE(refuses_an_array_where_it_does_not_fit),
+CNOR_TEST_CASE(has_dictionaries),
+CNOR_TEST_CASE(walks_the_keys_of_a_dictionary),
+CNOR_TEST_CASE(shares_a_dictionary_with_a_function),
+CNOR_TEST_CASE(keeps_a_global_dictionary_whole),
+CNOR_TEST_CASE(refuses_a_dictionary_where_it_does_not_fit),
     CNOR_TEST_CASE(has_the_string_functions),
     CNOR_TEST_CASE(checks_the_arguments_of_the_string_functions),
     CNOR_TEST_CASE(runs_well_typed_programs),

@@ -88,6 +88,23 @@ struct cnor_vm_frame
 typedef struct cnor_vm_frame cnor_vm_frame_t;
 
 /**
+ * @struct cnor_vm_try
+ * @brief One `try`: the catch block, and the frame it was made in.
+ *
+ * The `try` blocks are a stack of their own: a `try` inside a `try` pushes
+ * two, and the machine unwinds them as it leaves the frames they were made in.
+ */
+struct cnor_vm_try
+{
+    cnor_code_addr_t catch_addr; /**< Where the catch block starts. */
+    cnor_stack_slots_t fp;        /**< The frame the `try` was made in. */
+    cnor_call_depth_t depth;      /**< The call depth the `try` was made at. */
+    lh_u8_t slot;                 /**< Where the error's dictionary goes. */
+};
+/** @copybrief cnor_vm_try */
+typedef struct cnor_vm_try cnor_vm_try_t;
+
+/**
  * @struct cnor_vm
  * @brief One interpreter. Every field is written by ::cnor_vm_init; read it
  *        through the functions below.
@@ -109,6 +126,8 @@ struct cnor_vm
     cnor_vm_stack_t stack;             /**< Globals, then frames. */
     cnor_vm_frame_t *frames;           /**< Call stack, `max_depth` entries. */
     cnor_call_depth_t depth;           /**< Frames in use. */
+    cnor_vm_try_t *tries;              /**< The `try` blocks, `max_depth` entries. */
+    cnor_count_t try_count;            /**< How many are open. */
     cnor_str_pool_t str_pool;          /**< Strings built while running. */
     cnor_stack_slots_t fp;             /**< First slot of the current frame. */
     cnor_function_index_t function;    /**< Function running. */

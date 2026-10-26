@@ -25,6 +25,7 @@ cnor_vm_unload(cnor_vm_t *self)
     cnor_vm_free(self->constants);
     cnor_vm_free((lh_ptr) self->natives);
     cnor_vm_free(self->frames);
+    cnor_vm_free(self->tries);
     self->image = lh_null;
     self->code = lh_null;
     self->code_size = 0U;
@@ -37,6 +38,8 @@ cnor_vm_unload(cnor_vm_t *self)
     self->line_count = 0U;
     self->file_count = 0U;
     self->frames = lh_null;
+    self->tries = lh_null;
+    self->try_count = 0U;
     self->depth = 0U;
     self->fp = 0U;
     self->function = 0U;
@@ -59,6 +62,8 @@ cnor_vm_init(cnor_vm_t *self, const cnor_vm_config_t *config)
     self->constants = lh_null;
     self->natives = lh_null;
     self->frames = lh_null;
+    self->tries = lh_null;
+    self->try_count = 0U;
     cnor_vm_stack_init(&self->stack);
     cnor_str_pool_init(&self->str_pool);
     cnor_vm_unload(self);
@@ -80,6 +85,7 @@ cnor_vm_reset(cnor_vm_t *self)
     cnor_vm_stack_push_none(&self->stack, self->image != lh_null ? self->header.globals_count : 0U);
     cnor_str_pool_rewind(&self->str_pool);
     self->depth = 0U;
+    self->try_count = 0U;
     self->running = lh_bool_false;
     self->result = lh_value_make_none();
 }
@@ -151,6 +157,7 @@ cnor_vm_run(cnor_vm_t *self)
     /* Unwind whatever a failure left so globals are all that remains. */
     self->stack.sp = self->header.globals_count;
     self->depth = 0U;
+    self->try_count = 0U;
     return ok;
 }
 

@@ -275,6 +275,43 @@ cnor_compile_index_array_value(cnor_compiler_t *self, const cnor_node_t *node)
     return cnor_emit_op(self, cnor_op_array_get);
 }
 
+/* `settings["key"]`: a pair of the dictionary in a local. The pairs are
+ * slots of the frame, so the dictionary is not copied onto the stack first. */
+static lh_bool_t
+cnor_compile_index_dict(cnor_compiler_t *self, const cnor_node_t *node,
+                         const cnor_binding_t *binding)
+{
+    if (!cnor_compile_expr(self, node->data.index.index)
+        || !cnor_type_require(self, node, cnor_static_str, self->type))
+    {
+        return lh_bool_false;
+    }
+    /* The pairs hold whatever they were given. */
+    self->type = cnor_static_any;
+    return cnor_emit_insn(self, cnor_op_dict_get_l, binding->index, 0U);
+}
+
+/* `settings["key"]`: a pair of a dictionary that is not a local (a global is
+ * not): its value goes on the stack, and the key follows it. */
+static lh_bool_t
+cnor_compile_index_dict_value(cnor_compiler_t *self, const cnor_node_t *node)
+{
+    cnor_static_type_t target_type = cnor_static_any;
+
+    if (!cnor_compile_expr(self, node->data.index.target)
+        || !cnor_type_require(self, node, cnor_static_dict, target_type))
+    {
+        return lh_bool_false;
+    }
+    if (!cnor_compile_expr(self, node->data.index.index)
+        || !cnor_type_require(self, node, cnor_static_str, self->type))
+    {
+        return lh_bool_false;
+    }
+    self->type = cnor_static_any;
+    return cnor_emit_op(self, cnor_op_dict_get);
+}
+
 /* `text[i]`: a one-character string of a string, at an integer.
  *
  * The text and the index come from the frame or the code when they can
@@ -296,6 +333,15 @@ cnor_compile_index(cnor_compiler_t *self, const cnor_node_t *node)
     {
         const cnor_binding_t binding = cnor_scope_resolve(self, target->name);
 
+        if (binding.type == cnor_static_dict)
+        {
+            if (binding.kind == cnor_binding_local)
+            {
+                return cnor_compile_index_dict(self, node, &binding);
+            }
+            /* A global dictionary: its value is on the stack. */
+            return cnor_compile_index_dict_value(self, node);
+        }
         if (binding.type == cnor_static_array)
         {
             if (binding.kind == cnor_binding_local)

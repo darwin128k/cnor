@@ -23,6 +23,8 @@ workload's unit of work (one call, one loop iteration, one character).
 | `text` | index and compare a 43-character string 20000 times, join two characters and take `len` each round | character |
 | `native` | 1M calls of a host native, `absval(i - 500000)` | call |
 | `match` | 1M iterations of a 7-arm `match` on `i % 8` | iteration |
+| `dict` | 1M rounds of three lookups in a dictionary of five keys | lookup |
+| `try` | 1M rounds of a `try` that does not fail | iteration |
 | `compile` | a generated program of 1000 functions (if, while, match each) and 1000 calls | source line (compile time) |
 
 The C references (`reference.c`) do the `fib` and `loop` work in C, compiled
@@ -51,7 +53,8 @@ optimizations" below for what they measured and how to train a profile.
 Lua 5.4 and Python 3 (locals throughout, a C function in place of the native:
 `math.abs`, `abs`). `compare/pawn/` holds the same programs in Pawn 4.1, the
 language of the Half-Life 1.6 plugins, with a small runner that times a
-compiled `.amx` (`compare/pawn/README.md` has how to build it).
+compiled `.amx` (`compare/pawn/README.md` has how to build it). Pawn has no
+maps, so the `dict` workload is not there: the table shows a dash for it.
 `compare/compare.py` runs whichever interpreters are installed, checks their
 results, and prints them next to cnor's:
 

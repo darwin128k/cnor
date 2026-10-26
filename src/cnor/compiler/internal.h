@@ -39,6 +39,7 @@ enum cnor_static_type
     cnor_static_f32,     /**< `f32` */
     cnor_static_str,     /**< `str` */
     cnor_static_array,   /**< An array of values; its elements hold `any`. */
+    cnor_static_dict,    /**< A dictionary of pairs; its values hold `any`. */
     cnor_static_type_count
 };
 /** @copybrief cnor_static_type */
@@ -281,6 +282,7 @@ struct cnor_loop
 {
     cnor_label_t *break_label;
     cnor_label_t *continue_label;
+    lh_u32_t try_depth; /**< `try` blocks open when the loop began. */
 };
 
 /* -- initialization order (order.c) ---------------------------------------- */
@@ -315,6 +317,7 @@ struct cnor_compiler
     cnor_constant_pool_t constants;
     struct cnor_loop loops[CNOR_COMPILER_MAX_LOOPS];
     lh_u32_t loop_depth;
+    lh_u32_t try_depth; /**< `try` blocks open; a `break` closes them. */
     cnor_function_index_t function; /**< Being compiled. */
     cnor_slot_t result_slot;        /**< Entry function: last expression value. */
     lh_u32_t block_depth;           /**< 0 at the top level of a function. */
@@ -448,6 +451,14 @@ cnor_scope_add_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view
                      lh_bool_t is_mutable, cnor_static_type_t type, lh_u16_t count,
                      cnor_slot_t *slot);
 /**
+ * @brief Declare a local dictionary of @p room pairs; the pairs are its own,
+ *        so it takes a slot for its value, two for its header and two per
+ *        pair.
+ */
+lh_bool_t
+cnor_scope_add_dict_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view_t name,
+                          lh_bool_t is_mutable, lh_u16_t room, cnor_slot_t *slot);
+/**
  * @brief Resolve @p name: locals, then the current file's functions, natives
  *        and globals, then those of the files it imports, then the host's
  *        natives.
@@ -514,6 +525,14 @@ cnor_type_accepts(cnor_static_type_t wanted, cnor_static_type_t found);
 lh_bool_t
 cnor_type_require(cnor_compiler_t *self, const cnor_node_t *node, cnor_static_type_t wanted,
                   cnor_static_type_t found);
+
+/**
+ * @brief Fail with "expected @p wanted, found @p found"; @p wanted is a text,
+ *        for a wanted type that has no name of its own.
+ */
+lh_bool_t
+cnor_type_require_text(cnor_compiler_t *self, const cnor_node_t *node, const lh_char_t *wanted,
+                       cnor_static_type_t found);
 
 /** @brief Type of a variable declared with @p annotation and initialized with @p init. */
 cnor_static_type_t
@@ -610,6 +629,34 @@ cnor_compile_local_operand(cnor_compiler_t *self, const cnor_node_t *node, cnor_
 lh_bool_t
 cnor_compile_int_operand(const cnor_node_t *node, lh_u32_t *bits);
 
+/**
+ * @enum cnor_dict_form
+ * @brief What an initializer says about a dictionary.
+ */
+enum cnor_dict_form
+{
+    cnor_dict_not_a_dict = 0, /**< Not a dictionary declaration. */
+    cnor_dict_declared,       /**< `dict(n)`: a dictionary of `n` pairs. */
+    cnor_dict_malformed       /**< `dict(...)`, but not of a whole number. */
+};
+/** @copybrief cnor_dict_form */
+typedef enum cnor_dict_form cnor_dict_form_t;
+
+/**
+ * @brief What the initializer @p init says about a dictionary.
+ *
+ * `dict(n)` is a declaration, like an array literal: the room is a whole
+ * number the compiler knows, since the dictionary takes its slots.
+ *
+ * @param[out] room How many pairs the dictionary has, when it is one.
+ */
+cnor_dict_form_t
+cnor_compiler_dict_form(const cnor_node_t *init, lh_u32_t *room);
+
+/** @brief Whether the script names a function or native of its own `dict`. */
+lh_bool_t
+cnor_compiler_names_its_own_dict(cnor_compiler_t *self);
+
 /* logic.c */
 lh_bool_t
 cnor_compile_logic(cnor_compiler_t *self, const cnor_node_t *node);
@@ -650,6 +697,10 @@ lh_bool_t
 cnor_compile_break(cnor_compiler_t *self, const cnor_node_t *node);
 lh_bool_t
 cnor_compile_continue(cnor_compiler_t *self, const cnor_node_t *node);
+
+/* control_try.c */
+lh_bool_t
+cnor_compile_try(cnor_compiler_t *self, const cnor_node_t *node);
 
 /* control_match.c */
 lh_bool_t

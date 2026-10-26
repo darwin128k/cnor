@@ -96,6 +96,32 @@ cnor_verify_array(const struct cnor_verify *self, const cnor_insn_t *insn)
                                                                     : lh_bool_false;
 }
 
+/* A `dict_new` writes its header and its pairs in the slots after the
+ * dictionary's own, so they must be inside the function's frame. */
+static lh_bool_t
+cnor_verify_dict(const struct cnor_verify *self, const cnor_insn_t *insn)
+{
+    const lh_u64_t slot = insn->operands[0];
+    const lh_u64_t room = insn->operands[1];
+
+    return slot + 3U + room * 2U <= (lh_u64_t) self->function.slot_count ? lh_bool_true
+                                                                         : lh_bool_false;
+}
+
+/* A global array or dictionary takes its slots in the globals, so they must be
+ * inside them. */
+static lh_bool_t
+cnor_verify_global(const struct cnor_verify *self, const cnor_insn_t *insn)
+{
+    const lh_u64_t index = insn->operands[0];
+    const lh_u64_t count = insn->operands[1];
+    const lh_u64_t slots = insn->op == cnor_op_dict_new_global ? count * 2U + 3U
+                                                               : count + 1U;
+
+    return index + slots <= (lh_u64_t) self->view->header.globals_count ? lh_bool_true
+                                                                        : lh_bool_false;
+}
+
 static lh_bool_t
 cnor_verify_operands(struct cnor_verify *self, const cnor_insn_t *insn)
 {
@@ -120,6 +146,11 @@ cnor_verify_operands(struct cnor_verify *self, const cnor_insn_t *insn)
         return cnor_verify_switch(self, insn);
     case cnor_op_array_new:
         return cnor_verify_array(self, insn);
+    case cnor_op_dict_new:
+        return cnor_verify_dict(self, insn);
+    case cnor_op_array_new_global:
+    case cnor_op_dict_new_global:
+        return cnor_verify_global(self, insn);
     default:
         return lh_bool_true;
     }

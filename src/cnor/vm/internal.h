@@ -120,6 +120,25 @@ lh_bool_t cnor_vm_op_array_get_l(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_array_set_l(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_array_get(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_array_set(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_dict_new(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_dict_new_global(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_dict_get_l(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_dict_set_l(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_dict_get(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_dict_set(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_dict_key_l(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_collection_get_l(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_try_push(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_try_pop(cnor_vm_t *vm, const cnor_insn_t *insn);
+/** @brief The `try` blocks of the frame that is leaving are gone with it. */
+void
+cnor_vm_tries_leave(cnor_vm_t *vm);
+/**
+ * @brief Catch the failure the machine has just met, if a `try` wants it.
+ * @return Whether a handler took the failure.
+ */
+lh_bool_t
+cnor_vm_catch(cnor_vm_t *vm);
 lh_bool_t cnor_vm_op_call_builtin(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_operands(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_for_loop(cnor_vm_t *vm, const cnor_insn_t *insn);

@@ -45,6 +45,10 @@ enum cnor_error
     cnor_error_duplicate_name,     /**< A name declared twice in one scope. */
     cnor_error_not_assignable,     /**< Assignment to something that is not a variable. */
     cnor_error_array_returned,     /**< A function that returns an array. */
+    cnor_error_dict_full,         /**< A dictionary with no room for another key. */
+    cnor_error_dict_room,         /**< A dictionary whose room is not a whole number. */
+    cnor_error_dict_returned,     /**< A function that returns a dictionary. */
+    cnor_error_too_many_tries,    /**< More `try` blocks than the machine has room for. */
     cnor_error_immutable,          /**< Assignment to a binding declared without `mut`. */
     cnor_error_outside_loop,       /**< `break` or `continue` outside of a loop. */
     cnor_error_too_many_locals,    /**< A function needs more than ::CNOR_SLOT_MAX slots. */

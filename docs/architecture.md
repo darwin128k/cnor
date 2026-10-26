@@ -63,6 +63,7 @@ offset, copied name or detail, copied file name), with codes in
 | `call.c` | Script calls, native calls, built-in `len` |
 | `stmt.c` | `let`, assignment, expression statements, `return` |
 | `control_if.c`, `control_loop.c`, `control_match.c` | `if`, `while` (condition tested at the bottom: one conditional jump per iteration), `for` (one `for_loop` per iteration) / `break` / `continue`, `match` (dense integer arms through one `switch` and a table of jumps, other arms test in turn, integer ones with `eq_li`) |
+| `control_try.c` | `try` / `catch`: the catch block is marked, and the error's dictionary is written into the slots reserved for it |
 
 Two passes: the declaration pass registers every function, native and global,
 so calls and globals may appear before their definition; the second pass
@@ -110,6 +111,8 @@ functions and no `halt` is needed.
 | `op/control.c` | Jumps, `for_loop`, `switch`, `call`, `ret`, `halt`, `native` |
 | `op/text.c` | String join, `len`, `index` and the index forms |
 | `op/array.c` | The array instructions: the elements, and the bounds |
+| `op/dict.c` | The dictionary instructions: the pairs, the keys, and the room |
+| `op/error.c` | The error handling: the stack of `try` blocks, the unwinding, and the error's dictionary |
 
 ## Extension points
 
@@ -286,8 +289,39 @@ place, the handlers under `src/cnor/vm/op/`:
   that declares it, and the array's value (where the elements are and how
   many) sits in the slot before them. There is no allocation and no
   ownership: an element is read and written where it lies, and the frame dies
-  with the function. The price is that an array is a local: a global array
-  would outlive the frame its elements live in, and is refused.
+  with the function. A global array keeps its elements in the globals, so they
+  outlive the frame that made them.
+- **A dictionary's count lives with its pairs.** The pairs are slots of the
+  frame that declares it, two per pair, and the dictionary's value points at a
+  header (the count and the room) that sits right before them. The header is
+  not in the value, so a dictionary that was copied elsewhere — into a
+  parameter — still shares the count with the one it came from: what a
+  function writes into it, the caller sees. The price is the same as for an
+  array: a dictionary is a local unless it is a global, and it cannot be
+  returned (its pairs would outlive the frame they live in).
+- **A dictionary's key is found by comparing texts.** The pairs are compared
+  one by one, so a lookup costs a comparison per pair before the one wanted.
+  A dictionary of a few keys (a config, a player's state) is cheap; one of
+  thousands is not, and a hash would be the answer then. Measured 2026-10-26
+  on a Windows host (MinGW GCC): the `dict` workload (three lookups in a
+  dictionary of five keys, a million times) takes 16.5 ns a lookup on 64-bit
+  and 24.0 ns on 32-bit, at 243 and 167 million instructions a second (the
+  median of three runs). The same work in Python 3 (a hash table) takes
+  74 ns a lookup.
+- **The machine catches its own errors.** A `try` marks a catch block on a stack
+  of the machine's own (`cnor_vm_try_t`, 16 bytes), and the machine unwinds to
+  it when something fails: no `longjmp`, no unwinder table, no C++ runtime.
+  The hot path does not know the stack exists — the handlers are only looked
+  at when something fails, and the instructions inside a `try` cost what they
+  cost anywhere else. A `try` block itself costs three instructions (`try_push`,
+  `try_pop` and the jump over the catch block) and 16 bytes of the stack while
+  it is open. The error's dictionary is written into the slots the compiler
+  reserved for it, so catching an error allocates nothing.
+  Measured 2026-10-26 on a Windows host (MinGW GCC): the `try` workload (a
+  million rounds of a `try` that does not fail) takes 10.6 ns a round on
+  64-bit and 13.7 ns on 32-bit, at 566 and 439 million instructions a second
+  (the median of three runs). The step count of every other workload did not
+  move: the hot path is untouched.
 - **A native writes its result in place.** The result shares the slot of the
   arguments, so the machine copies nothing: a native reads its arguments and
   writes the result over them. Measured 2026-10-25 on a Windows host: the

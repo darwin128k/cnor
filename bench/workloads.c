@@ -116,6 +116,29 @@ static const char m_match[] = "fn classify(n: i32) -> i32:\n"
                               "    return s\n"
                               "classify(1000000)\n";
 
+static const char m_dict[] = "fn lookups(rounds: i32) -> i32:\n"
+                             "    let mut settings = dict(8)\n"
+                             "    settings[\"hp\"] = 100\n"
+                             "    settings[\"armor\"] = 25\n"
+                             "    settings[\"name\"] = \"Egor\"\n"
+                             "    settings[\"weapon\"] = \"ak47\"\n"
+                             "    settings[\"flags\"] = 7\n"
+                             "    let mut total = 0\n"
+                             "    for r in 0..rounds:\n"
+                             "        total = total + settings[\"hp\"] + settings[\"armor\"] + settings[\"flags\"]\n"
+                             "    return total\n"
+                             "lookups(1000000)\n";
+
+static const char m_try[] = "fn guarded(rounds: i32) -> i32:\n"
+                            "    let mut total = 0\n"
+                            "    for r in 0..rounds:\n"
+                            "        try:\n"
+                            "            total = total + r\n"
+                            "        catch e:\n"
+                            "            total = total + 1000\n"
+                            "    return total\n"
+                            "guarded(1000000)\n";
+
 static const cnor_bench_workload_t m_workloads[] = {
     {"fib", "recursive fib(25)", m_fib, 75025, 242785U, "call"},
     {"loop", "while loop summing 0..10M", m_loop, 49999995000000LL, 10000000U, "iteration"},
@@ -123,6 +146,8 @@ static const cnor_bench_workload_t m_workloads[] = {
     {"text", "index/compare 43-char text 20000x, join+len", m_text, 120000, 860000U, "char"},
     {"native", "1M native calls absval(i - 500000)", m_native, 250000000000LL, 1000000U, "call"},
     {"match", "1M iterations of a 7-arm match", m_match, 1750000, 1000000U, "iteration"},
+    {"dict", "1M rounds of three dictionary lookups", m_dict, 132000000, 3000000U, "lookup"},
+    {"try", "1M rounds of a try that does not fail", m_try, 499999500000LL, 1000000U, "iteration"},
     {"compile", "generated program, 1000 functions", lh_null, 0, 0U, "line"},
 };
 

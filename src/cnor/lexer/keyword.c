@@ -12,7 +12,8 @@ static const lh_str_view_t m_keywords[cnor_keyword_count] = {
     lh_str_view_initializer_lit("false"),   lh_str_view_initializer_lit("none"),
     lh_str_view_initializer_lit("and"),     lh_str_view_initializer_lit("or"),
     lh_str_view_initializer_lit("not"),     lh_str_view_initializer_lit("import"),
-    lh_str_view_initializer_lit("native"),
+    lh_str_view_initializer_lit("native"),  lh_str_view_initializer_lit("try"),
+    lh_str_view_initializer_lit("catch"),
 };
 
 /* Keywords are 2 to 8 bytes long: anything else is a name without a single

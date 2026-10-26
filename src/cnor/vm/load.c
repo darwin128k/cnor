@@ -152,6 +152,14 @@ cnor_vm_allocate(cnor_vm_t *vm)
     {
         return cnor_diag_set(&vm->diag, cnor_error_no_memory, 0U, 0U);
     }
+    /* The `try` blocks: as many as there are frames to unwind. */
+    vm->tries = (cnor_vm_try_t *) cnor_vm_alloc_table(vm->config.max_depth,
+                                                       sizeof(cnor_vm_try_t));
+    if (vm->tries == lh_null)
+    {
+        return cnor_diag_set(&vm->diag, cnor_error_no_memory, 0U, 0U);
+    }
+    vm->try_count = 0U;
     return lh_bool_true;
 }
 

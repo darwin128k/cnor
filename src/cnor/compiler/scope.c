@@ -437,16 +437,14 @@ cnor_scope_leave_block(cnor_scope_t *self, cnor_scope_mark_t mark)
     self->next_slot = mark.next_slot;
 }
 
-lh_bool_t
-cnor_scope_add_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view_t name,
-                     lh_bool_t is_mutable, cnor_static_type_t type, lh_u16_t count,
-                     cnor_slot_t *slot)
+/* Take @p slots slots for a local, and record it. */
+static lh_bool_t
+cnor_scope_take_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view_t name,
+                      lh_bool_t is_mutable, cnor_static_type_t type, lh_u16_t count,
+                      lh_u32_t slots, cnor_slot_t *slot)
 {
     cnor_scope_t *scope = &self->scope;
     struct cnor_local_decl decl;
-    /* An array takes a slot for its value and a slot per element; the others
-     * take one. */
-    const lh_u32_t slots = (type == cnor_static_array) ? (lh_u32_t) count + 1U : 1U;
 
     if ((lh_u32_t) scope->next_slot + slots > CNOR_SLOT_MAX)
     {
@@ -465,6 +463,29 @@ cnor_scope_add_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view
     }
     *slot = decl.slot;
     return lh_bool_true;
+}
+
+lh_bool_t
+cnor_scope_add_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view_t name,
+                     lh_bool_t is_mutable, cnor_static_type_t type, lh_u16_t count,
+                     cnor_slot_t *slot)
+{
+    /* An array takes a slot for its value and a slot per element; the others
+     * take one. A dictionary is a value here: the pairs it holds live where it
+     * was made, and only its declaration takes them. */
+    const lh_u32_t slots = (type == cnor_static_array) ? (lh_u32_t) count + 1U : 1U;
+
+    return cnor_scope_take_local(self, node, name, is_mutable, type, count, slots, slot);
+}
+
+lh_bool_t
+cnor_scope_add_dict_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view_t name,
+                          lh_bool_t is_mutable, lh_u16_t room, cnor_slot_t *slot)
+{
+    /* A dictionary declared here takes a slot for its value, two for its
+     * header and two per pair. */
+    return cnor_scope_take_local(self, node, name, is_mutable, cnor_static_dict, room,
+                                 (lh_u32_t) room * 2U + 3U, slot);
 }
 
 /* -- resolution ------------------------------------------------------------ */

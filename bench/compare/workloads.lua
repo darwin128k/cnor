@@ -64,6 +64,15 @@ local function match(n)
     return s
 end
 
+local function dictwork(rounds)
+    local settings = {hp = 100, armor = 25, name = "Egor", weapon = "ak47", flags = 7}
+    local s = 0
+    for r = 0, rounds - 1 do
+        s = s + settings.hp + settings.armor + settings.flags
+    end
+    return s
+end
+
 local work = {
     fib = function() return fib(25) end,
     loop = function() return loop(10000000) end,
@@ -71,6 +80,7 @@ local work = {
     text = function() return text("the quick brown fox jumps over the lazy dog", 20000) end,
     native = function() return native(1000000) end,
     match = function() return match(1000000) end,
+    dict = function() return dictwork(1000000) end,
 }
 
 local name, iterations, warmup = arg[1], tonumber(arg[2]), tonumber(arg[3])
