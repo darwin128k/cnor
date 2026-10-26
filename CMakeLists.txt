@@ -47,6 +47,7 @@ set(CNOR_SOURCES
         ${CNOR_SRC_PATH}/cnor/diag.c
         ${CNOR_SRC_PATH}/cnor/arena.c
         ${CNOR_SRC_PATH}/cnor/ast.c
+        ${CNOR_SRC_PATH}/cnor/builtin.c
         ${CNOR_SRC_PATH}/cnor/native.c
         ${CNOR_SRC_PATH}/cnor/op.c
         ${CNOR_SRC_PATH}/cnor/byte/reader.c
@@ -73,6 +74,7 @@ set(CNOR_SOURCES
         ${CNOR_SRC_PATH}/cnor/compiler/scope.c
         ${CNOR_SRC_PATH}/cnor/compiler/constant.c
         ${CNOR_SRC_PATH}/cnor/compiler/rules.c
+        ${CNOR_SRC_PATH}/cnor/compiler/builtin.c
         ${CNOR_SRC_PATH}/cnor/compiler/expr.c
         ${CNOR_SRC_PATH}/cnor/compiler/logic.c
         ${CNOR_SRC_PATH}/cnor/compiler/call.c
@@ -97,6 +99,7 @@ set(CNOR_SOURCES
         ${CNOR_SRC_PATH}/cnor/vm/op/control.c
         ${CNOR_SRC_PATH}/cnor/vm/op/text.c
         ${CNOR_SRC_PATH}/cnor/vm/op/array.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/builtin.c
         ${CNOR_SRC_PATH}/cnor/vm/op/operand.c
 )
 

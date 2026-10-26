@@ -48,6 +48,28 @@ cnor_compile_let_global(cnor_compiler_t *self, const cnor_node_t *node, cnor_sta
     return cnor_compile_store(self, &binding);
 }
 
+/* A top-level array: its elements live in the globals, so they outlive the
+ * frame of the top-level code that makes them. */
+static lh_bool_t
+cnor_compile_let_global_array(cnor_compiler_t *self, const cnor_node_t *node)
+{
+    const cnor_node_t *const array = node->data.let.init;
+    const lh_u32_t count = array->data.array.count;
+    const cnor_binding_t binding = cnor_scope_resolve(self, node->name);
+
+    cnor_scope_global_at(&self->scope, binding.index)->type = cnor_static_array;
+    if (binding.index + count + 1U > self->globals_ready)
+    {
+        self->globals_ready = binding.index + count + 1U;
+    }
+    /* The value every element holds. */
+    if (!cnor_compile_expr(self, array->data.array.value))
+    {
+        return lh_bool_false;
+    }
+    return cnor_emit_insn(self, cnor_op_array_new_global, binding.index, count);
+}
+
 /* `let mut name = [value; count]`: the name takes a slot for the array and a
  * slot per element, and every element holds the value. */
 static lh_bool_t
@@ -92,6 +114,10 @@ cnor_compile_let(cnor_compiler_t *self, const cnor_node_t *node)
         {
             return lh_bool_false;
         }
+        if (cnor_compile_at_top_level(self))
+        {
+            return cnor_compile_let_global_array(self, node);
+        }
         return cnor_compile_let_array(self, node, node->data.let.init);
     }
     /* The initializer is compiled before the name exists, so `let x = x + 1`
@@ -132,20 +158,34 @@ cnor_compile_assign_index(cnor_compiler_t *self, const cnor_node_t *node,
     binding = cnor_scope_resolve(self, base->name);
     if (binding.kind != cnor_binding_local || binding.type != cnor_static_array)
     {
-        return cnor_compile_fail(self, target, cnor_error_not_assignable);
+        if (binding.type != cnor_static_array)
+        {
+            return cnor_compile_fail(self, target, cnor_error_not_assignable);
+        }
+        /* A global array: its value goes on the stack, then the index and the
+         * value. */
+        if (!cnor_compile_expr(self, base)
+            || !cnor_type_require(self, target, cnor_static_array, self->type)
+            || !cnor_compile_expr(self, target->data.index.index)
+            || !cnor_type_require(self, target, cnor_static_i32, self->type)
+            || !cnor_compile_expr(self, node->data.assign.value))
+        {
+            return lh_bool_false;
+        }
+        return cnor_emit_op(self, cnor_op_array_set);
     }
     if (!binding.is_mutable)
     {
         return cnor_compile_fail_name(self, base, cnor_error_immutable);
     }
-    /* The index, then the value; `array_set` takes both. */
+    /* The index, then the value; `array_set_l` takes both. */
     if (!cnor_compile_expr(self, target->data.index.index)
         || !cnor_type_require(self, target, cnor_static_i32, self->type)
         || !cnor_compile_expr(self, node->data.assign.value))
     {
         return lh_bool_false;
     }
-    return cnor_emit_insn(self, cnor_op_array_set, binding.index, 0U);
+    return cnor_emit_insn(self, cnor_op_array_set_l, binding.index, 0U);
 }
 
 /* -- assignment ------------------------------------------------------------ */
@@ -207,7 +247,16 @@ cnor_compile_expr_stmt(cnor_compiler_t *self, const cnor_node_t *node)
 lh_bool_t
 cnor_compile_return(cnor_compiler_t *self, const cnor_node_t *node)
 {
-    return cnor_compile_value_or_none(self, node->data.return_.value)
-           && cnor_type_require(self, node, self->returns, self->type)
-           && cnor_emit_op(self, cnor_op_ret);
+    if (!cnor_compile_value_or_none(self, node->data.return_.value)
+        || !cnor_type_require(self, node, self->returns, self->type))
+    {
+        return lh_bool_false;
+    }
+    if (self->type == cnor_static_array)
+    {
+        /* The elements of an array live in a frame or in the globals: a
+         * returned array would point at a frame that is gone. */
+        return cnor_compile_fail(self, node, cnor_error_array_returned);
+    }
+    return cnor_emit_op(self, cnor_op_ret);
 }

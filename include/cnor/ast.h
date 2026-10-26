@@ -73,6 +73,7 @@ enum cnor_type
     cnor_type_f32,      /**< `f32` */
     cnor_type_bool,     /**< `bool` */
     cnor_type_str,      /**< `str` */
+    cnor_type_array,    /**< `array` */
     cnor_type_count
 };
 /** @copybrief cnor_type */

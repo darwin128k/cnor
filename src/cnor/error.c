@@ -19,6 +19,7 @@ static const lh_char_t *const m_messages[cnor_error_count] = {
     "unknown name",
     "name declared twice",
     "cannot assign to this",
+    "a function cannot return an array",
     "assignment to a binding without `mut`",
     "`break` or `continue` outside of a loop",
     "too many locals in one function",

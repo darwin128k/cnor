@@ -138,6 +138,73 @@ cnor_compile_for_loop(cnor_compiler_t *self, const cnor_node_t *node, cnor_slot_
            && cnor_emit_bind(self, &end);
 }
 
+/*
+ * `for v in a`: the elements of the array, one by one. The array's value, the
+ * index and the number of elements live in slots of their own; the variable
+ * takes each element in turn:
+ *
+ *     a -> array; len(array) -> bound; 0 -> index
+ *     lt_ll index, bound; jmp_if_false end
+ *   body:
+ *     index; array_get_l array; v
+ *     body                      (continue -> step, break -> end)
+ *   step:
+ *     for_loop body, index, bound
+ *   end:
+ */
+static lh_bool_t
+cnor_compile_for_array(cnor_compiler_t *self, const cnor_node_t *node)
+{
+    cnor_slot_t array = 0U;
+    cnor_slot_t index = 0U;
+    cnor_slot_t bound = 0U;
+    cnor_slot_t var = 0U;
+    cnor_label_t body;
+    cnor_label_t step;
+    cnor_label_t end;
+
+    cnor_label_init(&body);
+    cnor_label_init(&step);
+    cnor_label_init(&end);
+    self->emit.line = node->line;
+    /* The array's value, in a slot of its own: it is read every time. */
+    if (!cnor_compile_expr(self, node->data.for_.from)
+        || !cnor_type_require(self, node->data.for_.from, cnor_static_array, self->type)
+        || !cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false,
+                                 cnor_static_array, 0U, &array)
+        || !cnor_emit_insn(self, cnor_op_store_local, array, 0U)
+        /* The number of elements. */
+        || !cnor_emit_insn(self, cnor_op_load_local, array, 0U)
+        || !cnor_emit_op(self, cnor_op_len)
+        || !cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false,
+                                 cnor_static_i32, 0U, &bound)
+        || !cnor_emit_insn(self, cnor_op_store_local, bound, 0U)
+        /* The index, from zero. */
+        || !cnor_emit_insn(self, cnor_op_push_i32, 0U, 0U)
+        || !cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false, cnor_static_i32,
+                                 0U, &index)
+        || !cnor_emit_insn(self, cnor_op_store_local, index, 0U)
+        /* The variable of the loop. */
+        || !cnor_scope_add_local(self, node, node->name, lh_bool_false, cnor_static_any, 0U, &var))
+    {
+        return lh_bool_false;
+    }
+    if (!cnor_emit_insn(self, cnor_op_lt_ll, index, bound)
+        || !cnor_emit_jump(self, cnor_op_jmp_if_false, &end) || !cnor_emit_bind(self, &body)
+        /* The element takes the variable's place. */
+        || !cnor_emit_insn(self, cnor_op_load_local, index, 0U)
+        || !cnor_emit_insn(self, cnor_op_array_get_l, array, 0U)
+        || !cnor_emit_insn(self, cnor_op_store_local, var, 0U)
+        || !cnor_loop_body(self, node, node->data.for_.body, &end, &step))
+    {
+        return lh_bool_false;
+    }
+    self->emit.line = node->line;
+    return cnor_emit_bind(self, &step)
+           && cnor_emit_jump_with(self, cnor_op_for_loop, &body, index, bound)
+           && cnor_emit_bind(self, &end);
+}
+
 lh_bool_t
 cnor_compile_for(cnor_compiler_t *self, const cnor_node_t *node)
 {
@@ -146,8 +213,16 @@ cnor_compile_for(cnor_compiler_t *self, const cnor_node_t *node)
     cnor_slot_t bound = 0U;
     lh_bool_t ok;
 
-    ok = cnor_compile_for_slots(self, node, &var, &bound)
-         && cnor_compile_for_loop(self, node, var, bound);
+    if (node->data.for_.to == lh_null)
+    {
+        /* The elements of an array. */
+        ok = cnor_compile_for_array(self, node);
+    }
+    else
+    {
+        ok = cnor_compile_for_slots(self, node, &var, &bound)
+             && cnor_compile_for_loop(self, node, var, bound);
+    }
     cnor_scope_leave_block(&self->scope, mark);
     return ok;
 }

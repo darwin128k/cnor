@@ -238,7 +238,29 @@ cnor_compile_index_array(cnor_compiler_t *self, const cnor_node_t *node,
     }
     /* The elements hold whatever they were given. */
     self->type = cnor_static_any;
-    return cnor_emit_insn(self, cnor_op_array_get, binding->index, 0U);
+    return cnor_emit_insn(self, cnor_op_array_get_l, binding->index, 0U);
+}
+
+/* `scores[i]`: an element of an array that is not a local (a parameter is a
+ * local, but a global array is not): its value goes on the stack, and the
+ * index follows it. */
+static lh_bool_t
+cnor_compile_index_array_value(cnor_compiler_t *self, const cnor_node_t *node)
+{
+    cnor_static_type_t target_type = cnor_static_any;
+
+    if (!cnor_compile_expr(self, node->data.index.target)
+        || !cnor_type_require(self, node, cnor_static_array, target_type))
+    {
+        return lh_bool_false;
+    }
+    if (!cnor_compile_expr(self, node->data.index.index)
+        || !cnor_type_require(self, node, cnor_static_i32, self->type))
+    {
+        return lh_bool_false;
+    }
+    self->type = cnor_static_any;
+    return cnor_emit_op(self, cnor_op_array_get);
 }
 
 /* `text[i]`: a one-character string of a string, at an integer.
@@ -262,9 +284,14 @@ cnor_compile_index(cnor_compiler_t *self, const cnor_node_t *node)
     {
         const cnor_binding_t binding = cnor_scope_resolve(self, target->name);
 
-        if (binding.kind == cnor_binding_local && binding.type == cnor_static_array)
+        if (binding.type == cnor_static_array)
         {
-            return cnor_compile_index_array(self, node, &binding);
+            if (binding.kind == cnor_binding_local)
+            {
+                return cnor_compile_index_array(self, node, &binding);
+            }
+            /* A global array: its value is on the stack. */
+            return cnor_compile_index_array_value(self, node);
         }
     }
     if (cnor_compile_local_operand(self, target, &a, &target_type))

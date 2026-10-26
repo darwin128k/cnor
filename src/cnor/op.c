@@ -89,8 +89,12 @@ static const cnor_op_info_t m_ops[cnor_op_count] = {
     CNOR_OP_ROW("index_li", slot, s32, 6U, 0U, 1U, 0U),
     CNOR_OP_ROW("index_i", s32, none, 5U, 1U, 1U, 0U),
     CNOR_OP_ROW("array_new", slot, u16, 4U, 1U, 0U, 0U),
-    CNOR_OP_ROW("array_get", slot, none, 2U, 1U, 1U, 0U),
-    CNOR_OP_ROW("array_set", slot, none, 2U, 2U, 0U, 0U),
+    CNOR_OP_ROW("array_new_global", slot, u16, 4U, 1U, 0U, 0U),
+    CNOR_OP_ROW("array_get_l", slot, none, 2U, 1U, 1U, 0U),
+    CNOR_OP_ROW("array_set_l", slot, none, 2U, 2U, 0U, 0U),
+    CNOR_OP_ROW("array_get", none, none, 1U, 2U, 1U, 0U),
+    CNOR_OP_ROW("array_set", none, none, 1U, 3U, 0U, 0U),
+    CNOR_OP_ROW("call_builtin", u8, u8, 3U, 0U, 1U, CNOR_OP_FLAG_POPS_ARGC),
 };
 
 /* The binary operators that have operand forms, in the order of each family. */

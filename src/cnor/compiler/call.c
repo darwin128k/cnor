@@ -78,22 +78,63 @@ cnor_compile_call_native(cnor_compiler_t *self, const cnor_node_t *node, lh_u16_
     return cnor_emit_insn(self, cnor_op_native, cnor_scope_import_native(self, index), argc);
 }
 
-/* `len(s)` is built in unless the script or the host names something `len`. */
+/* A function of the language itself: its arguments are checked against the
+ * builtin's signature. */
+static lh_bool_t
+cnor_compile_call_string_builtin(cnor_compiler_t *self, const cnor_node_t *node,
+                                 cnor_builtin_t builtin)
+{
+    const cnor_static_type_t *const params = cnor_compiler_builtin_params(builtin);
+    const lh_u8_t argc = cnor_builtin_argc(builtin);
+    const cnor_node_t *arg;
+    lh_u8_t index = 0U;
+
+    if (node->data.call.argc != argc)
+    {
+        return cnor_compile_fail_name(self, node, cnor_error_wrong_arg_count);
+    }
+    for (arg = node->data.call.args; arg != lh_null; arg = arg->next, ++index)
+    {
+        if (!cnor_compile_expr(self, arg))
+        {
+            return lh_bool_false;
+        }
+        if (!cnor_type_require(self, arg, params[index], self->type))
+        {
+            return lh_bool_false;
+        }
+    }
+    self->type = cnor_compiler_builtin_result(builtin);
+    return cnor_emit_insn(self, cnor_op_call_builtin, (lh_u32_t) builtin, argc);
+}
+
+/* `len(s)` and the string functions are built in unless the script or the host
+ * names something of the same name. */
 static lh_bool_t
 cnor_compile_call_builtin(cnor_compiler_t *self, const cnor_node_t *node)
 {
     const lh_str_view_t len = lh_str_view_lit("len");
+    cnor_builtin_t builtin;
 
     if (!lh_str_view_equals(&node->name, &len, lh_bool_false))
     {
-        return cnor_compile_fail_name(self, node, cnor_error_no_such_native);
+        if (!cnor_compiler_builtin_find(node->name, &builtin))
+        {
+            return cnor_compile_fail_name(self, node, cnor_error_no_such_native);
+        }
+        return cnor_compile_call_string_builtin(self, node, builtin);
     }
     if (node->data.call.argc != 1U)
     {
         return cnor_compile_fail_name(self, node, cnor_error_wrong_arg_count);
     }
-    if (!cnor_compile_args(self, node, lh_null)
-        || !cnor_type_require(self, node->data.call.args, cnor_static_str, self->type))
+    if (!cnor_compile_args(self, node, lh_null))
+    {
+        return lh_bool_false;
+    }
+    /* The length of a text or of an array. */
+    if (self->type != cnor_static_str && self->type != cnor_static_array
+        && !cnor_type_require(self, node->data.call.args, cnor_static_str, self->type))
     {
         return lh_bool_false;
     }

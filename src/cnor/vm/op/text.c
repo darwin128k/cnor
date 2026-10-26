@@ -15,12 +15,17 @@ cnor_vm_op_len(cnor_vm_t *vm, const cnor_insn_t *insn)
 {
     lh_value_t *top = cnor_vm_stack_peek(&vm->stack, 0U);
 
-    if (cnor_vm_fast_kind(top) != lh_value_kind_str)
+    if (cnor_vm_fast_kind(top) == lh_value_kind_str)
     {
-        return cnor_vm_fail(vm, insn, cnor_error_type);
+        cnor_vm_fast_set_sint(top, (lh_sllong_t) cnor_vm_fast_str_size(top));
+        return lh_bool_true;
     }
-    cnor_vm_fast_set_sint(top, (lh_sllong_t) cnor_vm_fast_str_size(top));
-    return lh_bool_true;
+    if (cnor_vm_fast_kind(top) == CNOR_VALUE_KIND_ARRAY)
+    {
+        cnor_vm_fast_set_sint(top, (lh_sllong_t) cnor_vm_fast_array_count(top));
+        return lh_bool_true;
+    }
+    return cnor_vm_fail(vm, insn, cnor_error_type);
 }
 
 /* `text[i]` is a one-character string; it shares the text's storage. */

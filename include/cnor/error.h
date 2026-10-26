@@ -44,6 +44,7 @@ enum cnor_error
     cnor_error_unknown_name,       /**< A name that is not bound anywhere. */
     cnor_error_duplicate_name,     /**< A name declared twice in one scope. */
     cnor_error_not_assignable,     /**< Assignment to something that is not a variable. */
+    cnor_error_array_returned,     /**< A function that returns an array. */
     cnor_error_immutable,          /**< Assignment to a binding declared without `mut`. */
     cnor_error_outside_loop,       /**< `break` or `continue` outside of a loop. */
     cnor_error_too_many_locals,    /**< A function needs more than ::CNOR_SLOT_MAX slots. */

@@ -131,12 +131,26 @@ enum cnor_op
      * An array (format v6): the elements are slots of the frame, and the
      * array's value (where they are and how many) is in the slot before them.
      * `array_new` fills the elements and writes the array's value;
-     * `array_get` reads an element, `array_set` writes one. The bounds are
-     * checked at run time.
+     * `array_get_l` reads an element of the array in fp[a], `array_set_l`
+     * writes one. The bounds are checked at run time.
      */
     cnor_op_array_new, /**< Make an array of fp[a] and its `count` elements. Operands: slot, u16. */
-    cnor_op_array_get, /**< An element of fp[a]. Operand: slot. */
-    cnor_op_array_set, /**< Write an element of fp[a]. Operand: slot. */
+    cnor_op_array_new_global, /**< The same, in the globals. Operands: slot, u16. */
+    cnor_op_array_get_l, /**< An element of fp[a]. Operand: slot. */
+    cnor_op_array_set_l, /**< Write an element of fp[a]. Operand: slot. */
+    /**
+     * An array that is a value (format v8): `array_get` reads an element of
+     * the array on the stack, `array_set` writes one. They are how an array
+     * that is not a local is read: a parameter, or a global.
+     */
+    cnor_op_array_get, /**< An element of the array below the index. Operands: none. */
+    cnor_op_array_set, /**< Write an element of the array below the index. Operands: none. */
+    /**
+     * Call a function of the language itself (format v7): the operand is the
+     * ordinal of the function (`include/cnor/builtin.h`). The arguments are on
+     * the stack, as for `native`, and the result takes their place.
+     */
+    cnor_op_call_builtin, /**< Call the builtin with that ordinal. Operand: u8. */
     cnor_op_count /**< Number of opcodes; any byte at or above is invalid. */
 };
 /** @copybrief cnor_op */

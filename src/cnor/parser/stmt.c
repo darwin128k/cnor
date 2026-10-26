@@ -7,6 +7,7 @@ static const lh_str_view_t m_type_names[cnor_type_count] = {
     lh_str_view_empty_initializer(),  lh_str_view_initializer_lit("i32"),
     lh_str_view_initializer_lit("u32"), lh_str_view_initializer_lit("f32"),
     lh_str_view_initializer_lit("bool"), lh_str_view_initializer_lit("str"),
+    lh_str_view_initializer_lit("array"),
 };
 
 cnor_type_t

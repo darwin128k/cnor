@@ -128,6 +128,9 @@ typedef struct outcome
     char name[256];     /**< The diagnostic's name or detail. */
     char file[256];     /**< The file it points at. */
     long long value;    /**< The result, when it is an integer; -999999 otherwise. */
+    lh_u8_t kind;       /**< The kind of the result; 0 when there is none. */
+    lh_bool_t truth;    /**< The result, when it is a boolean. */
+    char text[256];     /**< The result, when it is a string. */
 } outcome_t;
 
 static void
@@ -211,9 +214,23 @@ run_program(const memory_file_t *files, size_t count, const char *const *search_
             {
                 const lh_value_t result = cnor_vm_get_result(&vm);
 
-                if (lh_value_get_kind(&result) == lh_value_kind_sint)
+                out->kind = (lh_u8_t) lh_value_get_kind(&result);
+                if (lh_value_get_kind(&result) == lh_value_kind_bool)
+                {
+                    out->truth = lh_value_get_data(&result)->b;
+                }
+                else if (lh_value_get_kind(&result) == lh_value_kind_sint)
                 {
                     out->value = (long long) lh_value_get_data(&result)->i;
+                }
+                else if (lh_value_get_kind(&result) == lh_value_kind_str)
+                {
+                    const lh_str_view_t text = lh_value_get_data(&result)->s;
+                    const size_t size = text.size < sizeof(out->text) - 1U ? text.size
+                                                                          : sizeof(out->text) - 1U;
+
+                    memcpy(out->text, text.begin, size);
+                    out->text[size] = '\0';
                 }
             }
         }
@@ -255,6 +272,202 @@ error_of(const char *text, cnor_line_t *line)
 
     *line = out.line;
     return out.compiled ? cnor_error_none : out.code;
+}
+
+/* The text the program returns. */
+static lh_bool_t
+text_of(const char *text, char *to, size_t capacity)
+{
+    const outcome_t out = run_source(text);
+
+    if (out.code != cnor_error_none || out.kind != lh_value_kind_str)
+    {
+        printf("    failed: %s at %s:%u: %s\n", cnor_error_get_message(out.code), out.file,
+               (unsigned) out.line, out.name);
+        return lh_bool_false;
+    }
+    (void) snprintf(to, capacity, "%s", out.text);
+    return lh_bool_true;
+}
+
+/* Whether the program returns the boolean @p truth. */
+static lh_bool_t
+bool_of(const char *text, lh_bool_t truth)
+{
+    const outcome_t out = run_source(text);
+
+    if (out.code != cnor_error_none || out.kind != lh_value_kind_bool)
+    {
+        printf("    failed: %s at %s:%u: %s\n", cnor_error_get_message(out.code), out.file,
+               (unsigned) out.line, out.name);
+        return lh_bool_false;
+    }
+    return out.truth == truth ? lh_bool_true : lh_bool_false;
+}
+
+/* -- arrays ------------------------------------------------------------------ */
+
+CNOR_TEST(passes_an_array_to_a_function_and_walks_it)
+{
+    /* The elements are shared: what the function writes, the caller sees. */
+    CHECK_EQ(value_of("fn bump(a: array, i: i32) -> i32:\n"
+                      "    a[i] = a[i] + 10\n"
+                      "    return a[i]\n"
+                      "fn main() -> i32:\n"
+                      "    let mut numbers = [1; 4]\n"
+                      "    bump(numbers, 2)\n"
+                      "    return numbers[2]\n"
+                      "main()\n"),
+             11);
+    /* The length of an array. */
+    CHECK_EQ(value_of("fn size(a: array) -> i32:\n"
+                      "    return len(a)\n"
+                      "fn main() -> i32:\n"
+                      "    let mut numbers = [0; 7]\n"
+                      "    return size(numbers)\n"
+                      "main()\n"),
+             7);
+    /* The elements, one by one. */
+    CHECK_EQ(value_of("fn total(a: array) -> i32:\n"
+                      "    let mut sum = 0\n"
+                      "    for x in a:\n"
+                      "        sum = sum + x\n"
+                      "    return sum\n"
+                      "fn main() -> i32:\n"
+                      "    let mut numbers = [0; 4]\n"
+                      "    numbers[0] = 1\n"
+                      "    numbers[1] = 2\n"
+                      "    numbers[2] = 3\n"
+                      "    numbers[3] = 4\n"
+                      "    return total(numbers)\n"
+                      "main()\n"),
+             10);
+    /* An empty array. */
+    CHECK_EQ(value_of("fn size(a: array) -> i32:\n"
+                      "    return len(a)\n"
+                      "fn main() -> i32:\n"
+                      "    let mut numbers = [0; 0]\n"
+                      "    return size(numbers)\n"
+                      "main()\n"),
+             0);
+}
+
+CNOR_TEST(keeps_a_global_array_whole)
+{
+    /* The elements of a global array live in the globals: a function writes
+     * them, and the top-level code sees it. */
+    CHECK_EQ(value_of("let mut scores = [0; 4]\n"
+                      "fn bump(i: i32) -> i32:\n"
+                      "    scores[i] = scores[i] + 10\n"
+                      "    return scores[i]\n"
+                      "bump(0)\n"
+                      "bump(1)\n"
+                      "scores[0] + scores[1]\n"),
+             20);
+}
+
+CNOR_TEST(refuses_an_array_where_it_does_not_fit)
+{
+    cnor_line_t line = 0U;
+
+    /* The argument of a function that takes an array must be one. */
+    CHECK_EQ(error_of("fn f(a: array) -> i32:\n    return len(a)\nf(3)\n", &line),
+             cnor_error_type_mismatch);
+    /* An array cannot be returned: it would point at a frame that is gone. */
+    CHECK_EQ(error_of("fn f() -> array:\n"
+                      "    let mut a = [0; 4]\n"
+                      "    return a\n"
+                      "f()\n",
+                      &line),
+             cnor_error_array_returned);
+    /* And it is not a number. */
+    CHECK_EQ(error_of("fn f() -> i32:\n"
+                      "    let mut a = [0; 4]\n"
+                      "    return a\n"
+                      "f()\n",
+                      &line),
+             cnor_error_type_mismatch);
+}
+
+/* -- the string functions of the language ------------------------------------ */
+CNOR_TEST(has_the_string_functions)
+{
+    char text[256];
+
+    /* find */
+    CHECK_EQ(value_of("fn f() -> i32:\n    return find(\"hello world\", \"wor\")\nf()\n"), 6);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return find(\"hello\", \"zz\")\nf()\n"), -1);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return find(\"hello\", \"\")\nf()\n"), 0);
+    /* contains */
+    CHECK(bool_of("fn f() -> bool:\n    return contains(\"hello\", \"ell\")\nf()\n",
+                  lh_bool_true));
+    CHECK(bool_of("fn f() -> bool:\n    return contains(\"hello\", \"xyz\")\nf()\n",
+                  lh_bool_false));
+    /* replace */
+    REQUIRE(text_of("fn f() -> str:\n    return replace(\"a-b-c\", \"-\", \"+\")\nf()\n", text,
+                    sizeof(text)));
+    CHECK(strcmp(text, "a+b+c") == 0);
+    REQUIRE(text_of("fn f() -> str:\n    return replace(\"aaa\", \"a\", \"bb\")\nf()\n", text,
+                    sizeof(text)));
+    CHECK(strcmp(text, "bbbbbb") == 0);
+    REQUIRE(text_of("fn f() -> str:\n    return replace(\"abc\", \"x\", \"y\")\nf()\n", text,
+                    sizeof(text)));
+    CHECK(strcmp(text, "abc") == 0);
+    /* trim */
+    REQUIRE(text_of("fn f() -> str:\n    return trim(\"  padded  \")\nf()\n", text, sizeof(text)));
+    CHECK(strcmp(text, "padded") == 0);
+    /* upper and lower */
+    REQUIRE(text_of("fn f() -> str:\n    return upper(\"MiXeD\")\nf()\n", text, sizeof(text)));
+    CHECK(strcmp(text, "MIXED") == 0);
+    REQUIRE(text_of("fn f() -> str:\n    return lower(\"MiXeD\")\nf()\n", text, sizeof(text)));
+    CHECK(strcmp(text, "mixed") == 0);
+    /* starts_with and ends_with */
+    CHECK(bool_of("fn f() -> bool:\n    return starts_with(\"hello\", \"he\")\nf()\n",
+                  lh_bool_true));
+    CHECK(bool_of("fn f() -> bool:\n    return starts_with(\"hello\", \"lo\")\nf()\n",
+                  lh_bool_false));
+    CHECK(bool_of("fn f() -> bool:\n    return ends_with(\"hello\", \"lo\")\nf()\n", lh_bool_true));
+    /* substr */
+    REQUIRE(text_of("fn f() -> str:\n    return substr(\"hello world\", 6, 5)\nf()\n", text,
+                    sizeof(text)));
+    CHECK(strcmp(text, "world") == 0);
+    REQUIRE(text_of("fn f() -> str:\n    return substr(\"hello\", 1, 99)\nf()\n", text,
+                    sizeof(text)));
+    CHECK(strcmp(text, "ello") == 0);
+    /* ord and char */
+    CHECK_EQ(value_of("fn f() -> i32:\n    return ord(\"A\")\nf()\n"), 65);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return ord(\"\")\nf()\n"), -1);
+    REQUIRE(text_of("fn f() -> str:\n    return char(66)\nf()\n", text, sizeof(text)));
+    CHECK(strcmp(text, "B") == 0);
+    /* str */
+    REQUIRE(text_of("fn f() -> str:\n    return str(1234)\nf()\n", text, sizeof(text)));
+    CHECK(strcmp(text, "1234") == 0);
+    REQUIRE(text_of("fn f() -> str:\n    return str(-12)\nf()\n", text, sizeof(text)));
+    CHECK(strcmp(text, "-12") == 0);
+    REQUIRE(text_of("fn f() -> str:\n    return str(true)\nf()\n", text, sizeof(text)));
+    CHECK(strcmp(text, "true") == 0);
+#if LH_REAL_ENABLED
+    REQUIRE(text_of("fn f() -> str:\n    return str(1.5)\nf()\n", text, sizeof(text)));
+    CHECK(strcmp(text, "1.5") == 0);
+    REQUIRE(text_of("fn f() -> str:\n    return str(2.0)\nf()\n", text, sizeof(text)));
+    CHECK(strcmp(text, "2.0") == 0);
+#endif
+    /* parse_int */
+    CHECK_EQ(value_of("fn f() -> i32:\n    return parse_int(\"-567\")\nf()\n"), -567);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return parse_int(\"nope\")\nf()\n"), 0);
+}
+
+CNOR_TEST(checks_the_arguments_of_the_string_functions)
+{
+    cnor_line_t line = 0U;
+
+    /* The wrong type of argument is a compile error. */
+    CHECK_EQ(error_of("fn f() -> i32:\n    return find(1, \"a\")\nf()\n", &line),
+             cnor_error_type_mismatch);
+    CHECK_EQ(error_of("fn f() -> i32:\n    return find(\"a\")\nf()\n", &line),
+             cnor_error_wrong_arg_count);
+    CHECK_EQ(error_of("fn f() -> i32:\n    return find(\"a\", \"b\", \"c\")\nf()\n", &line),
+             cnor_error_wrong_arg_count);
 }
 
 /* -- types ------------------------------------------------------------------- */
@@ -854,6 +1067,11 @@ CNOR_TEST(points_runtime_errors_at_the_imported_file)
 }
 
 static const cnor_test_case_t m_cases[] = {
+    CNOR_TEST_CASE(passes_an_array_to_a_function_and_walks_it),
+    CNOR_TEST_CASE(keeps_a_global_array_whole),
+    CNOR_TEST_CASE(refuses_an_array_where_it_does_not_fit),
+    CNOR_TEST_CASE(has_the_string_functions),
+    CNOR_TEST_CASE(checks_the_arguments_of_the_string_functions),
     CNOR_TEST_CASE(runs_well_typed_programs),
     CNOR_TEST_CASE(accepts_values_of_unknown_type_anywhere),
     CNOR_TEST_CASE(refuses_arguments_of_the_wrong_type),

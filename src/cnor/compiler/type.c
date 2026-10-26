@@ -53,6 +53,8 @@ cnor_type_of_annotation(cnor_type_t annotation)
         return cnor_static_bool;
     case cnor_type_str:
         return cnor_static_str;
+    case cnor_type_array:
+        return cnor_static_array;
     default:
         return cnor_static_any;
     }

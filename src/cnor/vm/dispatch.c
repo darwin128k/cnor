@@ -39,7 +39,7 @@
 #    endif
 #endif
 
-_Static_assert(cnor_op_count == 76, "a new opcode needs a handler and a dispatch label below");
+_Static_assert(cnor_op_count == 80, "a new opcode needs a handler and a dispatch label below");
 
 /* The three operand forms of binary operator @p name share one handler. */
 #define CNOR_VM_FORM_HANDLERS(name)                                                                \
@@ -88,8 +88,12 @@ static const cnor_vm_handler_t m_handlers[cnor_op_count] = {
     [cnor_op_index_li] = cnor_vm_op_index_operands,
     [cnor_op_index_i] = cnor_vm_op_index_operands,
     [cnor_op_array_new] = cnor_vm_op_array_new,
+    [cnor_op_array_new_global] = cnor_vm_op_array_new_global,
+    [cnor_op_array_get_l] = cnor_vm_op_array_get_l,
+    [cnor_op_array_set_l] = cnor_vm_op_array_set_l,
     [cnor_op_array_get] = cnor_vm_op_array_get,
     [cnor_op_array_set] = cnor_vm_op_array_set,
+    [cnor_op_call_builtin] = cnor_vm_op_call_builtin,
     CNOR_VM_FORM_HANDLERS(add),
     CNOR_VM_FORM_HANDLERS(sub),
     CNOR_VM_FORM_HANDLERS(mul),
@@ -547,8 +551,12 @@ cnor_vm_dispatch(cnor_vm_t *vm)
         [cnor_op_index_li] = &&cnor_vm_label_index_li,
         [cnor_op_index_i] = &&cnor_vm_label_index_i,
         [cnor_op_array_new] = &&cnor_vm_label_array_new,
+        [cnor_op_array_new_global] = &&cnor_vm_label_array_new_global,
+        [cnor_op_array_get_l] = &&cnor_vm_label_array_get_l,
+        [cnor_op_array_set_l] = &&cnor_vm_label_array_set_l,
         [cnor_op_array_get] = &&cnor_vm_label_array_get,
         [cnor_op_array_set] = &&cnor_vm_label_array_set,
+        [cnor_op_call_builtin] = &&cnor_vm_label_call_builtin,
     };
 #endif
     const lh_byte_t *const code = vm->code;
@@ -1054,6 +1062,21 @@ cnor_vm_switch:
     {
         CNOR_VM_SLOW();
     }
+    /* An array that is a value on the stack: the slow path knows where it is. */
+    CNOR_VM_OP(array_get)
+    {
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(array_set)
+    {
+        CNOR_VM_SLOW();
+    }
+    /* A function of the language itself: it works on the machine's strings,
+     * so it runs through the slow path. */
+    CNOR_VM_OP(call_builtin)
+    {
+        CNOR_VM_SLOW();
+    }
     CNOR_VM_OP(len)
     {
         if (CNOR_VM_LIKELY(cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_str))
@@ -1151,7 +1174,12 @@ cnor_vm_switch:
         pc += 4;
         CNOR_VM_NEXT();
     }
-    CNOR_VM_OP(array_get)
+    /* The same, in the globals: they outlive the frame that made them. */
+    CNOR_VM_OP(array_new_global)
+    {
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(array_get_l)
     {
         const lh_value_t *const array = &fp[pc[1]];
 
@@ -1169,7 +1197,7 @@ cnor_vm_switch:
         }
         CNOR_VM_SLOW();
     }
-    CNOR_VM_OP(array_set)
+    CNOR_VM_OP(array_set_l)
     {
         const lh_value_t *const array = &fp[pc[1]];
 

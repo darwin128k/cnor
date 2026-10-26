@@ -102,11 +102,27 @@ cnor_parser_for(cnor_parser_t *self)
     }
     cnor_parser_advance(self);
     node->data.for_.from = cnor_parser_expr(self);
-    if (node->data.for_.from == lh_null || !cnor_parser_expect_punct(self, cnor_punct_range))
+    if (node->data.for_.from == lh_null)
     {
         return lh_null;
     }
-    if (!cnor_parser_header_and_block(self, &node->data.for_.to, &node->data.for_.body))
+    if (cnor_parser_accept_punct(self, cnor_punct_range))
+    {
+        /* `for v in a..b`: a range. */
+        if (!cnor_parser_header_and_block(self, &node->data.for_.to, &node->data.for_.body))
+        {
+            return lh_null;
+        }
+        return node;
+    }
+    /* `for v in a`: the elements of an array. */
+    node->data.for_.to = lh_null;
+    if (!cnor_parser_expect_punct(self, cnor_punct_colon))
+    {
+        return lh_null;
+    }
+    node->data.for_.body = cnor_parser_block(self);
+    if (node->data.for_.body == lh_null)
     {
         return lh_null;
     }

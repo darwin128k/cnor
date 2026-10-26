@@ -1273,10 +1273,22 @@ CNOR_TEST(makes_an_array_and_writes_its_elements)
                             "f()\n",
                             lh_null, lh_null),
              cnor_error_immutable);
-    /* An array is a local: a global one would outlive its frame. */
-    CHECK_EQ(compile_error("let mut top = [0; 4]\n", lh_null, lh_null),
-             cnor_error_not_a_declaration);
-    /* And it is a declaration, not a value. */
+    /* A global array: its elements live in the globals, so they outlive the
+     * frame that made them. */
+    CHECK_EQ(run_sint("let mut top = [7; 4]\n"
+                      "fn f() -> i32:\n"
+                      "    top[0] = 9\n"
+                      "    return top[0] + top[1]\n"
+                      "f()\n"),
+             16);
+    /* An array is a declaration, not a value: it cannot be returned. */
+    CHECK_EQ(compile_error("fn f() -> array:\n"
+                            "    let mut x = [0; 4]\n"
+                            "    return x\n"
+                            "f()\n",
+                            lh_null, lh_null),
+             cnor_error_array_returned);
+    /* And it is not a number either. */
     CHECK_EQ(compile_error("fn f() -> i32:\n"
                             "    let mut x = [0; 4]\n"
                             "    return x\n"

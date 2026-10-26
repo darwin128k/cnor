@@ -9,6 +9,7 @@
 #define CNOR_SRC_COMPILER_INTERNAL_H
 
 #include <cnor/arena.h>
+#include <cnor/builtin.h>
 #include <cnor/byte/writer.h>
 #include <cnor/compiler.h>
 #include <cnor/lexer.h>
@@ -427,7 +428,7 @@ cnor_scope_add_function(cnor_compiler_t *self, const cnor_node_t *node);
 lh_bool_t
 cnor_scope_add_native(cnor_compiler_t *self, const cnor_node_t *node);
 lh_bool_t
-cnor_scope_add_global(cnor_compiler_t *self, const cnor_node_t *node);
+cnor_scope_add_global(cnor_compiler_t *self, const cnor_node_t *node, lh_u16_t count);
 struct cnor_function_decl *
 cnor_scope_function_at(cnor_scope_t *self, cnor_function_index_t index);
 cnor_count_t
@@ -478,6 +479,24 @@ cnor_constant_pool_intern(cnor_compiler_t *self, const cnor_node_t *node, cnor_c
                           cnor_const_index_t *index);
 
 /* type.c */
+
+/**
+ * @brief The builtin of the language with that name.
+ * @return ::lh_bool_true and @p out when there is one.
+ */
+lh_bool_t
+cnor_compiler_builtin_find(lh_str_view_t name, cnor_builtin_t *out);
+
+/**
+ * @brief The types the builtin takes, one per argument.
+ * @return The types; ::lh_null for an ordinal out of range.
+ */
+const cnor_static_type_t *
+cnor_compiler_builtin_params(cnor_builtin_t builtin);
+
+/** @brief The type the builtin gives. */
+cnor_static_type_t
+cnor_compiler_builtin_result(cnor_builtin_t builtin);
 
 /** @brief The static type an annotation names; `any` without one. */
 cnor_static_type_t

@@ -159,7 +159,7 @@ assign      := IDENT "=" expr | IDENT "[" expr "]" "=" expr
 compound    := if | while | for | match
 if          := "if" expr ":" block [ "else" ( ":" block | if ) ]
 while       := "while" expr ":" block
-for         := "for" IDENT "in" expr ".." expr ":" block
+for         := "for" IDENT "in" ( expr ".." expr | expr ) ":" block
 match       := "match" expr ":" NEWLINE INDENT arm { arm } DEDENT
 arm         := ( literal | "-" literal | "_" ) "=>" simple [ "," ] end
 end         := [ ";" ] ( NEWLINE | DEDENT | EOF )      (or ";" then more on the line)
@@ -171,10 +171,21 @@ literal     := INT | REAL | STRING | "true" | "false" | "none"
 ```
 
 **[cnor]** An array literal (`[value; count]`) is a declaration, not a value:
-its elements are slots of the frame that declares it, so it is only a `let`'s
-initializer, in a function. An array is written `let mut scores = [0; 32]`,
-and read and written with the index: `scores[i]` and `scores[i] = v`. The
-bounds are checked when the program runs.
+its elements are slots of a frame or of the globals, so it is only a `let`'s
+initializer. An array is written `let mut scores = [0; 32]`, and read and
+written with the index: `scores[i]` and `scores[i] = v`. The bounds are
+checked when the program runs.
+
+An array may be a parameter (`fn f(a: array)`) and a global (`let mut
+scores = [0; 32]` at the top level). A parameter is a **reference** to the
+elements: what the function writes, the caller sees. A global array keeps
+its elements in the globals, so they outlive the frame that made them. An
+array cannot be returned (its elements would outlive the frame they live in)
+and cannot be read as a value: `scores` is an error, `scores[i]` is the
+element.
+
+`for v in a` walks the elements of an array, and `len(a)` is how many there
+are.
 
 Operator precedence, loosest first; binary operators are left-associative:
 
@@ -372,7 +383,7 @@ closures, a preprocessor, metatables, arrays.
 
 ---
 
-## 7. The `.tbc` image format, v6
+## 7. The `.tbc` image format, v8
 
 **[cnor]** v1 replaced the original header (whose layout used `sizeof` and
 was not portable) and its names section. Every field is a fixed-width
@@ -381,15 +392,16 @@ keeps the v1 layout and adds opcodes (the operand forms and `for_loop`,
 section 8); v3 adds `switch`; v4 gives each function its source file and
 turns the file name into a file table, for `import`; v5 adds the index forms
 (`index_ll`, `index_li`, `index_i`); v6 adds the array instructions
-(`array_new`, `array_get`, `array_set`). An image of another version is
-refused: v5 images must be compiled again.
+(`array_new`, `array_get`, `array_set`); v7 adds `call_builtin`, which calls
+a function of the language itself (section 9.2). An image of another
+version is refused: v6 images must be compiled again.
 
 ### 7.1 Header (68 bytes)
 
 | Offset | Field | Type | Meaning |
 |---|---|---|---|
 | 0 | `magic` | 4 bytes | `"cnor"` |
-| 4 | `version` | u16 | format version, currently 6 |
+| 4 | `version` | u16 | format version, currently 8 |
 | 6 | `flags` | u16 | bit 0: the image carries a line table |
 | 8 | `image_size` | u32 | size of the whole image |
 | 12 | `stack_slots` | u32 | largest frame (slots + operands), **computed by the compiler** |
@@ -461,7 +473,8 @@ verifier and the machine all read it.
 | Jumps | `jmp`, `jmp_if_false`, `jmp_if_true`, `for_loop`, `switch` |
 | Functions | `call`, `ret`, `native` |
 | Text | `len`, `index`, `index_ll`, `index_li`, `index_i` |
-| Arrays | `array_new`, `array_get`, `array_set` |
+| Arrays | `array_new`, `array_new_global`, `array_get_l`, `array_set_l`, `array_get`, `array_set` |
+| The language's own functions | `call_builtin` |
 | Other | `halt` |
 
 Operands: `push_i32` / `push_u32`: 32 bits; `push_const`: u16 ordinal; local
@@ -516,17 +529,29 @@ the code, so `text[i]` does not copy the text onto the stack first:
 A form computes exactly what `index` computes on the same two values: the same
 bounds, the same error.
 
-**The array instructions** (format v6) work on the elements of an array, which
-are slots of the frame that declares it:
+**The array instructions** (format v6, extended in v8) work on the elements of
+an array, which are slots of a frame or of the globals:
 
 | Opcode | Operands | Computes |
 |---|---|---|
 | `array_new` | slot a, u16 count | the `count` elements at `FRAME.a + 1` take the value on the stack; `FRAME.a` becomes the array |
-| `array_get` | slot a | the element of `FRAME.a` at the index on the stack, in its place |
-| `array_set` | slot a | the element of `FRAME.a` at the index on the stack takes the value on top of it |
+| `array_new_global` | slot a, u16 count | the same, in the globals: the elements at `GLOBALS.a + 1`, and `GLOBALS.a` becomes the array |
+| `array_get_l` | slot a | the element of `FRAME.a` at the index on the stack, in its place |
+| `array_set_l` | slot a | the element of `FRAME.a` at the index on the stack takes the value on top of it |
+| `array_get` | none | the element of the array on the stack, at the index above it, in the index's place |
+| `array_set` | none | the element of the array on the stack takes the value at the index above it |
 
 The bounds are checked at run time: an index outside the array fails the run
 with `index`.
+
+`array_get_l` and `array_set_l` read the array out of a local slot, so a
+local array is not copied onto the stack. `array_get` and `array_set` take the
+array as a value, and are how an array that is not a local is read: a
+parameter is a local, a global array is not.
+
+**`call_builtin`** (u8 ordinal, u8 argument count; format v7) calls a
+function of the language itself (section 9.2). The arguments are on the
+stack, as for `native`, and the result takes their place.
 
 **[cnor]** `concat` is gone (`add` joins two strings); `line` is gone (the
 optional line table replaces it, so line information costs nothing at run
@@ -625,6 +650,39 @@ takes precedence, as for any native.
 The command line also loads imported files (section 6.5) from the file system,
 relative to the importing file, then in each `-I DIR` given.
 
+### 9.2 The language's own functions
+
+Some functions belong to the language rather than to a host: they work on the
+machine's strings, so they put their result into the machine's string pool.
+They are called like any other function, and the host may provide a native of
+the same name, which then wins; a script function of that name wins over
+both.
+
+| Function | Arguments | Does | Returns |
+|---|---|---|---|
+| `len(text)` | `str` | the length in bytes | `i32` |
+| `find(text, needle)` | `str`, `str` | the index of the first occurrence, or -1 | `i32` |
+| `contains(text, needle)` | `str`, `str` | whether the needle is in the text | `bool` |
+| `replace(text, from, to)` | `str`, `str`, `str` | every occurrence of `from` replaced by `to` | `str` |
+| `trim(text)` | `str` | without the spaces and tabs around it | `str` |
+| `upper(text)` | `str` | in upper case (ASCII) | `str` |
+| `lower(text)` | `str` | in lower case (ASCII) | `str` |
+| `starts_with(text, prefix)` | `str`, `str` | whether the text starts with the prefix | `bool` |
+| `ends_with(text, suffix)` | `str`, `str` | whether the text ends with the suffix | `bool` |
+| `substr(text, start, length)` | `str`, `i32`, `i32` | `length` bytes from `start`, fewer when the text is shorter | `str` |
+| `ord(text)` | `str` | the code of the first byte, or -1 for an empty text | `i32` |
+| `char(code)` | `i32` | the one-byte string of that code (0 to 255) | `str` |
+| `str(value)` | `any` | the value as text | `str` |
+| `parse_int(text)` | `str` | the number in the text, or 0 when there is none | `i32` |
+
+The compiler knows the argument types and the result type, so a call with the
+wrong type or the wrong number of arguments is refused before it runs. A
+`str` argument that is not a string fails the run at the call.
+
+**[cnor]** `split` is not here yet: it would return an array, and an array is
+a local (section 8), so it cannot be returned. It comes with the arrays that
+can be.
+
 ## 10. Runtime
 
 `cnor_vm_t` (`include/cnor/vm.h`) holds:
@@ -710,8 +768,13 @@ line in `tests/cli/`, 50 on Windows):
   `for`, `match` with literal patterns and `_`;
 - [x] compiler: every construct above, two passes (declarations, then bodies),
   computed frame sizes and stack depths, optional line table;
-- [x] arrays: a local array of a fixed size, its elements in the frame,
-  read and written by index, the bounds checked at run time (section 8);
+- [x] arrays: an array of a fixed size, read and written by index, the bounds
+  checked at run time; a local one keeps its elements in the frame, a global one in
+  the globals; an array may be a parameter (a reference to the elements), `len(a)` is
+  its size and `for v in a` walks them (section 8);
+- [x] the language's own functions: `len`, `find`, `contains`, `replace`,
+  `trim`, `upper`, `lower`, `starts_with`, `ends_with`, `substr`, `ord`,
+  `char`, `str`, `parse_int` (section 9.2);
 - [x] static type checking (section 6.3);
 - [x] global initializers in source order, with use-before-`let` errors
   (section 6.4);

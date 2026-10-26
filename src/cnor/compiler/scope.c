@@ -376,15 +376,16 @@ cnor_scope_add_native(cnor_compiler_t *self, const cnor_node_t *node)
 }
 
 lh_bool_t
-cnor_scope_add_global(cnor_compiler_t *self, const cnor_node_t *node)
+cnor_scope_add_global(cnor_compiler_t *self, const cnor_node_t *node, lh_u16_t count)
 {
     struct cnor_global_decl decl;
+    lh_uint_t i;
 
     if (cnor_scope_is_top_level_name(self, node->name))
     {
         return cnor_compile_fail_name(self, node, cnor_error_duplicate_name);
     }
-    if (lh_array_get_size(&self->scope.globals) > CNOR_INDEX_MAX)
+    if (lh_array_get_size(&self->scope.globals) + count > CNOR_INDEX_MAX)
     {
         return cnor_compile_fail(self, node, cnor_error_too_many_globals);
     }
@@ -393,6 +394,17 @@ cnor_scope_add_global(cnor_compiler_t *self, const cnor_node_t *node)
     decl.type = cnor_type_of_annotation(node->data.let.type);
     cnor_name_index_add(&self->scope.top, decl.key, cnor_binding_global,
                         (lh_u16_t) lh_array_push_back(&self->scope.globals, &decl));
+    /* The elements of an array follow its own slot: they live in the globals
+     * too, so they outlive the frame that made them. */
+    for (i = 1U; i < (lh_uint_t) count; ++i)
+    {
+        struct cnor_global_decl element;
+
+        element.key = cnor_scope_key(lh_str_view_empty(), self->module);
+        element.is_mutable = lh_bool_false;
+        element.type = cnor_static_any;
+        (void) lh_array_push_back(&self->scope.globals, &element);
+    }
     return lh_bool_true;
 }
 
