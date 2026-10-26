@@ -24,9 +24,9 @@
  * catching an error allocates nothing.
  */
 
-/* How many pairs the error's dictionary holds: the message, the line, the
- * code and the file. */
-#define CNOR_TRY_ERROR_PAIRS 4U
+/* How many pairs the error's dictionary holds: the message, the line, the code,
+ * the kind and the file. */
+#define CNOR_TRY_ERROR_PAIRS 5U
 
 lh_bool_t
 cnor_compile_try(cnor_compiler_t *self, const cnor_node_t *node)

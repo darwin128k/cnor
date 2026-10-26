@@ -27,10 +27,11 @@
 static const char m_key_message[] = "message";
 static const char m_key_line[] = "line";
 static const char m_key_code[] = "code";
+static const char m_key_kind[] = "kind";
 static const char m_key_file[] = "file";
 
 /* How many pairs the error's dictionary holds. */
-#define CNOR_ERROR_PAIRS 4U
+#define CNOR_ERROR_PAIRS 5U
 
 /* Mark the catch block at @p insn's operand; the error's dictionary goes into
  * the slot the other operand names. */
@@ -85,17 +86,20 @@ cnor_vm_error_dict(cnor_vm_t *vm, cnor_slot_t slot, const cnor_error_t code,
     lh_value_t *const pairs = &cells[3];
     const lh_str_view_t file = cnor_vm_get_file_at(vm, at);
     const char *const message = cnor_error_get_message(code);
+    const char *const kind = cnor_error_get_name(code);
 
     cnor_vm_fast_set_sint(&cells[1], (lh_sllong_t) CNOR_ERROR_PAIRS);
     cnor_vm_fast_set_sint(&cells[2], (lh_sllong_t) CNOR_ERROR_PAIRS);
     cnor_vm_fast_set_str(&pairs[0], m_key_message, sizeof(m_key_message) - 1U);
     cnor_vm_fast_set_str(&pairs[2], m_key_line, sizeof(m_key_line) - 1U);
     cnor_vm_fast_set_str(&pairs[4], m_key_code, sizeof(m_key_code) - 1U);
-    cnor_vm_fast_set_str(&pairs[6], m_key_file, sizeof(m_key_file) - 1U);
+    cnor_vm_fast_set_str(&pairs[6], m_key_kind, sizeof(m_key_kind) - 1U);
+    cnor_vm_fast_set_str(&pairs[8], m_key_file, sizeof(m_key_file) - 1U);
     cnor_vm_fast_set_str(&pairs[1], message, strlen(message));
     cnor_vm_fast_set_sint(&pairs[3], (lh_sllong_t) cnor_vm_get_line_at(vm, at));
     cnor_vm_fast_set_sint(&pairs[5], (lh_sllong_t) code);
-    cnor_vm_fast_set_str(&pairs[7], lh_str_view_get_data(&file),
+    cnor_vm_fast_set_str(&pairs[7], kind, strlen(kind));
+    cnor_vm_fast_set_str(&pairs[9], lh_str_view_get_data(&file),
                          lh_str_view_get_size(&file));
     cnor_vm_fast_set_dict(&cells[0], &cells[1]);
 }

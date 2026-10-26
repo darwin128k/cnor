@@ -13,6 +13,17 @@
 #include <lh/char.h>
 #include <lh/numeric/fixed/types.h>
 
+/**
+ * @def CNOR_CLI_HAS_COMPILER
+ * @brief Whether the library this command line was built with has a compiler.
+ *
+ * A library built without one runs images only: `run` and `compile` are then
+ * not there, and the command line says so.
+ */
+#ifndef CNOR_CLI_HAS_COMPILER
+#define CNOR_CLI_HAS_COMPILER 1
+#endif
+
 /** @brief Value stack of a run, in values (`--stack`). */
 #define CNOR_CLI_DEFAULT_STACK_SLOTS 65536U
 /** @brief Nested calls allowed (`--depth`). */

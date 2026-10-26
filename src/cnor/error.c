@@ -79,3 +79,84 @@ cnor_error_get_message(cnor_error_t self)
     }
     return m_messages[self];
 }
+
+/* Indexed by ::cnor_error_t; the order must follow the enum. The name is what
+ * a script reads: it is stable, unlike the number. */
+static const lh_char_t *const m_names[cnor_error_count] = {
+    "none",
+    "no_memory",
+    "unterminated_string",
+    "bad_character",
+    "bad_indent",
+    "too_deep",
+    "unexpected_token",
+    "empty_block",
+    "unknown_type",
+    "bad_number",
+    "bad_escape",
+    "not_an_expression",
+    "no_reals",
+    "misplaced_import",
+    "unknown_name",
+    "duplicate_name",
+    "not_assignable",
+    "array_returned",
+    "dict_full",
+    "dict_room",
+    "dict_returned",
+    "too_many_tries",
+    "immutable",
+    "outside_loop",
+    "too_many_locals",
+    "too_many_globals",
+    "too_many_constants",
+    "too_many_functions",
+    "too_many_args",
+    "wrong_arg_count",
+    "unknown_construct",
+    "type_mismatch",
+    "operand_type",
+    "missing_return",
+    "not_initialized",
+    "ambiguous_name",
+    "no_such_module",
+    "bad_module",
+    "import_cycle",
+    "imports_too_deep",
+    "too_many_files",
+    "not_a_declaration",
+    "too_small",
+    "bad_magic",
+    "bad_version",
+    "bad_header",
+    "bad_section",
+    "stack_too_big",
+    "code_truncated",
+    "bad_opcode",
+    "bad_operand",
+    "bad_jump",
+    "bad_stack",
+    "no_terminator",
+    "not_loaded",
+    "stack_overflow",
+    "type",
+    "div_by_zero",
+    "shift_out_of_range",
+    "index",
+    "no_such_native",
+    "bad_arity",
+    "native_fail",
+    "call_depth",
+    "str_pool_full",
+    "step_limit",
+};
+
+const lh_str_ptr
+cnor_error_get_name(cnor_error_t self)
+{
+    if ((lh_uint_t) self >= (lh_uint_t) cnor_error_count)
+    {
+        return "unknown";
+    }
+    return m_names[self];
+}

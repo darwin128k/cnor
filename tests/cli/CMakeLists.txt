@@ -49,6 +49,12 @@ cnor_cli_test(version CODE 0 ARGS --version
         STDOUT_REGEX "^cnor [0-9]+\\.[0-9]+\\.[0-9]+ \\(image format v[0-9]+\\)\n$" STDERR_EMPTY)
 cnor_cli_test(help CODE 0 ARGS --help STDOUT_REGEX "usage: cnor run" STDERR_EMPTY)
 
+if (NOT CNOR_BUILD_COMPILER)
+    # A command line without a compiler runs images only: the tests that need
+    # a source are not there.
+    return ()
+endif ()
+
 # -- run -----------------------------------------------------------------------
 
 cnor_cli_test(run CODE 0 ARGS run ${cnor_cli_data}/hello.cn

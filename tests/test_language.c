@@ -393,6 +393,17 @@ CNOR_TEST(catches_an_error)
                       "    return 0\n"
                       "f()\n"),
              (lh_u32_t) cnor_error_div_by_zero);
+    /* And its kind: the name a script reads, which does not change with the
+     * order of the codes. */
+    REQUIRE(text_of("fn f() -> str:\n"
+                    "    try:\n"
+                    "        let x = 10 / 0\n"
+                    "    catch e:\n"
+                    "        return e[\"kind\"]\n"
+                    "    return \"no\"\n"
+                    "f()\n",
+                    text, sizeof(text)));
+    CHECK_EQ(strcmp(text, "div_by_zero"), 0);
     /* The file it happened in. */
     REQUIRE(text_of("fn f() -> str:\n"
                     "    try:\n"

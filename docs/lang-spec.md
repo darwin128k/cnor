@@ -230,11 +230,12 @@ The catch is not optional: a `try` without one would only repeat what the
 machine does anyway. The name is optional too: `catch:` handles the failure
 and throws the error away.
 
-The error is a **dictionary** of four pairs: `message` (the text of the
+The error is a **dictionary** of five pairs: `message` (the text of the
 failure), `line` (the line it happened on), `code` (the number of the failure,
-the `cnor_error_t` of the machine) and `file` (the file it happened in). It is
-a value like any other: it may be passed to a function, put in a dictionary or
-left alone.
+the `cnor_error_t` of the machine), `kind` (its name, `div_by_zero` and the
+like — the name is stable, the number is not) and `file` (the file it
+happened in). It is a value like any other: it may be passed to a function,
+put in a dictionary or left alone.
 
 The failure flies through the calls of the script and through the host's
 functions, and the first `catch` above it takes it. Everything the machine
@@ -871,6 +872,23 @@ of the failing code; `cnor_vm_get_file_at` answers it for any code address).
   nowhere to trap to.
 - Running out of the instruction budget is a `step_limit` code (section 10).
 
+### 11.1 The library without a compiler
+
+**[cnor]** The library is built with `CNOR_BUILD_COMPILER=OFF` into the
+**machine alone**: the compiler, the parser and the lexer are not in it, and
+neither is the writer that puts an image on disk. What is left is the machine,
+the reader of an image, the verifier and the codes.
+
+The point is the boundary: the image is what the two halves exchange. A host
+that ships the machine alone (a plugin, a microcontroller) loads an image that
+was compiled on the desktop; the compiler is not part of the program.
+
+Measured 2026-10-26 on a Windows host (MinGW GCC, release): the objects of
+the whole library are 268 KB, the machine's alone 148 KB — **45% less**. The
+command line built with it runs images only: `exec` is there, `run` and
+`compile` say that they are not.
+
+
 ## 12. Versioning
 
 - The image format is versioned by an integer. An incompatible change means a
@@ -941,7 +959,8 @@ line in `tests/cli/`):
 
 Not done:
 
-1. A VM-only build of the library.
+1. ~~A VM-only build of the library.~~ Done: `CNOR_BUILD_COMPILER=OFF` builds
+   the machine without the compiler, the parser or the lexer (section 11.1).
 
 Initial values of globals stored in the image, formerly on this list, were
 decided against: section 6.4.

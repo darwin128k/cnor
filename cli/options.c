@@ -34,6 +34,11 @@ cnor_cli_options_print_help(void)
           "exit status: 0 done, 1 runtime error, 2 bad command line,\n"
           "             3 compile error or bad image, 4 file error\n",
           stdout);
+#if !CNOR_CLI_HAS_COMPILER
+    fputs("\nThis build has no compiler: it runs images only. `run` and `compile`\n"
+          "are not there; use `cnor exec`.\n",
+          stdout);
+#endif
 }
 
 /* -- parsing --------------------------------------------------------------- */

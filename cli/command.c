@@ -5,7 +5,6 @@
 #include "natives.h"
 #include "text.h"
 
-#include <cnor/compiler.h>
 #include <cnor/diag.h>
 #include <cnor/error.h>
 #include <cnor/image.h>
@@ -14,6 +13,9 @@
 #include <lh/str/view.h>
 #include <stdio.h>
 #include <string.h>
+#if CNOR_CLI_HAS_COMPILER
+#include <cnor/compiler.h>
+#endif
 
 /* What diagnostics call the standard input. */
 #define CNOR_CLI_STDIN_NAME "<stdin>"
@@ -71,6 +73,8 @@ cnor_cli_report_io(const lh_char_t *path, const lh_char_t *what)
 
 /* -- compiling ------------------------------------------------------------- */
 
+#if CNOR_CLI_HAS_COMPILER
+
 /* The file a diagnostic names, or @p fallback when it names none. */
 static lh_str_view_t
 cnor_cli_diag_file(const cnor_diag_t *diag, lh_str_view_t fallback)
@@ -110,6 +114,8 @@ cnor_cli_compile_input(const cnor_cli_options_t *options, cnor_image_t *image)
     return cnor_cli_exit_ok;
 }
 
+#endif /* CNOR_CLI_HAS_COMPILER */
+
 /* -- running --------------------------------------------------------------- */
 
 /* Where a run's diagnostics point: the source file of the failing code, when
@@ -117,8 +123,9 @@ cnor_cli_compile_input(const cnor_cli_options_t *options, cnor_image_t *image)
 static lh_str_view_t
 cnor_cli_run_file(const cnor_vm_t *vm, const lh_char_t *fallback)
 {
-    return cnor_cli_diag_file(cnor_vm_get_diag(vm),
-                              cnor_cli_view(cnor_cli_display_name(fallback)));
+    const lh_str_view_t file = cnor_diag_get_file(cnor_vm_get_diag(vm));
+
+    return lh_str_view_get_size(&file) > 0U ? file : cnor_cli_view(cnor_cli_display_name(fallback));
 }
 
 /* Load @p size bytes of image and run them; @p path names them. */
@@ -169,6 +176,8 @@ cnor_cli_run_image(const cnor_cli_options_t *options, const lh_byte_t *data, lh_
 }
 
 /* -- commands -------------------------------------------------------------- */
+
+#if CNOR_CLI_HAS_COMPILER
 
 cnor_cli_exit_t
 cnor_cli_run(const cnor_cli_options_t *options)
@@ -232,6 +241,32 @@ cnor_cli_compile(const cnor_cli_options_t *options)
     cnor_image_deinit(&image);
     return code;
 }
+
+#else /* CNOR_CLI_HAS_COMPILER */
+
+/* A library without a compiler runs images only. */
+static cnor_cli_exit_t
+cnor_cli_no_compiler(void)
+{
+    fputs("cnor: this build has no compiler: it runs images only\n", stderr);
+    return cnor_cli_exit_usage;
+}
+
+cnor_cli_exit_t
+cnor_cli_run(const cnor_cli_options_t *options)
+{
+    (void) options;
+    return cnor_cli_no_compiler();
+}
+
+cnor_cli_exit_t
+cnor_cli_compile(const cnor_cli_options_t *options)
+{
+    (void) options;
+    return cnor_cli_no_compiler();
+}
+
+#endif /* CNOR_CLI_HAS_COMPILER */
 
 cnor_cli_exit_t
 cnor_cli_exec(const cnor_cli_options_t *options)

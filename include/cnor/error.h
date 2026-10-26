@@ -115,6 +115,16 @@ LH_COMPILER_EXTERN_C_BEGIN
 const lh_str_ptr
 cnor_error_get_message(cnor_error_t self);
 
+/**
+ * @brief The name of @p self, for a script to read.
+ *
+ * The name is stable ("div_by_zero"), unlike the number, and is what the
+ * error a `catch` receives carries. Never returns ::lh_null: an unknown code
+ * names itself "unknown".
+ */
+const lh_str_ptr
+cnor_error_get_name(cnor_error_t self);
+
 LH_COMPILER_EXTERN_C_END
 
 #endif /* CNOR_ERROR_H */

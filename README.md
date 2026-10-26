@@ -43,6 +43,12 @@ cmake --build build-bench
 ./build-bench/bench/cnor_bench
 ```
 
+The machine without the compiler (`-DCNOR_BUILD_COMPILER=OFF`): the library
+holds the machine, the reader of an image and the verifier, and nothing that
+turns a source into an image. The command line runs images only (`exec`); the
+script is compiled on the desktop, and the image is what the two halves
+exchange. The library is 45% smaller that way.
+
 ## Command line
 
 The build also makes `cnor` (`build/cli/cnor`, `cnor.exe` on Windows) when

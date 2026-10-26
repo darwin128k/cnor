@@ -9,6 +9,10 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 option(CNOR_BUILD_TESTS "Build tests" OFF)
 option(CNOR_BUILD_BENCH "Build the benchmark runner (bench/)" OFF)
+# The compiler turns a source into an image; the machine runs the image. A
+# host that ships the machine alone needs no compiler: the image is the
+# boundary between them, and the script is compiled on the desktop.
+option(CNOR_BUILD_COMPILER "Build the compiler (the front end) into the library" ON)
 # The command line is for a cnor checkout built on its own; a project that
 # embeds cnor as a subdirectory gets the library only, unless it asks.
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
@@ -41,16 +45,43 @@ add_subdirectory(lib/lh)
 set(CNOR_SRC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(CNOR_INCLUDE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-set(CNOR_SOURCES
+# The machine, the image it reads, and what both need.
+set(CNOR_VM_SOURCES
         ${CNOR_SRC_PATH}/cnor/cnor.c
         ${CNOR_SRC_PATH}/cnor/error.c
         ${CNOR_SRC_PATH}/cnor/diag.c
         ${CNOR_SRC_PATH}/cnor/arena.c
         ${CNOR_SRC_PATH}/cnor/ast.c
-        ${CNOR_SRC_PATH}/cnor/builtin.c
         ${CNOR_SRC_PATH}/cnor/native.c
         ${CNOR_SRC_PATH}/cnor/op.c
+        ${CNOR_SRC_PATH}/cnor/builtin.c
         ${CNOR_SRC_PATH}/cnor/byte/reader.c
+        ${CNOR_SRC_PATH}/cnor/image/header.c
+        ${CNOR_SRC_PATH}/cnor/image/view.c
+        ${CNOR_SRC_PATH}/cnor/image/names.c
+        ${CNOR_SRC_PATH}/cnor/image/verify.c
+        ${CNOR_SRC_PATH}/cnor/vm/vm.c
+        ${CNOR_SRC_PATH}/cnor/vm/load.c
+        ${CNOR_SRC_PATH}/cnor/vm/dispatch.c
+        ${CNOR_SRC_PATH}/cnor/vm/stack.c
+        ${CNOR_SRC_PATH}/cnor/vm/str_pool.c
+        ${CNOR_SRC_PATH}/cnor/vm/value.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/data.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/arith.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/compare.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/control.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/text.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/array.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/dict.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/collection.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/error.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/builtin.c
+        ${CNOR_SRC_PATH}/cnor/vm/op/operand.c
+)
+
+# The front end: the lexer, the parser, the compiler, and the writers that
+# put an image on disk. None of it is needed to run an image.
+set(CNOR_COMPILER_SOURCES
         ${CNOR_SRC_PATH}/cnor/byte/writer.c
         ${CNOR_SRC_PATH}/cnor/lexer/lexer.c
         ${CNOR_SRC_PATH}/cnor/lexer/indent.c
@@ -64,10 +95,6 @@ set(CNOR_SOURCES
         ${CNOR_SRC_PATH}/cnor/parser/stmt.c
         ${CNOR_SRC_PATH}/cnor/parser/control.c
         ${CNOR_SRC_PATH}/cnor/parser/fn.c
-        ${CNOR_SRC_PATH}/cnor/image/header.c
-        ${CNOR_SRC_PATH}/cnor/image/view.c
-        ${CNOR_SRC_PATH}/cnor/image/names.c
-        ${CNOR_SRC_PATH}/cnor/image/verify.c
         ${CNOR_SRC_PATH}/cnor/image/writer.c
         ${CNOR_SRC_PATH}/cnor/compiler/compiler.c
         ${CNOR_SRC_PATH}/cnor/compiler/emit.c
@@ -88,24 +115,13 @@ set(CNOR_SOURCES
         ${CNOR_SRC_PATH}/cnor/compiler/module.c
         ${CNOR_SRC_PATH}/cnor/compiler/type.c
         ${CNOR_SRC_PATH}/cnor/compiler/order.c
-        ${CNOR_SRC_PATH}/cnor/vm/vm.c
-        ${CNOR_SRC_PATH}/cnor/vm/load.c
-        ${CNOR_SRC_PATH}/cnor/vm/dispatch.c
-        ${CNOR_SRC_PATH}/cnor/vm/stack.c
-        ${CNOR_SRC_PATH}/cnor/vm/str_pool.c
-        ${CNOR_SRC_PATH}/cnor/vm/value.c
-        ${CNOR_SRC_PATH}/cnor/vm/op/data.c
-        ${CNOR_SRC_PATH}/cnor/vm/op/arith.c
-        ${CNOR_SRC_PATH}/cnor/vm/op/compare.c
-        ${CNOR_SRC_PATH}/cnor/vm/op/control.c
-        ${CNOR_SRC_PATH}/cnor/vm/op/text.c
-        ${CNOR_SRC_PATH}/cnor/vm/op/array.c
-        ${CNOR_SRC_PATH}/cnor/vm/op/dict.c
-        ${CNOR_SRC_PATH}/cnor/vm/op/collection.c
-        ${CNOR_SRC_PATH}/cnor/vm/op/error.c
-        ${CNOR_SRC_PATH}/cnor/vm/op/builtin.c
-        ${CNOR_SRC_PATH}/cnor/vm/op/operand.c
 )
+
+if (CNOR_BUILD_COMPILER)
+    set(CNOR_SOURCES ${CNOR_VM_SOURCES} ${CNOR_COMPILER_SOURCES})
+else ()
+    set(CNOR_SOURCES ${CNOR_VM_SOURCES})
+endif ()
 
 # cnor is a static library only, like lh.
 add_library(${PROJECT_NAME} STATIC ${CNOR_SOURCES})
@@ -188,6 +204,7 @@ if (CNOR_BUILD_TESTS)
     add_subdirectory(tests)
 endif ()
 
-if (CNOR_BUILD_BENCH)
+if (CNOR_BUILD_BENCH AND CNOR_BUILD_COMPILER)
+    # The benchmark compiles the programs it runs.
     add_subdirectory(bench)
 endif ()
