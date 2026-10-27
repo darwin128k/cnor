@@ -231,36 +231,6 @@ cnor_vm_fast_dict_set_count(const lh_value_t *value, lh_u32_t count)
     cnor_vm_fast_set_sint(&cnor_vm_fast_dict_header(value)[0], (lh_sllong_t) count);
 }
 
-/**
- * @brief The value of the key @p key in the dictionary @p dictionary, or
- *        ::lh_null when the dictionary has no such key.
- *
- * The dictionary is known to be one and the key a text; a key that is not a
- * text is never found.
- */
-LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_value_t *
-cnor_vm_fast_dict_find(const lh_value_t *dictionary, const lh_value_t *key)
-{
-    lh_value_t *const pairs = cnor_vm_fast_dict_data(dictionary);
-    const lh_u32_t count = cnor_vm_fast_dict_count(dictionary);
-    lh_u32_t i;
-
-    for (i = 0U; i < count; ++i)
-    {
-        const lh_value_t *const candidate = &pairs[i * 2U];
-
-        if (cnor_vm_fast_kind(candidate) == lh_value_kind_str
-            && cnor_vm_fast_str_size(candidate) == cnor_vm_fast_str_size(key)
-            && memcmp(cnor_vm_fast_str_data(candidate), cnor_vm_fast_str_data(key),
-                      cnor_vm_fast_str_size(key))
-                   == 0)
-        {
-            return &pairs[i * 2U + 1U];
-        }
-    }
-    return lh_null;
-}
-
 /** @def CNOR_VM_FAST_LONG_TEXT @brief Beyond this many bytes a call into lh's
  *       block compare and copy beats the inline word loop. */
 #define CNOR_VM_FAST_LONG_TEXT 64U
@@ -340,6 +310,34 @@ cnor_vm_fast_str_equals(const lh_value_t *left, const lh_value_t *right)
         return 1;
     }
     return cnor_vm_fast_bytes_equal(a, b, size);
+}
+
+/**
+ * @brief The value of the key @p key in the dictionary @p dictionary, or
+ *        ::lh_null when the dictionary has no such key.
+ *
+ * The dictionary is known to be one and the key a text; a key that is not a
+ * text is never found. A key written from a constant and looked up with the
+ * same constant is the same view, so it matches without reading a byte.
+ */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_value_t *
+cnor_vm_fast_dict_find(const lh_value_t *dictionary, const lh_value_t *key)
+{
+    lh_value_t *const pairs = cnor_vm_fast_dict_data(dictionary);
+    const lh_u32_t count = cnor_vm_fast_dict_count(dictionary);
+    lh_u32_t i;
+
+    for (i = 0U; i < count; ++i)
+    {
+        const lh_value_t *const candidate = &pairs[i * 2U];
+
+        if (cnor_vm_fast_kind(candidate) == lh_value_kind_str
+            && cnor_vm_fast_str_equals(candidate, key))
+        {
+            return &pairs[i * 2U + 1U];
+        }
+    }
+    return lh_null;
 }
 
 /** @brief Copy @p size bytes from @p from to @p to; the ranges do not overlap. */
