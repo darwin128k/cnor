@@ -99,6 +99,7 @@ enum cnor_error
     cnor_error_call_depth,       /**< Calls nested past the configured depth. */
     cnor_error_str_pool_full,    /**< The string pool has no room for a new string. */
     cnor_error_step_limit,       /**< A run executed more instructions than allowed. */
+    cnor_error_nothing_to_raise, /**< `raise` with no error in flight. */
 
     cnor_error_count /**< Number of codes; not a code itself. */
 };

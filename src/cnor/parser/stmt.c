@@ -129,6 +129,20 @@ cnor_parser_jump(cnor_parser_t *self)
     return node;
 }
 
+/* `raise`: the error being handled goes on outward. It takes no value: there
+ * is only one error in flight at a time, and it is the one being handled. */
+static cnor_node_t *
+cnor_parser_raise(cnor_parser_t *self)
+{
+    cnor_node_t *node = cnor_parser_node(self, cnor_node_raise);
+
+    if (node != lh_null)
+    {
+        cnor_parser_advance(self);
+    }
+    return node;
+}
+
 /* An expression, or an assignment when `=` follows it. */
 static cnor_node_t *
 cnor_parser_expr_or_assign(cnor_parser_t *self)
@@ -213,6 +227,7 @@ static const struct cnor_parser_stmt_rule m_stmt_rules[] = {
     {cnor_keyword_return, cnor_parser_return, lh_bool_false},
     {cnor_keyword_break, cnor_parser_jump, lh_bool_false},
     {cnor_keyword_continue, cnor_parser_jump, lh_bool_false},
+    {cnor_keyword_raise, cnor_parser_raise, lh_bool_false},
     {cnor_keyword_if, cnor_parser_if, lh_bool_true},
     {cnor_keyword_while, cnor_parser_while, lh_bool_true},
     {cnor_keyword_for, cnor_parser_for, lh_bool_true},

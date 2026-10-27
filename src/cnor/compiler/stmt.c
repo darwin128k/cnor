@@ -389,6 +389,10 @@ cnor_compile_expr_stmt(cnor_compiler_t *self, const cnor_node_t *node)
 lh_bool_t
 cnor_compile_return(cnor_compiler_t *self, const cnor_node_t *node)
 {
+    lh_u32_t i;
+    cnor_slot_t slot = 0U;
+    lh_bool_t has_finally = lh_bool_false;
+
     if (!cnor_compile_value_or_none(self, node->data.return_.value)
         || !cnor_type_require(self, node, self->returns, self->type))
     {
@@ -406,5 +410,27 @@ cnor_compile_return(cnor_compiler_t *self, const cnor_node_t *node)
          * returned dictionary would point at a frame that is gone. */
         return cnor_compile_fail(self, node, cnor_error_dict_returned);
     }
-    return cnor_emit_op(self, cnor_op_ret);
+    /* The innermost `try` with a finally block: the value waits in its slot
+     * while the finally blocks run. */
+    for (i = self->try_depth; i > 0U; --i)
+    {
+        if (self->tries[i - 1U].finally_label != lh_null)
+        {
+            slot = self->tries[i - 1U].value_slot;
+            has_finally = lh_bool_true;
+            break;
+        }
+    }
+    if (!has_finally)
+    {
+        return cnor_emit_op(self, cnor_op_ret);
+    }
+    /* The value waits in a slot: the finally blocks run with the stack as it
+     * was, and the machine returns the value when they are done. */
+    if (!cnor_emit_insn(self, cnor_op_store_local, slot, 0U)
+        || !cnor_compile_exit_tries(self, 0U, (lh_u8_t) CNOR_EXIT_RETURN, lh_null, slot))
+    {
+        return lh_bool_false;
+    }
+    return lh_bool_true;
 }

@@ -64,6 +64,7 @@ cnor compile script.cn -o script.tbc   # write the image (default: script.tbc)
 cnor compile script.cn --no-lines      # without the line table
 cnor run app.cn -I lib -I vendor   # look for imported files in lib/ and vendor/ too
 cnor exec script.tbc               # load and run an image
+cnor repl                          # read lines and run them, keeping what came before
 cnor --version
 cnor --help
 ```
@@ -83,6 +84,12 @@ cnor --help
 from the file system relative to the importing file, then in each `-I`
 directory, and compiled into the same image (`compile` writes one `.tbc` that
 needs none of the sources).
+
+`cnor repl` (and `cnor` with no arguments) starts a session: each line is
+compiled together with the lines before it and run, so a value a line left in a
+global is there for the next one. `:q` ends the session, `:reset` forgets the
+program. A line that does not compile is reported and dropped, and the session
+goes on.
 
 Scripts get four natives, without declaring them: `print(...)` and
 `println(...)` write their arguments to the standard output separated by one

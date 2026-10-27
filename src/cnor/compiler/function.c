@@ -225,6 +225,7 @@ cnor_compile_begin_function(cnor_compiler_t *self, cnor_function_index_t index)
     self->returns = cnor_static_any;
     self->block_depth = 0U;
     self->loop_depth = 0U;
+    self->try_depth = 0U;
     cnor_scope_begin_function(&self->scope);
     cnor_emit_begin_function(&self->emit);
     if (cnor_module_count(self) > 1U)

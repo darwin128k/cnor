@@ -324,19 +324,24 @@ place, the handlers under `src/cnor/vm/op/`:
   median of three runs). The same work in Python 3 (a hash table) takes
   74 ns a lookup.
 - **The machine catches its own errors.** A `try` marks a catch block on a stack
-  of the machine's own (`cnor_vm_try_t`, 16 bytes), and the machine unwinds to
+  of the machine's own (`cnor_vm_try_t`, 28 bytes), and the machine unwinds to
   it when something fails: no `longjmp`, no unwinder table, no C++ runtime.
   The hot path does not know the stack exists — the handlers are only looked
   at when something fails, and the instructions inside a `try` cost what they
   cost anywhere else. A `try` block itself costs three instructions (`try_push`,
-  `try_pop` and the jump over the catch block) and 16 bytes of the stack while
-  it is open. The error's dictionary is written into the slots the compiler
+  `try_pop` and the jump over the catch block) and 28 bytes of the stack while
+  it is open; a `finally` block adds two instructions of its own (`try_finally`
+  and `finally_end`), and the machine runs it when the `try` is left, however
+  it is left. The error's dictionary is written into the slots the compiler
   reserved for it, so catching an error allocates nothing.
   Measured 2026-10-26 on a Windows host (MinGW GCC): the `try` workload (a
-  million rounds of a `try` that does not fail) takes 10.6 ns a round on
-  64-bit and 13.7 ns on 32-bit, at 566 and 439 million instructions a second
-  (the median of three runs). The step count of every other workload did not
-  move: the hot path is untouched.
+  million rounds of a `try` that does not fail) takes 10.8 ns a round on
+  64-bit and 14.1 ns on 32-bit, at 554 and 425 million instructions a second
+  (the median of three runs of the whole suite). The handler grew from 16 to
+  28 bytes when the finally block came, and a round costs 0.2 ns (64-bit) and
+  0.4 ns (32-bit) more than before: the machine writes two more words when it
+  opens a `try`. The step count of every other workload did not move: the hot
+  path is untouched.
 - **A native writes its result in place.** The result shares the slot of the
   arguments, so the machine copies nothing: a native reads its arguments and
   writes the result over them. Measured 2026-10-25 on a Windows host: the

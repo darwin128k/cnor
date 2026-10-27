@@ -13,9 +13,19 @@
 
 #include "options.h"
 
+#include <cnor/diag.h>
+#include <lh/str/view.h>
+
 /** @brief Compile the source, then run it. */
 cnor_cli_exit_t
 cnor_cli_run(const cnor_cli_options_t *options);
+
+/**
+ * @brief Report @p diag as `file:line: message` (`file: message` without a
+ *        line), then `: name` when the failure is about one.
+ */
+void
+cnor_cli_report(lh_str_view_t file, const cnor_diag_t *diag);
 
 /** @brief Compile the source and write its image. */
 cnor_cli_exit_t

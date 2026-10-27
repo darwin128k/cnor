@@ -1,0 +1,14 @@
+let x = 40
+x + 2
+fn double(n: i32) -> i32:
+    return n * 2
+double(x)
+try:
+    let z = 1 / 0
+catch e:
+    println("caught ", e["kind"])
+try:
+    let w = 1
+finally:
+    println("cleaned up")
+:q

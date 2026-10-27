@@ -59,6 +59,7 @@ enum cnor_cli_command
     cnor_cli_command_run = 0, /**< `run`: compile a source, then run it. */
     cnor_cli_command_compile, /**< `compile`: write the image of a source. */
     cnor_cli_command_exec,    /**< `exec`: load an image and run it. */
+    cnor_cli_command_repl,    /**< `repl`: read lines and run them. */
     cnor_cli_command_help,    /**< `--help`, `help`. */
     cnor_cli_command_version  /**< `--version`. */
 };

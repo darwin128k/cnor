@@ -129,11 +129,12 @@ cnor_parser_for(cnor_parser_t *self)
     return node;
 }
 
-/* -- try and catch ---------------------------------------------------------- */
+/* -- try, catch and finally ------------------------------------------------- */
 
 /*
- * `try:` block `catch [name]:` block. The catch is not optional: a `try`
- * without one would only repeat what the machine does anyway.
+ * `try:` block [`catch [name]:` block] [`finally:` block]. The catch and the
+ * finally are both optional, but one of them has to be there: a `try` with
+ * neither would catch nothing and clean nothing up.
  */
 cnor_node_t *
 cnor_parser_try(cnor_parser_t *self)
@@ -154,25 +155,45 @@ cnor_parser_try(cnor_parser_t *self)
     {
         return lh_null;
     }
-    if (!cnor_parser_at_keyword(self, cnor_keyword_catch))
+    if (cnor_parser_at_keyword(self, cnor_keyword_catch))
     {
-        return cnor_parser_fail(self, cnor_error_unexpected_token);
-    }
-    cnor_parser_advance(self);
-    if (cnor_parser_at(self, cnor_token_ident))
-    {
-        /* `catch e:` binds the error to `e`. */
-        if (!cnor_parser_take_name(self, node) || !cnor_parser_advance(self))
+        cnor_parser_advance(self);
+        if (cnor_parser_at(self, cnor_token_ident))
+        {
+            /* `catch e:` binds the error to `e`. */
+            if (!cnor_parser_take_name(self, node) || !cnor_parser_advance(self))
+            {
+                return lh_null;
+            }
+        }
+        if (!cnor_parser_expect_punct(self, cnor_punct_colon))
+        {
+            return lh_null;
+        }
+        node->data.try_.catch_body = cnor_parser_block(self);
+        if (node->data.try_.catch_body == lh_null)
         {
             return lh_null;
         }
     }
-    if (!cnor_parser_expect_punct(self, cnor_punct_colon))
+    if (cnor_parser_at_keyword(self, cnor_keyword_finally))
     {
-        return lh_null;
+        cnor_parser_advance(self);
+        if (!cnor_parser_expect_punct(self, cnor_punct_colon))
+        {
+            return lh_null;
+        }
+        node->data.try_.finally_body = cnor_parser_block(self);
+        if (node->data.try_.finally_body == lh_null)
+        {
+            return lh_null;
+        }
     }
-    node->data.try_.catch_body = cnor_parser_block(self);
-    return node->data.try_.catch_body != lh_null ? node : lh_null;
+    if (node->data.try_.catch_body == lh_null && node->data.try_.finally_body == lh_null)
+    {
+        return cnor_parser_fail(self, cnor_error_unexpected_token);
+    }
+    return node;
 }
 
 /* -- match ----------------------------------------------------------------- */

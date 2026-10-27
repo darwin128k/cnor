@@ -68,6 +68,7 @@ static const lh_char_t *const m_messages[cnor_error_count] = {
     "calls nested too deep",
     "string pool is full",
     "instruction budget exhausted",
+    "nothing to raise",
 };
 
 const lh_str_ptr
@@ -149,6 +150,7 @@ static const lh_char_t *const m_names[cnor_error_count] = {
     "call_depth",
     "str_pool_full",
     "step_limit",
+    "nothing_to_raise",
 };
 
 const lh_str_ptr

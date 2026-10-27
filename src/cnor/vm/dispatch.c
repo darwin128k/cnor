@@ -39,7 +39,7 @@
 #    endif
 #endif
 
-_Static_assert(cnor_op_count == 111, "a new opcode needs a handler and a dispatch label below");
+_Static_assert(cnor_op_count == 115, "a new opcode needs a handler and a dispatch label below");
 
 /* The three operand forms of binary operator @p name share one handler. */
 #define CNOR_VM_FORM_HANDLERS(name)                                                                \
@@ -109,6 +109,10 @@ static const cnor_vm_handler_t m_handlers[cnor_op_count] = {
     [cnor_op_collection_get_l] = cnor_vm_op_collection_get_l,
     [cnor_op_try_push] = cnor_vm_op_try_push,
     [cnor_op_try_pop] = cnor_vm_op_try_pop,
+    [cnor_op_try_finally] = cnor_vm_op_try_finally,
+    [cnor_op_finally_end] = cnor_vm_op_finally_end,
+    [cnor_op_raise] = cnor_vm_op_raise,
+    [cnor_op_try_exit] = cnor_vm_op_try_exit,
     [cnor_op_call_builtin] = cnor_vm_op_call_builtin,
     CNOR_VM_FORM_HANDLERS(add),
     CNOR_VM_FORM_HANDLERS(sub),
@@ -603,6 +607,10 @@ cnor_vm_dispatch(cnor_vm_t *vm)
         [cnor_op_collection_get_l] = &&cnor_vm_label_collection_get_l,
         [cnor_op_try_push] = &&cnor_vm_label_try_push,
         [cnor_op_try_pop] = &&cnor_vm_label_try_pop,
+        [cnor_op_try_finally] = &&cnor_vm_label_try_finally,
+        [cnor_op_finally_end] = &&cnor_vm_label_finally_end,
+        [cnor_op_raise] = &&cnor_vm_label_raise,
+        [cnor_op_try_exit] = &&cnor_vm_label_try_exit,
         [cnor_op_call_builtin] = &&cnor_vm_label_call_builtin,
     };
 #endif
@@ -1429,34 +1437,75 @@ cnor_vm_switch:
     {
         CNOR_VM_SLOW();
     }
-    /* The error handlers: the catch block, and the end of the `try`. */
+    /* The error handlers: the catch block, the finally block, and the end of
+     * the `try`. */
     CNOR_VM_OP(try_push)
     {
         if (CNOR_VM_LIKELY(vm->try_count < (cnor_count_t) vm->config.max_depth))
         {
             cnor_vm_try_t *const entry = &vm->tries[vm->try_count];
+            const lh_s32_t catch_rel = cnor_vm_fast_s32(pc + 1);
+            const cnor_code_addr_t next = (cnor_code_addr_t) ((pc - code) + 6);
 
             /* The catch block, as the jump operand says: the next instruction
-             * plus the distance. */
-            entry->catch_addr =
-                (cnor_code_addr_t) ((pc - code) + 6 + cnor_vm_fast_s32(pc + 1));
-            entry->fp = (cnor_stack_slots_t) (fp - values);
+             * plus the distance. A distance of zero means the block is not
+             * there. */
+            entry->catch_addr = catch_rel != 0 ? (cnor_code_addr_t) (next + catch_rel) : 0U;
+            entry->finally_addr = 0U;
             entry->depth = (cnor_call_depth_t) (frame_top - vm->frames);
             entry->slot = (lh_u8_t) pc[5];
+            entry->flags = 0U;
+            entry->error = cnor_error_none;
             ++vm->try_count;
             pc += 6;
             CNOR_VM_NEXT();
         }
         CNOR_VM_SLOW();
     }
+    CNOR_VM_OP(try_finally)
+    {
+        if (vm->try_count > 0U)
+        {
+            const lh_s32_t rel = cnor_vm_fast_s32(pc + 1);
+
+            vm->tries[vm->try_count - 1U].finally_addr =
+                rel != 0 ? (cnor_code_addr_t) ((pc - code) + 5 + rel) : 0U;
+        }
+        pc += 5;
+        CNOR_VM_NEXT();
+    }
     CNOR_VM_OP(try_pop)
     {
         if (vm->try_count > 0U)
         {
-            --vm->try_count;
+            cnor_vm_try_t *const entry = &vm->tries[vm->try_count - 1U];
+
+            /* The code that may fail is done, and the error it took is handled.
+             * A `try` with a finally block keeps its handler until the finally
+             * block ends. */
+            entry->flags |= (lh_u8_t) (CNOR_VM_TRY_CLOSED | CNOR_VM_TRY_CLEANED);
+            entry->error = cnor_error_none;
+            if (entry->finally_addr == 0U)
+            {
+                --vm->try_count;
+            }
         }
         pc += 1;
         CNOR_VM_NEXT();
+    }
+    /* The end of a finally block, the error being raised again, and leaving a
+     * `try` that has one: the slow path knows where they go. */
+    CNOR_VM_OP(finally_end)
+    {
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(raise)
+    {
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(try_exit)
+    {
+        CNOR_VM_SLOW();
     }
     /* A dictionary that is a value on the stack: the slow path knows where it
      * is. */

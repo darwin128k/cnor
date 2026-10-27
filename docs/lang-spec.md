@@ -162,7 +162,7 @@ param       := IDENT ":" type
 type        := "i32" | "u32" | "f32" | "bool" | "str"
 block       := NEWLINE INDENT statement { statement } DEDENT
 statement   := simple end | compound
-simple      := let | assign | expr | "return" [ expr ] | "break" | "continue"
+simple      := let | assign | expr | "return" [ expr ] | "break" | "continue" | "raise"
 let         := "let" [ "mut" ] IDENT [ ":" type ] [ "=" expr ]
 assign      := IDENT "=" expr | IDENT "[" expr "]" "=" expr
 compound    := if | while | for | match | try
@@ -171,7 +171,7 @@ while       := "while" expr ":" block
 for         := "for" IDENT "in" ( expr ".." expr | expr ) ":" block
 match       := "match" expr ":" NEWLINE INDENT arm { arm } DEDENT
 arm         := ( literal | "-" literal | "_" ) "=>" simple [ "," ] end
-try         := "try" ":" block "catch" [ IDENT ] ":" block
+try         := "try" ":" block [ "catch" [ IDENT ] ":" block ] [ "finally" ":" block ]
 end         := [ ";" ] ( NEWLINE | DEDENT | EOF )      (or ";" then more on the line)
 expr        := binary expression, precedence below
 postfix     := primary { "[" expr "]" }
@@ -217,18 +217,32 @@ a collection whose kind the compiler does not know walks the elements of an
 array or the keys of a dictionary, whichever it is.
 
 **[cnor]** A `try` guards a block, and its `catch` handles what goes wrong
-there:
+there. A `finally` block runs when the `try` is left, however it is left:
 
 ```
 try:
-    let settings = load("hp.cfg")
+    let file = open("hp.cfg")
 catch e:
     print(e["message"], "on line", e["line"])
+finally:
+    close(file)
 ```
 
-The catch is not optional: a `try` without one would only repeat what the
-machine does anyway. The name is optional too: `catch:` handles the failure
-and throws the error away.
+The catch and the finally are both optional, but one of them has to be there:
+a `try` with neither would catch nothing and clean nothing up. The name of
+the catch is optional too: `catch:` handles the failure and throws the error
+away.
+
+The finally block runs when the block of the `try` went fine, when it did
+not (the catch block runs first, the finally block after it), and when the
+code asked to go elsewhere: a `break`, a `continue` or a `return` out of the
+`try` runs it on the way. An error nobody caught goes on outward when the
+finally block is done: the finally block cleans up, it does not swallow the
+error.
+
+`raise` gives the error that is being handled to the next `catch` above it,
+as if it had just happened: the error keeps its code, its line and its file.
+A `raise` with no error in flight is the failure `nothing_to_raise`.
 
 The error is a **dictionary** of five pairs: `message` (the text of the
 failure), `line` (the line it happened on), `code` (the number of the failure,
@@ -244,9 +258,11 @@ usable state (the stack overflowing, the memory running out). An error nobody
 catches ends the run, as it did before: the host sees the code, the line and
 the file.
 
-A `try` costs three instructions when it begins and when it ends, and nothing
-at all inside it: the machine does not look for handlers while the program
-runs.
+A `try` without a finally block costs three instructions when it begins and
+when it ends, and nothing at all inside it: the machine does not look for
+handlers while the program runs. A finally block adds two instructions of its
+own, the mark of the block and its end, and the machine runs it when the
+`try` is left.
 
 Operator precedence, loosest first; binary operators are left-associative:
 
@@ -457,7 +473,7 @@ closures, a preprocessor, metatables.
 
 ---
 
-## 7. The `.tbc` image format, v11
+## 7. The `.tbc` image format, v12
 
 **[cnor]** v1 replaced the original header (whose layout used `sizeof` and
 was not portable) and its names section. Every field is a fixed-width
@@ -475,16 +491,17 @@ globals (`array_new_global`); v9 adds the bitwise operators (`band`, `bor`,
 `dict_set`, `dict_key_l`) and the collection of an unknown kind
 (`collection_get_l`), and gives the global instructions (`array_new_global`,
 `dict_new_global`) a u16 index, for the globals may be more than a frame's
-slots hold; v11 adds the error handling (`try_push`, `try_pop`). An image of
-another version is refused: v10
-images must be compiled again.
+slots hold; v11 adds the error handling (`try_push`, `try_pop`); v12 adds the
+finally block and the error that is raised again (`try_finally`,
+`finally_end`, `raise`, `try_exit`). An image of another version is refused:
+v11 images must be compiled again.
 
 ### 7.1 Header (68 bytes)
 
 | Offset | Field | Type | Meaning |
 |---|---|---|---|
 | 0 | `magic` | 4 bytes | `"cnor"` |
-| 4 | `version` | u16 | format version, currently 11 |
+| 4 | `version` | u16 | format version, currently 12 |
 | 6 | `flags` | u16 | bit 0: the image carries a line table |
 | 8 | `image_size` | u32 | size of the whole image |
 | 12 | `stack_slots` | u32 | largest frame (slots + operands), **computed by the compiler** |
@@ -517,12 +534,12 @@ version, and an image produced by a newer version is rejected rather than
 
 ```
 fn let mut if else match for in while return break continue
-true false none and or not import native try catch
+true false none and or not import native try catch finally raise
 ```
 
 **[cnor]** `in` (for `for`) and `none` (the literal) were missing from the
-original list. `import` is section 6.5. `try` and `catch` are the error
-handling of section 6.1.
+original list. `import` is section 6.5. `try`, `catch` and `finally` are the
+error handling of section 6.1, and `raise` is there too.
 
 ### 7.3 Addressing
 
@@ -665,15 +682,20 @@ of an unknown kind uses: an element of an array, or a key of a dictionary, and
 the machine tells them apart. The compiler picks `array_get_l` or `dict_key_l`
 when it knows the kind.
 
-**[cnor]** The error handling (format v11) is the machine's own: a `try` marks
-a catch block, and the machine unwinds to it when something fails inside the
-`try`. There is no `longjmp` and no unwinder table: the handlers are a stack
-of the machine's own, and the hot path does not know they exist.
+**[cnor]** The error handling (format v11, the finally block in v12) is the
+machine's own: a `try` marks a catch block, and the machine unwinds to it
+when something fails inside the `try`. There is no `longjmp` and no unwinder
+table: the handlers are a stack of the machine's own, and the hot path does
+not know they exist.
 
 | Opcode | Operands | Computes |
 |---|---|---|
-| `try_push` | s32 catch, u8 slot | the catch block at the distance from the next instruction, and the slot the error's dictionary goes into, are marked as a handler |
-| `try_pop` | none | the `try` ended without an error: its handler is gone |
+| `try_push` | s32 catch, u8 slot | the catch block at the distance from the next instruction, and the slot the error's dictionary goes into, are marked as a handler; a distance of zero means there is no catch block |
+| `try_pop` | none | the `try` ended without an error: its handler is gone, unless it has a finally block |
+| `try_finally` | s32 finally | the finally block of the handler that is open is marked, at the distance from the next instruction |
+| `finally_end` | none | the finally block is done: the handler is gone, an error it was holding goes on outward, and the jump it was asked to do happens |
+| `raise` | none | the error that is being handled goes on outward, as if it had just happened |
+| `try_exit` | s32 target | the `try` is left: the finally block runs, and the machine goes to the target when it is done |
 
 The error's dictionary is written into the slots the compiler reserved for it
 (the value, the header and the four pairs), so catching an error allocates
@@ -682,6 +704,12 @@ the ones whose frame is gone are dropped, the ones in a frame deeper than the
 failure's are left for the frame that holds them, and the first one in the
 frame the failure happened in takes it. The frames in between are left as a
 `ret` would leave them.
+
+A handler with a finally block runs it before the error goes on: the error
+waits in the handler, and `finally_end` gives it to the next handler outward.
+A `break`, a `continue` or a `return` out of a `try` runs the finally blocks
+on the way: `try_exit` names the finally block to run, and the machine comes
+back to the code that runs the next one.
 
 **`call_builtin`** (u8 ordinal, u8 argument count; format v7) calls a
 function of the language itself (section 9.2). The arguments are on the

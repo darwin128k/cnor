@@ -130,9 +130,19 @@ lh_bool_t cnor_vm_op_dict_key_l(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_collection_get_l(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_try_push(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_try_pop(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_try_finally(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_finally_end(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_raise(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_try_exit(cnor_vm_t *vm, const cnor_insn_t *insn);
 /** @brief The `try` blocks of the frame that is leaving are gone with it. */
 void
 cnor_vm_tries_leave(cnor_vm_t *vm);
+/**
+ * @brief Give the error @p code that happened at @p at to a handler.
+ * @return Whether a handler took the error.
+ */
+lh_bool_t
+cnor_vm_unwind(cnor_vm_t *vm, cnor_error_t code, cnor_code_addr_t at);
 /**
  * @brief Catch the failure the machine has just met, if a `try` wants it.
  * @return Whether a handler took the failure.

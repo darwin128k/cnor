@@ -12,6 +12,10 @@ add_executable(cnor_cli
         natives.c
         text.c
 )
+if (CNOR_BUILD_COMPILER)
+    # The session compiles what it reads, so it needs the compiler.
+    target_sources(cnor_cli PRIVATE repl.c)
+endif ()
 set_target_properties(cnor_cli PROPERTIES OUTPUT_NAME cnor)
 target_link_libraries(cnor_cli PRIVATE cnor)
 # A library without a compiler runs images only: the commands that need one

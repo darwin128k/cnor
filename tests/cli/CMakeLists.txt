@@ -161,9 +161,15 @@ cnor_cli_test(import_path_missing_value CODE 2 ARGS run ${cnor_cli_imports}/main
 cnor_cli_test(help_mentions_imports CODE 0 ARGS --help STDOUT_REGEX "--import-path DIR"
         STDERR_EMPTY)
 
+# -- the session ----------------------------------------------------------------
+
+cnor_cli_test(repl CODE 0 ARGS repl STDIN ${cnor_cli_data}/repl.in
+        STDOUT_REGEX "42" STDERR_EMPTY)
+
 # -- bad command lines ---------------------------------------------------------
 
-cnor_cli_test(no_arguments CODE 2 STDERR_REGEX "missing command")
+cnor_cli_test(no_arguments CODE 0 ARGS STDIN ${cnor_cli_data}/repl.in
+        STDOUT_REGEX "42" STDERR_EMPTY)
 cnor_cli_test(unknown_command CODE 2 ARGS frobnicate STDERR_REGEX "unknown command: frobnicate")
 cnor_cli_test(unknown_option CODE 2 ARGS run ${cnor_cli_data}/hello.cn --frob
         STDERR_REGEX "unknown option: --frob")

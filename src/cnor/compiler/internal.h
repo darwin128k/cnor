@@ -19,6 +19,20 @@
 /** @def CNOR_COMPILER_MAX_LOOPS @brief Loops nested in one function. */
 #define CNOR_COMPILER_MAX_LOOPS CNOR_LEXER_MAX_INDENTS
 
+/** @def CNOR_COMPILER_MAX_TRIES @brief `try` blocks nested in one function. */
+#define CNOR_COMPILER_MAX_TRIES CNOR_LEXER_MAX_INDENTS
+
+/**
+ * @def CNOR_EXIT_JUMP @brief An exit that goes on somewhere: a `break` or a
+ *        `continue`.
+ */
+#define CNOR_EXIT_JUMP 1U
+
+/**
+ * @def CNOR_EXIT_RETURN @brief An exit that leaves the function: a `return`.
+ */
+#define CNOR_EXIT_RETURN 2U
+
 
 /* -- static types (type.c) ------------------------------------------------- */
 
@@ -285,6 +299,17 @@ struct cnor_loop
     lh_u32_t try_depth; /**< `try` blocks open when the loop began. */
 };
 
+/**
+ * @struct cnor_try
+ * @brief One open `try` block: where its finally block is, and where a
+ *        returned value waits while that block runs.
+ */
+struct cnor_try
+{
+    cnor_label_t *finally_label; /**< Where the finally block starts; null when there is none. */
+    cnor_slot_t value_slot;       /**< Where a returned value waits; 0 when there is no finally. */
+};
+
 /* -- initialization order (order.c) ---------------------------------------- */
 
 /** @brief A call from one function's code to another's. */
@@ -317,6 +342,7 @@ struct cnor_compiler
     cnor_constant_pool_t constants;
     struct cnor_loop loops[CNOR_COMPILER_MAX_LOOPS];
     lh_u32_t loop_depth;
+    struct cnor_try tries[CNOR_COMPILER_MAX_TRIES];
     lh_u32_t try_depth; /**< `try` blocks open; a `break` closes them. */
     cnor_function_index_t function; /**< Being compiled. */
     cnor_slot_t result_slot;        /**< Entry function: last expression value. */
@@ -701,6 +727,24 @@ cnor_compile_continue(cnor_compiler_t *self, const cnor_node_t *node);
 /* control_try.c */
 lh_bool_t
 cnor_compile_try(cnor_compiler_t *self, const cnor_node_t *node);
+lh_bool_t
+cnor_compile_raise(cnor_compiler_t *self, const cnor_node_t *node);
+/**
+ * @brief Leave the `try` blocks that are open, running the finally blocks of the
+ *        ones the exit crosses.
+ *
+ * The finally blocks run from the inside out: the machine jumps to the first
+ * one and comes back to a trampoline that runs the next. When the last one is
+ * done, the machine does what @p kind says: jump to @p target, or return the
+ * value that waits in @p slot.
+ *
+ * @param first The outermost `try` block the exit crosses; the ones above it
+ *              are left behind.
+ * @param kind  ::CNOR_EXIT_JUMP or ::CNOR_EXIT_RETURN.
+ */
+lh_bool_t
+cnor_compile_exit_tries(cnor_compiler_t *self, lh_u32_t first, lh_u8_t kind,
+                         cnor_label_t *target, cnor_slot_t slot);
 
 /* control_match.c */
 lh_bool_t

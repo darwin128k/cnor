@@ -9,6 +9,7 @@
 #include "args.h"
 #include "command.h"
 #include "options.h"
+#include "repl.h"
 
 #include <cnor/cnor.h>
 #include <cnor/image.h>
@@ -34,6 +35,8 @@ cnor_cli_dispatch(const cnor_cli_options_t *options)
         return cnor_cli_compile(options);
     case cnor_cli_command_exec:
         return cnor_cli_exec(options);
+    case cnor_cli_command_repl:
+        return cnor_cli_repl(options);
     case cnor_cli_command_help:
         cnor_cli_options_print_help();
         return cnor_cli_exit_ok;

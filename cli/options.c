@@ -14,6 +14,7 @@ cnor_cli_options_print_help(void)
           "       cnor compile <file.cn> [-o <out.tbc>] [--no-lines]\n"
           "                                        write the image of a script\n"
           "       cnor exec <file.tbc> [options]   load and run an image\n"
+          "       cnor repl [options]              read lines and run them\n"
           "       cnor <file.cn> [options]         same as `cnor run <file.cn>`\n"
           "       cnor --version | --help\n"
           "\n"
@@ -223,7 +224,7 @@ cnor_cli_options_parse_rest(cnor_cli_options_t *out, const cnor_cli_args_t *args
             return code;
         }
     }
-    if (out->input == lh_null)
+    if (out->input == lh_null && out->command != cnor_cli_command_repl)
     {
         return cnor_cli_options_fail("missing file", lh_null);
     }
@@ -252,7 +253,13 @@ cnor_cli_options_parse(cnor_cli_options_t *out, const cnor_cli_args_t *args)
     cnor_cli_options_init(out);
     if (args->count == 0)
     {
+#if CNOR_CLI_HAS_COMPILER
+        /* No command at all: the session, like `python`. */
+        out->command = cnor_cli_command_repl;
+        return cnor_cli_exit_ok;
+#else
         return cnor_cli_options_fail("missing command", lh_null);
+#endif
     }
     first = args->values[0];
     if (cnor_cli_options_is(first, "--help") || cnor_cli_options_is(first, "-h")
@@ -280,6 +287,13 @@ cnor_cli_options_parse(cnor_cli_options_t *out, const cnor_cli_args_t *args)
         out->command = cnor_cli_command_exec;
         return cnor_cli_options_parse_rest(out, args, 1);
     }
+#if CNOR_CLI_HAS_COMPILER
+    if (cnor_cli_options_is(first, "repl"))
+    {
+        out->command = cnor_cli_command_repl;
+        return cnor_cli_options_parse_rest(out, args, 1);
+    }
+#endif
     if (first[0] == '-' && !cnor_cli_options_is(first, "-"))
     {
         return cnor_cli_options_fail("unknown option", first);

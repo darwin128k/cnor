@@ -39,10 +39,11 @@ enum cnor_node_kind
     cnor_node_for,        /**< `for name in from..to:` block. */
     cnor_node_match,      /**< `match subject:` arms. */
     cnor_node_match_arm,  /**< `pattern => statement`; `_` has no pattern. */
-    cnor_node_try,        /**< `try:` block `catch [name]:` block; the name is in `name`. */
+    cnor_node_try,        /**< `try:` block [`catch [name]:` block] [`finally:` block]; the name is in `name`. */
     cnor_node_return,     /**< `return [value]`. */
     cnor_node_break,      /**< `break`. */
     cnor_node_continue,   /**< `continue`. */
+    cnor_node_raise,      /**< `raise`: the error being handled goes on outward. */
     /* expressions */
     cnor_node_ident,      /**< A name in use. */
     cnor_node_int,        /**< Whole number literal. */
@@ -195,8 +196,9 @@ union cnor_node_data
     } arm;
     struct
     {
-        cnor_node_t *body;       /**< Statements that may fail. */
-        cnor_node_t *catch_body; /**< Statements run when they fail. */
+        cnor_node_t *body;        /**< Statements that may fail. */
+        cnor_node_t *catch_body;  /**< Statements run when they fail, or ::lh_null. */
+        cnor_node_t *finally_body; /**< Statements run when the `try` is left, or ::lh_null. */
     } try_;
     struct
     {

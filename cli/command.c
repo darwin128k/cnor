@@ -42,7 +42,7 @@ cnor_cli_view(const lh_char_t *text)
 }
 
 /* `file:line: message` (`file: message` without a line), then `: name`. */
-static void
+void
 cnor_cli_report(lh_str_view_t file, const cnor_diag_t *diag)
 {
     const lh_str_view_t name = cnor_diag_get_name(diag);
@@ -261,6 +261,13 @@ cnor_cli_run(const cnor_cli_options_t *options)
 
 cnor_cli_exit_t
 cnor_cli_compile(const cnor_cli_options_t *options)
+{
+    (void) options;
+    return cnor_cli_no_compiler();
+}
+
+cnor_cli_exit_t
+cnor_cli_repl(const cnor_cli_options_t *options)
 {
     (void) options;
     return cnor_cli_no_compiler();

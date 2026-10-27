@@ -125,6 +125,10 @@ static const cnor_op_info_t m_ops[cnor_op_count] = {
     CNOR_OP_ROW("collection_get_l", slot, none, 2U, 1U, 1U, 0U),
     CNOR_OP_ROW3("try_push", s32, u8, none, 6U, 0U, 0U, CNOR_OP_FLAG_JUMP),
     CNOR_OP_ROW("try_pop", none, none, 1U, 0U, 0U, 0U),
+    CNOR_OP_ROW("try_finally", s32, none, 5U, 0U, 0U, CNOR_OP_FLAG_JUMP),
+    CNOR_OP_ROW("finally_end", none, none, 1U, 0U, 0U, 0U),
+    CNOR_OP_ROW("raise", none, none, 1U, 0U, 0U, 0U),
+    CNOR_OP_ROW("try_exit", s32, none, 5U, 0U, 0U, CNOR_OP_FLAG_JUMP),
     CNOR_OP_ROW("call_builtin", u8, u8, 3U, 0U, 1U, CNOR_OP_FLAG_POPS_ARGC),
 };
 

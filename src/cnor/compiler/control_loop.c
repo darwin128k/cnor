@@ -255,22 +255,11 @@ cnor_compile_for(cnor_compiler_t *self, const cnor_node_t *node)
 
 /* -- break and continue ---------------------------------------------------- */
 
-/* Close the `try` blocks between here and the loop: the handler of a `try`
- * that has been left must not catch what happens after it. */
-static lh_bool_t
-cnor_compile_close_tries(cnor_compiler_t *self, const struct cnor_loop *loop)
-{
-    while (self->try_depth > loop->try_depth)
-    {
-        if (!cnor_emit_op(self, cnor_op_try_pop))
-        {
-            return lh_bool_false;
-        }
-        --self->try_depth;
-    }
-    return lh_bool_true;
-}
-
+/*
+ * Leave the `try` blocks that are open between here and the loop: the handler
+ * of a `try` that has been left must not catch what happens after it. The
+ * finally blocks of the ones the exit crosses run first.
+ */
 lh_bool_t
 cnor_compile_break(cnor_compiler_t *self, const cnor_node_t *node)
 {
@@ -281,8 +270,8 @@ cnor_compile_break(cnor_compiler_t *self, const cnor_node_t *node)
         return cnor_compile_fail(self, node, cnor_error_outside_loop);
     }
     loop = &self->loops[self->loop_depth - 1U];
-    return cnor_compile_close_tries(self, loop)
-           && cnor_emit_jump(self, cnor_op_jmp, loop->break_label);
+    return cnor_compile_exit_tries(self, loop->try_depth, (lh_u8_t) CNOR_EXIT_JUMP,
+                                   loop->break_label, 0U);
 }
 
 lh_bool_t
@@ -295,6 +284,6 @@ cnor_compile_continue(cnor_compiler_t *self, const cnor_node_t *node)
         return cnor_compile_fail(self, node, cnor_error_outside_loop);
     }
     loop = &self->loops[self->loop_depth - 1U];
-    return cnor_compile_close_tries(self, loop)
-           && cnor_emit_jump(self, cnor_op_jmp, loop->continue_label);
+    return cnor_compile_exit_tries(self, loop->try_depth, (lh_u8_t) CNOR_EXIT_JUMP,
+                                   loop->continue_label, 0U);
 }

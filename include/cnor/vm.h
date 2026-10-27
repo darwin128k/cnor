@@ -21,6 +21,7 @@
 #include <cnor/diag.h>
 #include <cnor/image.h>
 #include <cnor/native.h>
+#include <cnor/op.h>
 #include <cnor/types.h>
 #include <cnor/vm/stack.h>
 #include <cnor/vm/str_pool.h>
@@ -89,20 +90,50 @@ typedef struct cnor_vm_frame cnor_vm_frame_t;
 
 /**
  * @struct cnor_vm_try
- * @brief One `try`: the catch block, and the frame it was made in.
+ * @brief One `try`: the catch block, the finally block, and the frame it was
+ *        made in.
  *
  * The `try` blocks are a stack of their own: a `try` inside a `try` pushes
  * two, and the machine unwinds them as it leaves the frames they were made in.
+ *
+ * The handler holds what the machine needs to know about the error it is
+ * dealing with: the error itself, where it happened, and what the `try` block
+ * has left to do. The flags say how far the block has come: ::CNOR_VM_TRY_CLOSED
+ * means the code that may fail is over and the catch block will not take
+ * another error, and ::CNOR_VM_TRY_CLEANED means the finally block has run and
+ * must not run again.
  */
 struct cnor_vm_try
 {
-    cnor_code_addr_t catch_addr; /**< Where the catch block starts. */
-    cnor_stack_slots_t fp;        /**< The frame the `try` was made in. */
-    cnor_call_depth_t depth;      /**< The call depth the `try` was made at. */
-    lh_u8_t slot;                 /**< Where the error's dictionary goes. */
+    cnor_code_addr_t catch_addr;   /**< Where the catch block starts, 0 when there is none. */
+    cnor_code_addr_t finally_addr; /**< Where the finally block starts, 0 when there is none. */
+    cnor_code_addr_t action_addr;  /**< Where to go after the finally block, 0 when nowhere. */
+    cnor_code_addr_t error_at;     /**< Where the error happened. */
+    cnor_call_depth_t depth;       /**< The call depth the `try` was made at. */
+    lh_u8_t slot;                  /**< Where the error's dictionary goes. */
+    lh_u8_t flags;                 /**< ::CNOR_VM_TRY_CLOSED, ::CNOR_VM_TRY_CLEANED, ::CNOR_VM_TRY_ACTION. */
+    cnor_error_t error;            /**< The error being handled, ::cnor_error_none when there is none. */
 };
 /** @copybrief cnor_vm_try */
 typedef struct cnor_vm_try cnor_vm_try_t;
+
+/**
+ * @def CNOR_VM_TRY_CLOSED @brief The code that may fail is over; the catch
+ *        block will not take another error.
+ */
+#define CNOR_VM_TRY_CLOSED 0x01U
+
+/**
+ * @def CNOR_VM_TRY_CLEANED @brief The finally block has run; it must not run
+ *        again.
+ */
+#define CNOR_VM_TRY_CLEANED 0x02U
+
+/**
+ * @def CNOR_VM_TRY_ACTION @brief The finally block is asked to go somewhere
+ *        when it ends; the address is in the handler.
+ */
+#define CNOR_VM_TRY_ACTION 0x04U
 
 /**
  * @struct cnor_vm

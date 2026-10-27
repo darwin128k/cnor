@@ -51,6 +51,7 @@ cnor_compiler_init(cnor_compiler_t *self, const cnor_compiler_config_t *config, 
     cnor_modules_init(self);
     cnor_order_init(self);
     self->loop_depth = 0U;
+    self->try_depth = 0U;
     self->function = 0U;
     self->result_slot = 0U;
     self->block_depth = 0U;

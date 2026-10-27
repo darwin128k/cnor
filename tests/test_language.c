@@ -509,7 +509,7 @@ CNOR_TEST(refuses_a_try_where_it_does_not_fit)
 {
     cnor_line_t line = 0U;
 
-    /* A `try` needs a catch. */
+    /* A `try` needs a catch or a finally. */
     CHECK_EQ(error_of("fn f() -> i32:\n"
                       "    try:\n"
                       "        let x = 1\n"
@@ -529,6 +529,159 @@ CNOR_TEST(refuses_a_try_where_it_does_not_fit)
                         "    return 10 / 0\n"
                         "f()\n"),
              cnor_error_div_by_zero);
+}
+
+/* -- finally and raise ------------------------------------------------------- */
+
+CNOR_TEST(runs_a_finally_block)
+{
+    /* The finally block runs when the try block went fine. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut total = 0\n"
+                      "    try:\n"
+                      "        total = 1\n"
+                      "    finally:\n"
+                      "        total = total + 10\n"
+                      "    return total\n"
+                      "f()\n"),
+             11);
+    /* And when it did not: the catch block runs first, the finally block after
+     * it. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut total = 0\n"
+                      "    try:\n"
+                      "        let x = 10 / 0\n"
+                      "    catch e:\n"
+                      "        total = 1\n"
+                      "    finally:\n"
+                      "        total = total + 10\n"
+                      "    return total\n"
+                      "f()\n"),
+             11);
+    /* A finally block without a catch block runs the same way, and the error
+     * goes on outward when it is done. */
+    {
+        const outcome_t out = run_source("fn f() -> i32:\n"
+                                         "    note(1)\n"
+                                         "    try:\n"
+                                         "        let x = 10 / 0\n"
+                                         "    finally:\n"
+                                         "        note(2)\n"
+                                         "    return 0\n"
+                                         "f()\n");
+
+        CHECK_EQ(out.code, cnor_error_div_by_zero);
+        CHECK_EQ(m_note_count, 2U);
+        CHECK_EQ(m_notes[0], 1);
+        CHECK_EQ(m_notes[1], 2);
+    }
+}
+
+CNOR_TEST(raises_the_error_again)
+{
+    /* The error goes on outward, and the outer catch gets it as it was: the
+     * line it happened on. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    try:\n"
+                      "        try:\n"
+                      "            let x = 10 / 0\n"
+                      "        catch e:\n"
+                      "            raise\n"
+                      "    catch e2:\n"
+                      "        return e2[\"line\"]\n"
+                      "    return 0\n"
+                      "f()\n"),
+             4);
+    /* The finally block runs before the error goes on. */
+    {
+        const outcome_t out = run_source("fn f() -> i32:\n"
+                                         "    try:\n"
+                                         "        try:\n"
+                                         "            let x = 10 / 0\n"
+                                         "        catch e:\n"
+                                         "            raise\n"
+                                         "        finally:\n"
+                                         "            note(1)\n"
+                                         "    catch e2:\n"
+                                         "        note(2)\n"
+                                         "        return e2[\"line\"]\n"
+                                         "    return 0\n"
+                                         "f()\n");
+
+        CHECK_EQ(out.value, 4);
+        CHECK_EQ(m_note_count, 2U);
+        CHECK_EQ(m_notes[0], 1);
+        CHECK_EQ(m_notes[1], 2);
+    }
+    /* A raise with no error to raise is a failure of its own. */
+    CHECK_EQ(failure_of("fn f() -> i32:\n"
+                        "    raise\n"
+                        "    return 0\n"
+                        "f()\n"),
+             cnor_error_nothing_to_raise);
+}
+
+CNOR_TEST(leaves_a_try_with_a_finally)
+{
+    /* A break out of a try runs its finally block first. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut total = 0\n"
+                      "    for i in 0..5:\n"
+                      "        try:\n"
+                      "            if i == 2:\n"
+                      "                break\n"
+                      "            total = total + i\n"
+                      "        finally:\n"
+                      "            total = total + 100\n"
+                      "    return total\n"
+                      "f()\n"),
+             301);
+    /* A continue out of a try runs it too. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut total = 0\n"
+                      "    for i in 0..5:\n"
+                      "        try:\n"
+                      "            if i == 2:\n"
+                      "                continue\n"
+                      "            total = total + i\n"
+                      "        finally:\n"
+                      "            total = total + 100\n"
+                      "    return total\n"
+                      "f()\n"),
+             508);
+    /* A return out of a try runs it as well, and the function returns the
+     * value the return had. */
+    {
+        const outcome_t out = run_source("fn f() -> i32:\n"
+                                         "    try:\n"
+                                         "        note(1)\n"
+                                         "        return 7\n"
+                                         "    finally:\n"
+                                         "        note(2)\n"
+                                         "    return 0\n"
+                                         "f()\n");
+
+        CHECK_EQ(out.value, 7);
+        CHECK_EQ(m_note_count, 2U);
+        CHECK_EQ(m_notes[0], 1);
+        CHECK_EQ(m_notes[1], 2);
+    }
+    /* Two finally blocks: they run from the inside out. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut total = 0\n"
+                      "    for i in 0..5:\n"
+                      "        try:\n"
+                      "            try:\n"
+                      "                if i == 2:\n"
+                      "                    break\n"
+                      "                total = total + i\n"
+                      "            finally:\n"
+                      "                total = total + 10\n"
+                      "        finally:\n"
+                      "            total = total + 100\n"
+                      "    return total\n"
+                      "f()\n"),
+             331);
 }
 
 /* -- arrays ------------------------------------------------------------------ */
@@ -1497,6 +1650,9 @@ CNOR_TEST_CASE(catches_an_error),
 CNOR_TEST_CASE(catches_an_error_from_a_function),
 CNOR_TEST_CASE(leaves_a_try_when_the_code_goes_away),
 CNOR_TEST_CASE(refuses_a_try_where_it_does_not_fit),
+    CNOR_TEST_CASE(runs_a_finally_block),
+    CNOR_TEST_CASE(raises_the_error_again),
+    CNOR_TEST_CASE(leaves_a_try_with_a_finally),
     CNOR_TEST_CASE(passes_an_array_to_a_function_and_walks_it),
     CNOR_TEST_CASE(keeps_a_global_array_whole),
     CNOR_TEST_CASE(refuses_an_array_where_it_does_not_fit),

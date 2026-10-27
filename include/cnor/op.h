@@ -194,13 +194,36 @@ enum cnor_op
      */
     cnor_op_collection_get_l, /**< An element of the array or key of the dictionary in fp[a]. Operand: slot. */
     /**
-     * Error handling (format v11): `try_push` marks a catch block, and the
+     * Error handling (format v12): `try_push` marks a catch block, and the
      * machine unwinds to it when an error happens inside the `try`. The
      * operand is the address of the catch block, relative to the next
-     * instruction, and the slot the error's dictionary goes into.
+     * instruction, and the slot the error's dictionary goes into. An address
+     * of zero means the catch block is not there.
      */
     cnor_op_try_push, /**< Mark the catch block. Operands: s32, u8. */
     cnor_op_try_pop,  /**< The `try` ended without an error. Operands: none. */
+    /**
+     * The finally block of a `try` (format v12): the machine runs it when the
+     * `try` is left, however it is left. The operand is the address of the
+     * finally block, relative to the next instruction.
+     */
+    cnor_op_try_finally, /**< Mark the finally block. Operands: s32. */
+    /**
+     * The end of a `finally` block (format v12): the handler is gone, and the
+     * error it was holding, if any, goes on outward. Operands: none.
+     */
+    cnor_op_finally_end,
+    /**
+     * Raise the error that is being handled (format v12): the machine gives it
+     * to the next handler outward, as if it had just happened. Operands: none.
+     */
+    cnor_op_raise,
+    /**
+     * Leave a `try` that has a `finally` block (format v12): the finally block
+     * runs, and the machine goes where the operand says afterwards. The
+     * operand is that address, relative to the next instruction.
+     */
+    cnor_op_try_exit, /**< Leave the `try`. Operands: s32. */
     /**
      * Call a function of the language itself (format v7): the operand is the
      * ordinal of the function (`include/cnor/builtin.h`). The arguments are on
@@ -242,7 +265,7 @@ typedef lh_u8_t cnor_op_flags_t;
 #define CNOR_OP_MAX_OPERANDS 3U
 
 /** @def CNOR_OP_MAX_SIZE @brief Largest encoded instruction, in bytes. */
-#define CNOR_OP_MAX_SIZE 7U
+#define CNOR_OP_MAX_SIZE 10U
 
 /**
  * @struct cnor_op_info
