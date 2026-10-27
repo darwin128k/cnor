@@ -159,6 +159,16 @@ cnor_vm_allocate(cnor_vm_t *vm)
     {
         return cnor_diag_set(&vm->diag, cnor_error_no_memory, 0U, 0U);
     }
+    if (vm->config.trace_capacity > 0U)
+    {
+        if (vm->config.trace_capacity > (lh_usize_t) -1 / sizeof(struct cnor_vm_trace_node))
+            return cnor_diag_set(&vm->diag, cnor_error_no_memory, 0U, 0U);
+        vm->trace_nodes = cnor_vm_alloc_table(vm->config.trace_capacity, sizeof(struct cnor_vm_trace_node));
+        if (vm->trace_nodes == lh_null)
+            return cnor_diag_set(&vm->diag, cnor_error_no_memory, 0U, 0U);
+    }
+    vm->trace_valid = vm->trace_nodes != lh_null; /* Initialize the fresh pool once. */
+    cnor_vm_trace_clear(vm);
     vm->try_count = 0U;
     return lh_bool_true;
 }

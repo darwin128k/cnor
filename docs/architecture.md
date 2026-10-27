@@ -597,3 +597,22 @@ outputs; `CMAKE_CROSSCOMPILING_EMULATOR` runs a Windows build under wine).
 compile, load and run timed separately, median and minimum of several runs,
 VM instructions per second from `cnor_vm_get_steps`, and C, Lua and Python
 versions of the same work for comparison.
+
+
+## Saved runtime tracebacks
+
+`vm/trace.c` stores fixed-budget persistent chains of bytecode addresses.
+The node pool is allocated at load and is inactive on error-free execution;
+no function-call instruction or call-frame layout changes are needed. A fault
+captures the current address plus the callers' return addresses minus one,
+which identify bytes within the calling instructions. Public queries resolve
+names, files and lines lazily through the existing verified image tables.
+
+The current error and try handlers own references to saved chain roots;
+nodes own references to their suffixes. Matching suffixes are shared. Handler
+exit releases its reference, and rethrow/finally restore the saved root before
+unwinding. This preserves an outer error when another error is caught inside
+its handler. Exhaustion keeps the fault origin and marks truncation, rather
+than allocating memory or changing the program's error. `vm.c` clears traces
+on new public operations and successful completion. CLI `report_vm` is shared
+by `run`, `exec` and the REPL. See [debugging.md](debugging.md).

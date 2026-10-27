@@ -26,6 +26,12 @@ cnor_vm_unload(cnor_vm_t *self)
     cnor_vm_free((lh_ptr) self->natives);
     cnor_vm_free(self->frames);
     cnor_vm_free(self->tries);
+    cnor_vm_free(self->trace_nodes);
+    self->trace_nodes = lh_null;
+    self->trace_head = CNOR_VM_TRACE_NONE;
+    self->trace_valid = lh_bool_false;
+    self->trace_truncated = lh_bool_false;
+    self->trace_at = 0U;
     self->image = lh_null;
     self->code = lh_null;
     self->code_size = 0U;
@@ -63,6 +69,7 @@ cnor_vm_init(cnor_vm_t *self, const cnor_vm_config_t *config)
     self->natives = lh_null;
     self->frames = lh_null;
     self->tries = lh_null;
+    self->trace_nodes = lh_null;
     self->try_count = 0U;
     cnor_vm_stack_init(&self->stack);
     cnor_str_pool_init(&self->str_pool);
@@ -81,6 +88,7 @@ cnor_vm_deinit(cnor_vm_t *self)
 void
 cnor_vm_reset(cnor_vm_t *self)
 {
+    cnor_vm_trace_clear(self);
     self->stack.sp = 0U;
     cnor_vm_stack_push_none(&self->stack, self->image != lh_null ? self->header.globals_count : 0U);
     cnor_str_pool_rewind(&self->str_pool);
@@ -142,6 +150,7 @@ cnor_vm_run(cnor_vm_t *self)
     lh_bool_t ok;
 
     cnor_diag_init(&self->diag);
+    cnor_vm_trace_clear(self);
     self->result = lh_value_make_none();
     self->steps = 0U;
     if (self->image == lh_null)
@@ -154,6 +163,8 @@ cnor_vm_run(cnor_vm_t *self)
     }
     self->running = lh_bool_true;
     ok = cnor_vm_dispatch(self);
+    /* Preserve the saved trace while releasing handlers left by a failure. */
+    cnor_vm_trace_finish(self, ok);
     /* Unwind whatever a failure left so globals are all that remains. */
     self->stack.sp = self->header.globals_count;
     self->depth = 0U;
@@ -232,6 +243,7 @@ cnor_vm_call(cnor_vm_t *self, lh_str_view_t name, const lh_value_t *args, cnor_a
     lh_bool_t ok;
 
     cnor_diag_init(&self->diag);
+    cnor_vm_trace_clear(self);
     self->result = lh_value_make_none();
     self->steps = 0U;
     if (self->image == lh_null)
@@ -248,6 +260,8 @@ cnor_vm_call(cnor_vm_t *self, lh_str_view_t name, const lh_value_t *args, cnor_a
     }
     self->running = lh_bool_true;
     ok = cnor_vm_dispatch(self);
+    /* Preserve the saved trace while releasing handlers left by a failure. */
+    cnor_vm_trace_finish(self, ok);
     /* Unwind whatever a failure left so globals are all that remains. */
     self->stack.sp = self->header.globals_count;
     self->depth = 0U;
@@ -351,8 +365,32 @@ cnor_vm_get_line_at(const cnor_vm_t *self, cnor_code_addr_t addr)
 lh_bool_t
 cnor_vm_fail(cnor_vm_t *vm, const cnor_insn_t *insn, cnor_error_t code)
 {
+    cnor_vm_trace_capture(vm, insn->at);
     vm->running = lh_bool_false;
     (void) cnor_diag_set(&vm->diag, code, cnor_vm_get_line_at(vm, insn->at), insn->at);
     cnor_diag_set_file(&vm->diag, cnor_vm_get_file_at(vm, insn->at));
     return lh_bool_false;
+}
+
+lh_bool_t
+cnor_vm_get_trace_frame(const cnor_vm_t *self, cnor_count_t index, cnor_vm_trace_frame_t *out)
+{
+    cnor_count_t head;
+    cnor_code_addr_t at;
+    cnor_image_view_t view;
+    if (out == lh_null || index >= cnor_vm_get_trace_count(self)) return lh_bool_false;
+    head = self->trace_head;
+    if (head == CNOR_VM_TRACE_NONE) at = self->trace_at;
+    else
+    {
+        while (index-- > 0U) head = self->trace_nodes[head].next;
+        at = self->trace_nodes[head].at;
+    }
+    view = cnor_vm_view(self);
+    out->offset = at;
+    out->function = cnor_image_view_function_of(&view, at);
+    out->name = cnor_image_view_function_name(&view, out->function);
+    out->file = cnor_vm_get_file_at(self, at);
+    out->line = cnor_vm_get_line_at(self, at);
+    return lh_bool_true;
 }

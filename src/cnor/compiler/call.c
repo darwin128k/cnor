@@ -55,6 +55,7 @@ cnor_compile_call_function(cnor_compiler_t *self, const cnor_node_t *node, lh_u1
     }
     cnor_order_call(self, node, index);
     self->type = cnor_compile_result_type(self, declaration);
+    self->emit.line = node->line;
     return cnor_emit_insn(self, cnor_op_call, index, node->data.call.argc);
 }
 
@@ -75,6 +76,7 @@ cnor_compile_call_native(cnor_compiler_t *self, const cnor_node_t *node, lh_u16_
         return lh_bool_false;
     }
     self->type = cnor_compile_result_type(self, native->node);
+    self->emit.line = node->line;
     return cnor_emit_insn(self, cnor_op_native, cnor_scope_import_native(self, index), argc);
 }
 
@@ -111,6 +113,7 @@ cnor_compile_call_string_builtin(cnor_compiler_t *self, const cnor_node_t *node,
         }
     }
     self->type = cnor_compiler_builtin_result(builtin);
+    self->emit.line = node->line;
     return cnor_emit_insn(self, cnor_op_call_builtin, (lh_u32_t) builtin, argc);
 }
 
@@ -153,6 +156,7 @@ cnor_compile_call_builtin(cnor_compiler_t *self, const cnor_node_t *node)
         return lh_bool_false;
     }
     self->type = cnor_static_i32;
+    self->emit.line = node->line;
     return cnor_emit_op(self, cnor_op_len);
 }
 
@@ -196,6 +200,7 @@ cnor_compile_call_value(cnor_compiler_t *self, const cnor_node_t *node,
         return cnor_compile_fail_binding(self, node, binding);
     }
     self->type = cnor_static_any;
+    self->emit.line = node->line;
     return cnor_emit_insn(self, cnor_op_call_value, node->data.call.argc, 0U);
 }
 

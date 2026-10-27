@@ -14,6 +14,7 @@
 #include "options.h"
 
 #include <cnor/diag.h>
+#include <cnor/vm.h>
 #include <lh/str/view.h>
 
 /** @brief Compile the source, then run it. */
@@ -26,6 +27,9 @@ cnor_cli_run(const cnor_cli_options_t *options);
  */
 void
 cnor_cli_report(lh_str_view_t file, const cnor_diag_t *diag);
+
+/** @brief Report a runtime error followed by its saved script traceback. */
+void cnor_cli_report_vm(lh_str_view_t file, const cnor_vm_t *vm);
 
 /** @brief Compile the source and write its image. */
 cnor_cli_exit_t

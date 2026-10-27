@@ -1665,7 +1665,141 @@ CNOR_TEST(swaps_and_duplicates_whole_values)
     p_deinit(&p);
 }
 
+
+static void
+trace_program(program_t *p, lh_bool_t metadata)
+{
+    cnor_code_addr_t leaf;
+    cnor_code_addr_t failure;
+    cnor_code_addr_t ok;
+    p_init(p);
+    op_u16_u8(p, cnor_op_call, 1U, 0U);
+    op(p, cnor_op_halt);
+    end_function(p, 0U, 0U, 0U, 1U);
+    leaf = here(p);
+    op_u32(p, cnor_op_push_i32, 1U);
+    op_u32(p, cnor_op_push_i32, 0U);
+    failure = here(p);
+    op(p, cnor_op_div);
+    op(p, cnor_op_ret);
+    end_function(p, leaf, 0U, 0U, 2U);
+    ok = here(p);
+    op_u32(p, cnor_op_push_i32, 42U);
+    op(p, cnor_op_ret);
+    end_function(p, ok, 0U, 0U, 1U);
+    if (metadata)
+    {
+        p->file = view_of("trace.cn");
+        p->function_names[0] = view_of("");
+        p->function_names[1] = view_of("leaf");
+        p->function_names[2] = view_of("ok");
+        p->function_name_count = 3U;
+        add_line(p, 0U, 5U);
+        add_line(p, leaf, 1U);
+        add_line(p, failure, 9U);
+    }
+    build(p, 2U);
+}
+
+CNOR_TEST(exposes_saved_traces_and_invalidates_them_on_new_operations)
+{
+    program_t p;
+    cnor_vm_t vm;
+    cnor_vm_trace_frame_t frame;
+    lh_value_t result;
+    trace_program(&p, lh_bool_true);
+    vm_open(&vm);
+    CHECK_EQ(cnor_vm_get_trace_count(&vm), 0U);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK(!cnor_vm_run(&vm));
+    CHECK_EQ(cnor_vm_get_trace_count(&vm), 2U);
+    CHECK(!cnor_vm_trace_is_truncated(&vm));
+    CHECK(cnor_vm_get_trace_frame(&vm, 0U, &frame));
+    CHECK_EQ(frame.function, 1U);
+    CHECK_EQ(frame.line, 9U);
+    CHECK_EQ(frame.name.size, 4U);
+    CHECK(memcmp(frame.name.begin, "leaf", 4U) == 0);
+    CHECK_EQ(frame.file.size, 8U);
+    CHECK(memcmp(frame.file.begin, "trace.cn", 8U) == 0);
+    CHECK_EQ(frame.offset, cnor_diag_get_offset(cnor_vm_get_diag(&vm)));
+    CHECK(cnor_vm_get_trace_frame(&vm, 1U, &frame));
+    CHECK_EQ(frame.function, 0U);
+    CHECK_EQ(frame.line, 5U);
+    CHECK(!cnor_vm_get_trace_frame(&vm, 2U, &frame));
+    CHECK(!cnor_vm_get_trace_frame(&vm, 0U, lh_null));
+    CHECK(!cnor_vm_call(&vm, view_of("leaf"), lh_null, 0U, lh_null));
+    CHECK_EQ(cnor_vm_get_trace_count(&vm), 1U);
+    CHECK(cnor_vm_get_trace_frame(&vm, 0U, &frame));
+    CHECK_EQ(frame.function, 1U);
+    CHECK(cnor_vm_call(&vm, view_of("ok"), lh_null, 0U, &result));
+    CHECK_EQ(sint_of(&result), 42);
+    CHECK_EQ(cnor_vm_get_trace_count(&vm), 0U);
+    CHECK(!cnor_vm_run(&vm));
+    cnor_vm_reset(&vm);
+    CHECK_EQ(cnor_vm_get_trace_count(&vm), 0U);
+    CHECK(!cnor_vm_run(&vm));
+    CHECK(!cnor_vm_call(&vm, view_of("missing"), lh_null, 0U, lh_null));
+    CHECK_EQ(cnor_vm_get_trace_count(&vm), 0U);
+    CHECK(!cnor_vm_run(&vm));
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK_EQ(cnor_vm_get_trace_count(&vm), 0U);
+    CHECK(!cnor_vm_run(&vm));
+    CHECK(!cnor_vm_load(&vm, lh_null, 0U));
+    CHECK_EQ(cnor_vm_get_trace_count(&vm), 0U);
+    cnor_vm_deinit(&vm);
+    CHECK_EQ(cnor_vm_get_trace_count(&vm), 0U);
+    p_deinit(&p);
+}
+
+CNOR_TEST(traces_images_without_source_metadata_and_with_small_budgets)
+{
+    program_t p;
+    cnor_vm_t vm;
+    cnor_vm_config_t config = cnor_vm_config_initializer();
+    cnor_vm_trace_frame_t frame;
+    trace_program(&p, lh_bool_false);
+    cnor_vm_init(&vm, &config);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK(!cnor_vm_run(&vm));
+    CHECK_EQ(cnor_vm_get_trace_count(&vm), 2U);
+    CHECK(cnor_vm_get_trace_frame(&vm, 0U, &frame));
+    CHECK_EQ(frame.function, 1U);
+    CHECK_EQ(frame.name.size, 0U);
+    CHECK_EQ(frame.file.size, 0U);
+    CHECK_EQ(frame.line, 0U);
+    cnor_vm_deinit(&vm);
+    config.trace_capacity = 1U;
+    cnor_vm_init(&vm, &config);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK(!cnor_vm_run(&vm));
+    CHECK_EQ(cnor_vm_get_trace_count(&vm), 1U);
+    CHECK(cnor_vm_trace_is_truncated(&vm));
+    CHECK(cnor_vm_get_trace_frame(&vm, 0U, &frame));
+    CHECK_EQ(frame.function, 1U);
+    cnor_vm_deinit(&vm);
+    config.trace_capacity = 0U;
+    cnor_vm_init(&vm, &config);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK(!cnor_vm_run(&vm));
+    CHECK_EQ(cnor_vm_get_trace_count(&vm), 0U);
+    CHECK(!cnor_vm_trace_is_truncated(&vm));
+    cnor_vm_deinit(&vm);
+    config.trace_capacity = 4U;
+    config.max_steps = 1U;
+    cnor_vm_init(&vm, &config);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    CHECK(!cnor_vm_run(&vm));
+    CHECK_EQ(vm_code(&vm), cnor_error_step_limit);
+    CHECK_EQ(cnor_vm_get_trace_count(&vm), 2U);
+    CHECK(cnor_vm_get_trace_frame(&vm, 0U, &frame));
+    CHECK_EQ(frame.function, 1U);
+    cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
 static const cnor_test_case_t m_cases[] = {
+    CNOR_TEST_CASE(exposes_saved_traces_and_invalidates_them_on_new_operations),
+    CNOR_TEST_CASE(traces_images_without_source_metadata_and_with_small_budgets),
     CNOR_TEST_CASE(refuses_a_buffer_shorter_than_a_header),
     CNOR_TEST_CASE(refuses_a_buffer_without_the_signature),
     CNOR_TEST_CASE(refuses_a_version_it_does_not_speak),

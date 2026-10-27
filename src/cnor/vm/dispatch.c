@@ -1460,6 +1460,8 @@ cnor_vm_switch:
             entry->slot = (lh_u8_t) pc[5];
             entry->flags = 0U;
             entry->error = cnor_error_none;
+            entry->trace_head = CNOR_VM_TRACE_NONE;
+            entry->trace_truncated = lh_bool_false;
             ++vm->try_count;
             pc += 6;
             CNOR_VM_NEXT();
@@ -1489,6 +1491,7 @@ cnor_vm_switch:
              * block ends. */
             entry->flags |= (lh_u8_t) (CNOR_VM_TRY_CLOSED | CNOR_VM_TRY_CLEANED);
             entry->error = cnor_error_none;
+            cnor_vm_trace_release_try(vm, entry);
             if (entry->finally_addr == 0U)
             {
                 --vm->try_count;

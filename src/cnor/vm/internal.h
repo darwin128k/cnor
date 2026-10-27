@@ -26,6 +26,23 @@
  */
 typedef lh_bool_t (*cnor_vm_handler_t)(cnor_vm_t *vm, const cnor_insn_t *insn);
 
+/** @brief Sentinel for an empty saved trace root. */
+#define CNOR_VM_TRACE_NONE ((cnor_count_t) 0xFFFFFFFFU)
+
+/** @brief Reference-counted persistent trace suffix; sharing preserves nested rethrows. */
+struct cnor_vm_trace_node
+{
+    cnor_code_addr_t at;
+    cnor_count_t next;
+    lh_u32_t refs;
+};
+void cnor_vm_trace_clear(cnor_vm_t *vm);
+void cnor_vm_trace_capture(cnor_vm_t *vm, cnor_code_addr_t at);
+void cnor_vm_trace_save_try(cnor_vm_t *vm, cnor_vm_try_t *entry);
+void cnor_vm_trace_restore_try(cnor_vm_t *vm, const cnor_vm_try_t *entry);
+void cnor_vm_trace_release_try(cnor_vm_t *vm, cnor_vm_try_t *entry);
+void cnor_vm_trace_finish(cnor_vm_t *vm, lh_bool_t ok);
+
 /* -- vm.c ------------------------------------------------------------------ */
 
 /** @brief Record @p code at @p insn and stop. @return ::lh_bool_false. */

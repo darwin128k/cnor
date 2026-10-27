@@ -71,6 +71,30 @@ cnor_cli_report_io(const lh_char_t *path, const lh_char_t *what)
     return cnor_cli_exit_io;
 }
 
+/* Metadata comes from the loaded image; source files are never opened here. */
+void
+cnor_cli_report_vm(lh_str_view_t file, const cnor_vm_t *vm)
+{
+    cnor_count_t i;
+    const cnor_count_t count = cnor_vm_get_trace_count(vm);
+    cnor_cli_report(file, cnor_vm_get_diag(vm));
+    for (i = 0U; i < count; ++i)
+    {
+        cnor_vm_trace_frame_t frame;
+        if (!cnor_vm_get_trace_frame(vm, i, &frame)) break;
+        fputs(i == 0U ? "  at " : "  called from ", stderr);
+        if (frame.name.size != 0U) fwrite(frame.name.begin, 1U, frame.name.size, stderr);
+        else if (frame.function == 0U) fputs("<main>", stderr);
+        else fprintf(stderr, "<function #%u>", (unsigned) frame.function);
+        fputs(" (", stderr);
+        if (frame.file.size != 0U) fwrite(frame.file.begin, 1U, frame.file.size, stderr);
+        else fputs("<unknown>", stderr);
+        if (frame.line != 0U) fprintf(stderr, ":%u", (unsigned) frame.line);
+        fputs(")\n", stderr);
+    }
+    if (cnor_vm_trace_is_truncated(vm)) fputs("  ... traceback truncated\n", stderr);
+}
+
 /* -- compiling ------------------------------------------------------------- */
 
 #if CNOR_CLI_HAS_COMPILER
@@ -154,7 +178,7 @@ cnor_cli_run_image(const cnor_cli_options_t *options, const lh_byte_t *data, lh_
     }
     else if (!cnor_vm_run(&vm))
     {
-        cnor_cli_report(cnor_cli_run_file(&vm, path), cnor_vm_get_diag(&vm));
+        cnor_cli_report_vm(cnor_cli_run_file(&vm, path), &vm);
         code = cnor_cli_exit_run;
     }
     else

@@ -80,6 +80,7 @@ set(CNOR_VM_SOURCES
         ${CNOR_SRC_PATH}/cnor/image/view.c
         ${CNOR_SRC_PATH}/cnor/image/names.c
         ${CNOR_SRC_PATH}/cnor/image/verify.c
+        ${CNOR_SRC_PATH}/cnor/vm/trace.c
         ${CNOR_SRC_PATH}/cnor/vm/vm.c
         ${CNOR_SRC_PATH}/cnor/vm/load.c
         ${CNOR_SRC_PATH}/cnor/vm/dispatch.c

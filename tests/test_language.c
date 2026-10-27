@@ -131,6 +131,9 @@ typedef struct outcome
     lh_u8_t kind;       /**< The kind of the result; 0 when there is none. */
     lh_bool_t truth;    /**< The result, when it is a boolean. */
     char text[256];     /**< The result, when it is a string. */
+    cnor_count_t trace_count;
+    lh_bool_t trace_truncated;
+    struct { char name[64]; char file[256]; cnor_line_t line; } trace[16];
 } outcome_t;
 
 static void
@@ -156,6 +159,22 @@ take_diag(outcome_t *out, const cnor_diag_t *diag)
     out->line = cnor_diag_get_line(diag);
     copy_view(out->name, sizeof(out->name), cnor_diag_get_name(diag));
     copy_view(out->file, sizeof(out->file), cnor_diag_get_file(diag));
+}
+
+static void
+take_trace(outcome_t *out, const cnor_vm_t *vm)
+{
+    cnor_count_t i;
+    out->trace_count = cnor_vm_get_trace_count(vm);
+    out->trace_truncated = cnor_vm_trace_is_truncated(vm);
+    for (i = 0U; i < out->trace_count && i < 16U; ++i)
+    {
+        cnor_vm_trace_frame_t frame;
+        if (!cnor_vm_get_trace_frame(vm, i, &frame)) break;
+        copy_view(out->trace[i].name, sizeof(out->trace[i].name), frame.name);
+        copy_view(out->trace[i].file, sizeof(out->trace[i].file), frame.file);
+        out->trace[i].line = frame.line;
+    }
 }
 
 /* Compile @p files[0] (the main file, named by its path) with the others
@@ -209,6 +228,7 @@ run_program(const memory_file_t *files, size_t count, const char *const *search_
             if (!cnor_vm_run(&vm))
             {
                 take_diag(out, cnor_vm_get_diag(&vm));
+                take_trace(out, &vm);
             }
             else
             {
@@ -2269,7 +2289,135 @@ CNOR_TEST(keeps_namespaced_runtime_errors_at_the_original_source)
     CHECK(strcmp(out.file, "lib.cn") == 0);
 }
 
+
+static outcome_t
+run_trace_source(const char *source, cnor_count_t capacity, lh_bool_t lines)
+{
+    cnor_compiler_config_t config = cnor_compiler_config_initializer();
+    cnor_vm_config_t vm_config = cnor_vm_config_initializer();
+    cnor_diag_t diag;
+    cnor_image_t image;
+    cnor_vm_t vm;
+    outcome_t out;
+    memset(&out, 0, sizeof(out));
+    config.file = view_of("trace.cn");
+    config.emit_lines = lines;
+    config.natives = &m_table;
+    out.compiled = cnor_compiler_compile_source(view_of(source), &config, &image, &diag);
+    if (!out.compiled) { take_diag(&out, &diag); return out; }
+    vm_config.natives = &m_table;
+    vm_config.trace_capacity = capacity;
+    cnor_vm_init(&vm, &vm_config);
+    if (cnor_vm_load(&vm, image.data, image.size)) (void) cnor_vm_run(&vm);
+    take_diag(&out, cnor_vm_get_diag(&vm));
+    take_trace(&out, &vm);
+    cnor_vm_deinit(&vm);
+    cnor_image_deinit(&image);
+    return out;
+}
+
+CNOR_TEST(traces_script_callers_at_their_call_sites)
+{
+    static const memory_file_t files[] = {
+        {"main.cn", "import \"lib.cn\" as lib\nfn attack() -> i32:\n"
+            "    return lib.divide(\n        0\n    )\nattack()\n"},
+        {"lib.cn", "fn divide(n: i32) -> i32:\n    return 10 / n\n"},
+    };
+    memory_loader_t loader;
+    outcome_t out;
+    run_program(files, 2U, lh_null, 0U, &loader, 1, &out);
+    CHECK(out.compiled);
+    CHECK_EQ(out.code, cnor_error_div_by_zero);
+    CHECK_EQ(out.trace_count, 3U);
+    CHECK(!out.trace_truncated);
+    CHECK(strcmp(out.trace[0].name, "divide") == 0);
+    CHECK(strcmp(out.trace[0].file, "lib.cn") == 0);
+    CHECK_EQ(out.trace[0].line, 2U);
+    CHECK(strcmp(out.trace[1].name, "attack") == 0);
+    CHECK(strcmp(out.trace[1].file, "main.cn") == 0);
+    CHECK_EQ(out.trace[1].line, 3U);
+    CHECK(out.trace[2].name[0] == '\0');
+    CHECK_EQ(out.trace[2].line, 6U);
+}
+
+CNOR_TEST(preserves_original_traces_across_finally_and_nested_rethrows)
+{
+    const char *program = "fn original() -> i32:\n    return 1 / 0\n"
+        "fn secondary() -> i32:\n    return 2 / 0\n"
+        "fn wrapper():\n    try:\n        return original()\n"
+        "    catch:\n        try:\n            secondary()\n        catch:\n            note(3)\n"
+        "        raise\nwrapper()\n";
+    outcome_t out = run_trace_source(program, 64U, lh_bool_true);
+    CHECK_EQ(out.code, cnor_error_div_by_zero);
+    CHECK_EQ(out.trace_count, 3U);
+    CHECK(!out.trace_truncated);
+    CHECK(strcmp(out.trace[0].name, "original") == 0);
+    CHECK_EQ(out.trace[0].line, 2U);
+    CHECK(strcmp(out.trace[1].name, "wrapper") == 0);
+    CHECK_EQ(out.trace[1].line, 7U);
+    /* The first error fills a tiny pool; a nested error must not overwrite it. */
+    out = run_trace_source(program, 3U, lh_bool_true);
+    CHECK_EQ(out.code, cnor_error_div_by_zero);
+    CHECK_EQ(out.trace_count, 3U);
+    CHECK(!out.trace_truncated);
+    CHECK(strcmp(out.trace[0].name, "original") == 0);
+    out = run_trace_source("fn original() -> i32:\n    return 1 / 0\n"
+        "fn wrapper():\n    try:\n        return original()\n"
+        "    finally:\n        note(9)\nwrapper()\n", 64U, lh_bool_true);
+    CHECK_EQ(out.code, cnor_error_div_by_zero);
+    CHECK_EQ(out.trace_count, 3U);
+    CHECK(strcmp(out.trace[0].name, "original") == 0);
+    CHECK_EQ(out.trace[1].line, 5U);
+    out = run_trace_source("fn original() -> i32:\n    return 1 / 0\n"
+        "fn secondary() -> i32:\n    return 2 / 0\n"
+        "fn wrapper():\n    try:\n        return original()\n"
+        "    finally:\n        secondary()\nwrapper()\n", 64U, lh_bool_true);
+    CHECK_EQ(out.code, cnor_error_div_by_zero);
+    CHECK_EQ(out.trace_count, 3U);
+    CHECK(strcmp(out.trace[0].name, "secondary") == 0);
+    CHECK_EQ(out.trace[1].line, 9U);
+}
+
+CNOR_TEST(bounds_trace_storage_and_recycles_handled_snapshots)
+{
+    const char *program = "fn leaf() -> i32:\n    return 1 / 0\n"
+        "fn middle() -> i32:\n    return leaf()\nmiddle()\n";
+    outcome_t out = run_trace_source(program, 2U, lh_bool_true);
+    CHECK_EQ(out.code, cnor_error_div_by_zero);
+    CHECK_EQ(out.trace_count, 2U);
+    CHECK(out.trace_truncated);
+    CHECK(strcmp(out.trace[0].name, "leaf") == 0);
+    CHECK(strcmp(out.trace[1].name, "middle") == 0);
+    out = run_trace_source(program, 0U, lh_bool_true);
+    CHECK_EQ(out.code, cnor_error_div_by_zero);
+    CHECK_EQ(out.trace_count, 0U);
+    CHECK(!out.trace_truncated);
+    out = run_trace_source(program, 64U, lh_bool_false);
+    CHECK_EQ(out.trace_count, 3U);
+    CHECK(strcmp(out.trace[0].name, "leaf") == 0);
+    CHECK_EQ(out.trace[0].line, 0U);
+    CHECK_EQ(out.trace[1].line, 0U);
+    out = run_trace_source("fn leaf() -> i32:\n    return 1 / 0\n"
+        "fn wrapper():\n    for i in 0..200:\n        try:\n            leaf()\n"
+        "        catch:\n            note(i)\n    return leaf()\nwrapper()\n", 3U, lh_bool_true);
+    CHECK_EQ(out.code, cnor_error_div_by_zero);
+    CHECK_EQ(out.trace_count, 3U);
+    CHECK(!out.trace_truncated);
+    out = run_trace_source("try:\n    1 / 0\ncatch:\n    42\n", 2U, lh_bool_true);
+    CHECK_EQ(out.code, cnor_error_none);
+    CHECK_EQ(out.trace_count, 0U);
+    CHECK(!out.trace_truncated);
+    out = run_trace_source("fn leaf() -> i32:\n    return 1 / 0\n"
+        "fn middle() -> i32:\n    let f = leaf\n    return f()\nmiddle()\n", 64U, lh_bool_true);
+    CHECK_EQ(out.trace_count, 3U);
+    CHECK(strcmp(out.trace[0].name, "leaf") == 0);
+    CHECK_EQ(out.trace[1].line, 5U);
+}
+
 static const cnor_test_case_t m_cases[] = {
+    CNOR_TEST_CASE(traces_script_callers_at_their_call_sites),
+    CNOR_TEST_CASE(preserves_original_traces_across_finally_and_nested_rethrows),
+    CNOR_TEST_CASE(bounds_trace_storage_and_recycles_handled_snapshots),
     CNOR_TEST_CASE(keeps_namespaced_runtime_errors_at_the_original_source),
     CNOR_TEST_CASE(calls_namespaced_natives_and_function_values),
     CNOR_TEST_CASE(distinguishes_nominal_types_from_different_namespaces),

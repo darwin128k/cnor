@@ -328,7 +328,7 @@ cnor_cli_repl_run(struct cnor_cli_repl *self, const cnor_cli_options_t *options)
         }
         else if (!cnor_vm_run(&vm))
         {
-            cnor_cli_report(config.file, cnor_vm_get_diag(&vm));
+            cnor_cli_report_vm(config.file, &vm);
             ok = lh_bool_false;
         }
         else

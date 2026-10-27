@@ -104,7 +104,9 @@ Errors go to the standard error as `file:line: message`, for example
 `script.cn:3: unknown name: missing`, `script.cn:4: type mismatch: expected
 i32, found str` or `lib/math.cn:12: division by zero`, naming the file the
 failing code is in; an image keeps the source names and line table, so `exec`
-reports the same.
+reports the same. Runtime failures also show the saved script call chain,
+from the fault through its callers, without opening the source files. See
+[tracebacks and the C API](docs/debugging.md) for the configurable memory budget.
 Exit status: 0 done, 1 runtime error (including `--max-steps`), 2 bad command
 line, 3 compile error or bad image, 4 file error. File names are UTF-8 on every
 system; a leading UTF-8 byte order mark in a source file is skipped.

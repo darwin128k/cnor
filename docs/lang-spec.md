@@ -1078,6 +1078,14 @@ when it is empty: `"a,b,"` has three pieces.
 - `frames`: the call stack, `max_depth` entries, each holding the return
   address, the caller's `fp` and the caller's function.
 - `str_pool`: the string pool, allocated at load, rewound by a reset.
+- A saved traceback pool, allocated at load (`trace_capacity`, default 64
+  nodes; 0 disables it). Faults capture script frames before exception
+  unwinding; `raise` and `finally` preserve the original error's chain.
+  `cnor_vm_get_trace_count`, `cnor_vm_get_trace_frame` and
+  `cnor_vm_trace_is_truncated` expose it after a failed run/call. Names and
+  source locations come from the image; source files are not read. The trace
+  is cleared by a new run/call, reset or load, and by successful execution.
+  See [the traceback API and budget rules](debugging.md).
 - Globals live **at the bottom of the same stack**.
 
 A call frame starts where the arguments are, so the arguments are the callee's

@@ -82,12 +82,12 @@ cnor_cli_test(compile_error CODE 3 ARGS run ${cnor_cli_data}/compile_error.cn
         STDERR_REGEX "compile_error\\.cn:3: unknown name: missing\n$")
 cnor_cli_test(runtime_error CODE 1 ARGS run ${cnor_cli_data}/runtime_error.cn
         STDOUT_FILE ${cnor_cli_data}/runtime_error.out
-        STDERR_REGEX "runtime_error\\.cn:5: division by zero\n$")
+        STDERR_REGEX "runtime_error\\.cn:5: division by zero\n")
 cnor_cli_test(runtime_error_stdin CODE 1 ARGS run - STDIN ${cnor_cli_data}/runtime_error.cn
         STDOUT_FILE ${cnor_cli_data}/runtime_error.out
-        STDERR_REGEX "^<stdin>:5: division by zero\n$")
+        STDERR_REGEX "^<stdin>:5: division by zero\n")
 cnor_cli_test(step_limit CODE 1 ARGS run ${cnor_cli_data}/count.cn --max-steps 1000
-        STDERR_REGEX "count\\.cn:[34]: instruction budget exhausted\n$")
+        STDERR_REGEX "count\\.cn:[34]: instruction budget exhausted\n")
 cnor_cli_test(step_limit_enough CODE 0 ARGS run ${cnor_cli_data}/count.cn --max-steps 1000000
         STDOUT_FILE ${cnor_cli_data}/count.out STDERR_EMPTY)
 
@@ -107,9 +107,9 @@ cnor_cli_test(exec_stdin CODE 0 ARGS exec - STDIN ${cnor_cli_work}/hello.cnb
         STDOUT_FILE ${cnor_cli_data}/hello.out STDERR_EMPTY REQUIRES cnor_cli_images)
 cnor_cli_test(exec_runtime_error CODE 1 ARGS exec runtime_error.cnb
         STDOUT_FILE ${cnor_cli_data}/runtime_error.out
-        STDERR_REGEX "runtime_error\\.cn:5: division by zero\n$" REQUIRES cnor_cli_images)
+        STDERR_REGEX "runtime_error\\.cn:5: division by zero\n" REQUIRES cnor_cli_images)
 cnor_cli_test(exec_without_lines CODE 1 ARGS exec no_lines.cnb
-        STDERR_REGEX "runtime_error\\.cn: division by zero\n$" REQUIRES cnor_cli_images)
+        STDERR_REGEX "runtime_error\\.cn: division by zero\n" REQUIRES cnor_cli_images)
 cnor_cli_test(exec_not_an_image CODE 3 ARGS exec ${cnor_cli_data}/hello.cn
         STDERR_REGEX "hello\\.cn: [a-z]")
 cnor_cli_test(compile_reports_errors CODE 3
@@ -138,7 +138,7 @@ cnor_cli_test(import_type_error CODE 3 ARGS run ${cnor_cli_imports}/type_error.c
         STDERR_REGEX "lib/bad_type\\.cn:2: type mismatch: expected i32, found str\n$")
 cnor_cli_test(import_runtime_error CODE 1 ARGS run ${cnor_cli_imports}/runtime_error.cn
         STDOUT_FILE ${cnor_cli_imports}/runtime_error.out
-        STDERR_REGEX "lib/divide\\.cn:4: division by zero\n$")
+        STDERR_REGEX "lib/divide\\.cn:4: division by zero\n")
 cnor_cli_test(init_order CODE 3 ARGS run ${cnor_cli_imports}/init_order.cn
         STDERR_REGEX "init_order\\.cn:3: global used before its `let`: base\n$")
 cnor_cli_test(compile_imports CODE 0
@@ -152,7 +152,7 @@ cnor_cli_test(exec_imports CODE 0 ARGS exec imports.cnb
         STDOUT_FILE ${cnor_cli_imports}/main.out STDERR_EMPTY REQUIRES cnor_cli_import_images)
 cnor_cli_test(exec_import_runtime_error CODE 1 ARGS exec import_error.cnb
         STDOUT_FILE ${cnor_cli_imports}/runtime_error.out
-        STDERR_REGEX "lib/divide\\.cn:4: division by zero\n$"
+        STDERR_REGEX "lib/divide\\.cn:4: division by zero\n"
         REQUIRES cnor_cli_import_images)
 cnor_cli_test(import_path_on_exec CODE 2 ARGS exec imports.cnb -I ${cnor_cli_imports}
         STDERR_REGEX "unknown option: -I")
@@ -188,3 +188,18 @@ cnor_cli_test(compile_stdin_needs_output CODE 2 ARGS compile - STDIN ${cnor_cli_
         STDERR_REGEX "needs -o")
 cnor_cli_test(no_such_file CODE 4 ARGS run no_such_file.cn
         STDERR_REGEX "no_such_file\\.cn: cannot read the file")
+
+# -- saved runtime tracebacks ---------------------------------------------------
+
+set(cnor_trace_regex "trace\\.cn:2: division by zero\n  at divide \\(.*trace\\.cn:2\\)\n  called from attack \\(.*trace\\.cn:4\\)\n  called from <main> \\(.*trace\\.cn:7\\)\n$")
+cnor_cli_test(trace_run CODE 1 ARGS run ${cnor_cli_data}/trace.cn
+        STDERR_REGEX "${cnor_trace_regex}")
+cnor_cli_test(trace_compile CODE 0 ARGS compile ${cnor_cli_data}/trace.cn -o trace.cnb
+        STDERR_EMPTY SETUP cnor_cli_trace_image)
+cnor_cli_test(trace_exec CODE 1 ARGS exec trace.cnb
+        STDERR_REGEX "${cnor_trace_regex}" REQUIRES cnor_cli_trace_image)
+cnor_cli_test(trace_compile_no_lines CODE 0 ARGS compile ${cnor_cli_data}/trace.cn -o trace-no-lines.cnb --no-lines
+        STDERR_EMPTY SETUP cnor_cli_trace_no_lines)
+cnor_cli_test(trace_exec_no_lines CODE 1 ARGS exec trace-no-lines.cnb
+        STDERR_REGEX "trace\\.cn: division by zero\n  at divide \\(.*trace\\.cn\\)\n  called from attack \\(.*trace\\.cn\\)\n  called from <main> \\(.*trace\\.cn\\)\n$"
+        REQUIRES cnor_cli_trace_no_lines)

@@ -51,6 +51,9 @@
  */
 #define CNOR_VM_DEFAULT_MAX_STEPS 1000000U
 
+/** @def CNOR_VM_DEFAULT_TRACE_CAPACITY @brief Shared saved traceback nodes; 0 disables tracing. */
+#define CNOR_VM_DEFAULT_TRACE_CAPACITY 64U
+
 /**
  * @struct cnor_vm_config
  * @brief What a host decides about a machine.
@@ -63,6 +66,7 @@ struct cnor_vm_config
     cnor_call_depth_t max_depth;        /**< Nested calls allowed. */
     lh_u32_t str_pool_size;             /**< String pool, in bytes. */
     cnor_step_count_t max_steps;        /**< Instructions per run; 0 is unlimited. */
+    cnor_count_t trace_capacity;        /**< Saved traceback node budget; 0 disables tracing. */
 };
 /** @copybrief cnor_vm_config */
 typedef struct cnor_vm_config cnor_vm_config_t;
@@ -73,7 +77,7 @@ typedef struct cnor_vm_config cnor_vm_config_t;
  */
 #define cnor_vm_config_initializer()                                                               \
     lh_initializer(lh_null, lh_null, CNOR_VM_DEFAULT_STACK_SLOTS, CNOR_VM_DEFAULT_MAX_DEPTH,       \
-                   CNOR_VM_DEFAULT_STR_POOL_SIZE, CNOR_VM_DEFAULT_MAX_STEPS)
+                   CNOR_VM_DEFAULT_STR_POOL_SIZE, CNOR_VM_DEFAULT_MAX_STEPS, CNOR_VM_DEFAULT_TRACE_CAPACITY)
 
 /**
  * @struct cnor_vm_frame
@@ -113,6 +117,8 @@ struct cnor_vm_try
     lh_u8_t slot;                  /**< Where the error's dictionary goes. */
     lh_u8_t flags;                 /**< ::CNOR_VM_TRY_CLOSED, ::CNOR_VM_TRY_CLEANED, ::CNOR_VM_TRY_ACTION. */
     cnor_error_t error;            /**< The error being handled, ::cnor_error_none when there is none. */
+    cnor_count_t trace_head;       /**< Saved trace root, private to the VM. */
+    lh_bool_t trace_truncated;     /**< The saved trace omitted callers. */
 };
 /** @copybrief cnor_vm_try */
 typedef struct cnor_vm_try cnor_vm_try_t;
@@ -134,6 +140,19 @@ typedef struct cnor_vm_try cnor_vm_try_t;
  *        when it ends; the address is in the handler.
  */
 #define CNOR_VM_TRY_ACTION 0x04U
+
+/** @brief One saved script frame, from the fault outward through its callers. */
+struct cnor_vm_trace_frame
+{
+    cnor_function_index_t function; /**< Function index in the loaded image. */
+    lh_str_view_t name;             /**< Function name; empty for unnamed code. */
+    lh_str_view_t file;             /**< Original source file; empty without metadata. */
+    cnor_line_t line;               /**< Fault/call-site line; 0 without line metadata. */
+    cnor_code_addr_t offset;        /**< Fault/call-site bytecode address. */
+};
+typedef struct cnor_vm_trace_frame cnor_vm_trace_frame_t;
+
+struct cnor_vm_trace_node;
 
 /**
  * @struct cnor_vm
@@ -169,6 +188,11 @@ struct cnor_vm
     cnor_diag_t diag;                  /**< Why the last load or run failed. */
     cnor_count_t file_count;           /**< File table entries; last, it is never hot. */
     cnor_count_t function_name_count;  /**< Function name entries; a host looks them up by name. */
+    struct cnor_vm_trace_node *trace_nodes; /**< Fixed shared snapshot storage, allocated at load. */
+    cnor_count_t trace_head;          /**< Current saved trace root. */
+    cnor_code_addr_t trace_at;        /**< Fault origin, also used when storage was exhausted. */
+    lh_bool_t trace_valid;            /**< A runtime failure was captured. */
+    lh_bool_t trace_truncated;        /**< Some caller frames did not fit. */
 };
 /** @copybrief cnor_vm */
 typedef struct cnor_vm cnor_vm_t;
@@ -268,6 +292,24 @@ cnor_vm_get_file_at(const cnor_vm_t *self, cnor_code_addr_t addr);
 /** @brief Source line of code address @p addr, or 0 without a line table. */
 cnor_line_t
 cnor_vm_get_line_at(const cnor_vm_t *self, cnor_code_addr_t addr);
+
+/**
+ * @brief Frames saved by the last failed run/call, innermost first.
+ * Cleared by the next run, call, reset or load, and after successful execution.
+ * Validation/load failures and disabled tracing have no frames.
+ */
+cnor_count_t cnor_vm_get_trace_count(const cnor_vm_t *self);
+
+/**
+ * @brief Read saved frame @p index; false for an invalid index or null output.
+ * Name/file views belong to the loaded image and expire on load/deinit.
+ * Source files are not read. A caller's offset/line identifies its call site.
+ */
+lh_bool_t cnor_vm_get_trace_frame(const cnor_vm_t *self, cnor_count_t index,
+                                  cnor_vm_trace_frame_t *out);
+
+/** @brief Whether the saved trace omitted callers because its fixed budget was exhausted. */
+lh_bool_t cnor_vm_trace_is_truncated(const cnor_vm_t *self);
 
 LH_COMPILER_EXTERN_C_END
 

@@ -71,6 +71,8 @@ cnor_vm_op_try_push(cnor_vm_t *vm, const cnor_insn_t *insn)
     entry->slot = (lh_u8_t) insn->operands[1];
     entry->flags = 0U;
     entry->error = cnor_error_none;
+    entry->trace_head = CNOR_VM_TRACE_NONE;
+    entry->trace_truncated = lh_bool_false;
     return lh_bool_true;
 }
 
@@ -102,6 +104,7 @@ cnor_vm_op_try_pop(cnor_vm_t *vm, const cnor_insn_t *insn)
     entry = &vm->tries[vm->try_count - 1U];
     entry->flags |= (lh_u8_t) (CNOR_VM_TRY_CLOSED | CNOR_VM_TRY_CLEANED);
     entry->error = cnor_error_none;
+    cnor_vm_trace_release_try(vm, entry);
     if (entry->finally_addr == 0U)
     {
         --vm->try_count;
@@ -116,6 +119,7 @@ cnor_vm_tries_leave(cnor_vm_t *vm)
     while (vm->try_count > 0U
            && vm->tries[vm->try_count - 1U].depth >= vm->depth)
     {
+        cnor_vm_trace_release_try(vm, &vm->tries[vm->try_count - 1U]);
         --vm->try_count;
     }
 }
@@ -184,6 +188,7 @@ cnor_vm_unwind(cnor_vm_t *vm, cnor_error_t code, cnor_code_addr_t at)
         if (entry->depth > vm->depth)
         {
             /* The frame the `try` was made in is gone. */
+            cnor_vm_trace_release_try(vm, &vm->tries[vm->try_count - 1U]);
             --vm->try_count;
             continue;
         }
@@ -198,6 +203,7 @@ cnor_vm_unwind(cnor_vm_t *vm, cnor_error_t code, cnor_code_addr_t at)
             && (entry->flags & (lh_u8_t) CNOR_VM_TRY_CLOSED) == 0U)
         {
             /* The catch block takes it. */
+            cnor_vm_trace_save_try(vm, entry);
             entry->error = code;
             entry->error_at = at;
             entry->flags |= (lh_u8_t) CNOR_VM_TRY_CLOSED;
@@ -212,6 +218,7 @@ cnor_vm_unwind(cnor_vm_t *vm, cnor_error_t code, cnor_code_addr_t at)
             && (entry->flags & (lh_u8_t) CNOR_VM_TRY_CLEANED) == 0U)
         {
             /* The finally block runs first; the error waits for it. */
+            cnor_vm_trace_save_try(vm, entry);
             entry->error = code;
             entry->error_at = at;
             entry->flags |= (lh_u8_t) (CNOR_VM_TRY_CLOSED | CNOR_VM_TRY_CLEANED);
@@ -222,6 +229,7 @@ cnor_vm_unwind(cnor_vm_t *vm, cnor_error_t code, cnor_code_addr_t at)
             return lh_bool_true;
         }
         /* Nothing here can take it: drop the handler and look further out. */
+        cnor_vm_trace_release_try(vm, &vm->tries[vm->try_count - 1U]);
         --vm->try_count;
     }
     /* Nobody took the error: the run fails with it. */
@@ -265,6 +273,8 @@ cnor_vm_op_finally_end(cnor_vm_t *vm, const cnor_insn_t *insn)
     error_at = entry->error_at;
     action_addr = entry->action_addr;
     flags = entry->flags;
+    if (error != cnor_error_none) cnor_vm_trace_restore_try(vm, entry);
+    cnor_vm_trace_release_try(vm, &vm->tries[vm->try_count - 1U]);
     --vm->try_count;
 
     if (error != cnor_error_none)
@@ -315,6 +325,7 @@ cnor_vm_op_raise(cnor_vm_t *vm, const cnor_insn_t *insn)
         /* There is no error to raise. */
         return cnor_vm_fail(vm, insn, cnor_error_nothing_to_raise);
     }
+    cnor_vm_trace_restore_try(vm, entry);
     return cnor_vm_unwind(vm, entry->error, entry->error_at);
 }
 
@@ -343,6 +354,7 @@ cnor_vm_op_try_exit(cnor_vm_t *vm, const cnor_insn_t *insn)
             top->flags |= (lh_u8_t) (CNOR_VM_TRY_CLOSED | CNOR_VM_TRY_CLEANED);
         }
         top->error = cnor_error_none;
+        cnor_vm_trace_release_try(vm, &vm->tries[vm->try_count - 1U]);
         --vm->try_count;
     }
     if (vm->try_count == 0U)
@@ -354,6 +366,7 @@ cnor_vm_op_try_exit(cnor_vm_t *vm, const cnor_insn_t *insn)
     entry = &vm->tries[vm->try_count - 1U];
     entry->flags |= (lh_u8_t) (CNOR_VM_TRY_CLOSED | CNOR_VM_TRY_CLEANED | CNOR_VM_TRY_ACTION);
     entry->error = cnor_error_none;
+    cnor_vm_trace_release_try(vm, entry);
     entry->action_addr = addr;
     vm->ip = entry->finally_addr;
     return lh_bool_true;
