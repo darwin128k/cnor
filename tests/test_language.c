@@ -1862,7 +1862,249 @@ CNOR_TEST(points_runtime_errors_at_the_imported_file)
     }
 }
 
+
+CNOR_TEST(has_nominal_records_and_enums)
+{
+    CHECK_EQ(value_of("enum State:\n    idle\n    active\n"
+        "struct Player:\n    hp: i32\n    state: State\n"
+        "let mut p = Player(80, State.idle)\n"
+        "p.hp += 20\np.state = State.active\n"
+        "match p.state:\n    State.idle => p.hp = 0\n    State.active => p.hp += 7\n"
+        "p.hp\n"), 107);
+    CHECK_EQ(value_of("struct Point:\n    x: i32\n    y: i32\n"
+        "fn sum(p: Point) -> i32:\n    p.x += 2\n    return p.x + p.y\n"
+        "fn test() -> i32:\n    let mut p: Point = Point(3, 4)\n"
+        "    let n = sum(p)\n    return n + p.x\ntest()\n"), 14);
+    CHECK_EQ(value_of("enum Mode:\n    off\n    on\n"
+        "fn mode() -> Mode:\n    return Mode.on\n"
+        "let mut result = 0\nmatch mode():\n    Mode.on => result = 42\n"
+        "    _ => result = 1\nresult\n"), 42);
+    m_note_count = 0U;
+    CHECK_EQ(value_of("struct Pair:\n    a: i32\n    b: i32\n"
+        "let p = Pair(note(11), note(22))\np.a * 100 + p.b\n"), 1122);
+    CHECK_EQ(m_note_count, 2U);
+    CHECK_EQ(m_notes[0], 11);
+    CHECK_EQ(m_notes[1], 22);
+}
+
+CNOR_TEST(checks_record_fields_and_enum_identity)
+{
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet p = P(\"bad\")\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet p = P()\n"), cnor_error_wrong_arg_count);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet p = P(1)\np.missing\n"), cnor_error_unknown_name);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet mut p = P(1)\np.x = true\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet p = P(1)\np.x = 2\n"), cnor_error_immutable);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet mut p = P(1)\np.x += \"x\"\n"), cnor_error_operand_type);
+    CHECK_EQ(failure_of("enum A:\n    x\nenum B:\n    x\nlet a: A = B.x\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("enum A:\n    x\nenum B:\n    x\nA.x == B.x\n"), cnor_error_operand_type);
+    CHECK_EQ(failure_of("enum A:\n    x\nenum B:\n    x\nmatch A.x:\n    B.x => 1\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("enum A:\n    x\nA.missing\n"), cnor_error_unknown_name);
+    CHECK_EQ(failure_of("enum A:\n    x\nlet a: A = 0\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("enum A:\n    x\nA.x + 1\n"), cnor_error_operand_type);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\n    x: i32\n"), cnor_error_duplicate_name);
+    CHECK_EQ(failure_of("enum A:\n    x\n    x\n"), cnor_error_duplicate_name);
+    CHECK_EQ(failure_of("struct P:\n    x: Missing\n"), cnor_error_unknown_type);
+    CHECK_EQ(failure_of("fn f(x: Missing):\n    return\n"), cnor_error_unknown_type);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nstruct Q:\n    p: P\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nfn f():\n    let p = P(1)\n    return p\nf()\n"), cnor_error_struct_lifetime);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet P = 1\n"), cnor_error_duplicate_name);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nP(1)\n"), cnor_error_not_a_declaration);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nfn f(p: P):\n    return\nf(1)\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nstruct Q:\n    x: i32\n"
+        "fn f(p: P):\n    return\nlet q = Q(1)\nf(q)\n"), cnor_error_type_mismatch);
+}
+
+
+CNOR_TEST(keeps_record_references_within_their_lifetime)
+{
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet p = P(1)\nlet alias = p\n"), cnor_error_struct_lifetime);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet mut p = P(1)\nlet q = P(2)\np = q\n"), cnor_error_struct_lifetime);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet p = P(1)\nlet mut a = [0; 1]\na[0] = p\n"), cnor_error_struct_lifetime);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet p = P(1)\nlet mut d = dict(1)\nd[\"p\"] = p\n"), cnor_error_struct_lifetime);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet p = P(1)\nlet a = [p; 1]\n"), cnor_error_struct_lifetime);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet p = P(p.x)\n"), cnor_error_not_initialized);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet p = P(1)\np[0]\n"), cnor_error_type_mismatch);
+    {
+        const outcome_t out = run_source("enum State:\n    idle\nenum Mode:\n    idle\nlet s: State = Mode.idle\n");
+        CHECK(!out.compiled);
+        CHECK(strcmp(out.name, "expected State, found Mode") == 0);
+    }
+}
+
+CNOR_TEST(imports_nominal_types_without_a_file_system)
+{
+    static const memory_file_t files[] = {
+        {"main.cn", "import \"types.cn\"\nlet mut p = Player(10, State.idle)\n"
+            "p.state = State.active\nadvance(p)\np.hp\n"},
+        {"types.cn", "enum State:\n    idle\n    active\n"
+            "struct Player:\n    hp: i32\n    state: State\n"
+            "fn advance(p: Player):\n    p.hp += 5\n"},
+    };
+    memory_loader_t loader;
+    outcome_t out;
+    run_program(files, 2U, lh_null, 0U, &loader, 1, &out);
+    CHECK(out.compiled);
+    CHECK_EQ(out.code, cnor_error_none);
+    CHECK_EQ(out.value, 15);
+}
+
+
+CNOR_TEST(declares_array_lists_and_typed_collections)
+{
+    CHECK_EQ(value_of("let a = [10, 20, 30]\na[0] + a[1] + a[2]\n"), 60);
+    CHECK_EQ(value_of("let a = []\nlen(a)\n"), 0);
+    CHECK_EQ(value_of("let a = [7,]\na[0]\n"), 7);
+    CHECK_EQ(value_of("let a = [\n    1,\n    2,\n]\nlen(a) + a[1]\n"), 4);
+    CHECK_EQ(value_of("let mut a: array[i32] = [10, 20, 30]\na[1] += 2\na[1]\n"), 22);
+    CHECK_EQ(value_of("fn f() -> i32:\n    let mut a: array[i32] = [10, 20]\n"
+        "    a[0] *= 3\n    a[1] = 7\n    return a[0] + a[1]\nf()\n"), 37);
+    CHECK_EQ(value_of("let a: array[i32] = [7; 3]\na[0] + a[2] + len(a)\n"), 17);
+    CHECK_EQ(value_of("let a: array[i32] = []\nlen(a)\n"), 0);
+    CHECK_EQ(value_of("let mut d: dict[i32] = dict(3)\nd[\"x\"] = 10\n"
+        "d[\"x\"] += 7\nd[\"x\"]\n"), 17);
+    CHECK_EQ(value_of("fn f() -> i32:\n    let mut d: dict[i32] = dict(2)\n"
+        "    d[\"x\"] = 12\n    d[\"x\"] -= 2\n    return d[\"x\"]\nf()\n"), 10);
+    CHECK_EQ(value_of("let a: array[i32] = [4]\nlet b: array[i32] = [8]\n(a if true else b)[0]\n"), 4);
+    CHECK_EQ(value_of("let mut a: dict[i32] = dict(1)\na[\"x\"] = 9\n"
+        "(a if true else a)[\"x\"]\n"), 9);
+    CHECK(bool_of("let d: dict[i32] = dict(1)\nd[\"missing\"] == none\n", lh_bool_true));
+    m_note_count = 0U;
+    CHECK_EQ(value_of("fn f() -> i32:\n    let a = [note(3), note(4), note(5)]\n"
+        "    return a[0] * 100 + a[1] * 10 + a[2]\nf()\n"), 345);
+    CHECK_EQ(m_note_count, 3U);
+    CHECK_EQ(m_notes[0], 3);
+    CHECK_EQ(m_notes[1], 4);
+    CHECK_EQ(m_notes[2], 5);
+}
+
+CNOR_TEST(carries_element_types_through_calls_and_loops)
+{
+    CHECK_EQ(value_of("fn sum(a: array[i32]) -> i32:\n    let mut n = 0\n"
+        "    for v in a:\n        n += v\n    a[0] = 4\n    return n\n"
+        "let mut a: array[i32] = [1, 2, 3]\nlet n = sum(a)\nn + a[0]\n"), 10);
+    CHECK_EQ(value_of("fn add(d: dict[i32]):\n    d[\"x\"] += 2\n"
+        "let mut d: dict[i32] = dict(1)\nd[\"x\"] = 3\nadd(d)\nd[\"x\"]\n"), 5);
+    CHECK_EQ(value_of("let a: array[i32] = [4, 5]\nlet alias = a\nalias[0] + alias[1]\n"), 9);
+    CHECK_EQ(value_of("enum State:\n    off\n    on\n"
+        "let mut a: array[State] = [State.off, State.on]\n"
+        "let mut n = 0\nfor state in a:\n    match state:\n"
+        "        State.off => n += 1\n        State.on => n += 10\nn\n"), 11);
+    CHECK_EQ(value_of("let mut d: dict[str] = dict(2)\nd[\"a\"] = \"one\"\n"
+        "let mut n = 0\nfor key in d:\n    n += len(key)\nn + len(d[\"a\"])\n"), 4);
+    CHECK_EQ(value_of("let mut parts: array[str] = [\"\"; 3]\n"
+        "split_into(\"a,b\", \",\", parts) + len(parts[1])\n"), 3);
+    CHECK_EQ(value_of("fn double(n: i32) -> i32:\n    return n * 2\n"
+        "let a: array[function] = [double]\nlet f = a[0]\nf(6)\n"), 12);
+}
+
+CNOR_TEST(rejects_incompatible_collection_values)
+{
+    CHECK_EQ(failure_of("let a: array[i32] = [1, \"x\"]\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let a: array[i32] = [\"x\"; 3]\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let mut a: array[i32] = [1]\na[0] = \"x\"\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("fn f():\n    let mut a: array[i32] = [1]\n    a[0] = false\nf()\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let mut d: dict[i32] = dict(1)\nd[\"x\"] = \"x\"\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("fn f():\n    let mut d: dict[i32] = dict(1)\n    d[\"x\"] = false\nf()\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let a: array[i32] = [1]\nlet s: str = a[0]\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let d: dict[i32] = dict(1)\nlet s: str = d[\"x\"]\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let a: array[i32] = [1]\nfor v in a:\n    let s: str = v\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let mut a: array[i32] = [1]\na[0] += \"x\"\n"), cnor_error_operand_type);
+    CHECK_EQ(failure_of("fn f():\n    let mut a: array[i32] = [1]\n    a[0] += \"x\"\nf()\n"), cnor_error_operand_type);
+    CHECK_EQ(failure_of("let mut d: dict[str] = dict(1)\nd[\"x\"] += 1\n"), cnor_error_operand_type);
+    CHECK_EQ(failure_of("fn f():\n    let mut d: dict[str] = dict(1)\n    d[\"x\"] += 1\nf()\n"), cnor_error_operand_type);
+    CHECK_EQ(failure_of("let a: array[i32] = [1]\nlet b: array[str] = a\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("fn f(a: array[str]):\n    return\nlet a: array[i32] = [1]\nf(a)\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("fn f(a: array):\n    a[0] = \"x\"\nlet a: array[i32] = [1]\nf(a)\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("fn f(a: array[i32]):\n    return\nlet a = [1]\nf(a)\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let a: array[i32] = [1]\nlet b: array = a\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let d: dict[i32] = dict(1)\nlet e: dict = d\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let a: array[i32] = [0; 2]\nsplit_into(\"a,b\", \",\", a)\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let a: array[Missing] = []\n"), cnor_error_unknown_type);
+    CHECK_EQ(failure_of("struct P:\n    x: i32\nlet a: array[P] = []\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let a: array[array] = []\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let a: array[dict] = []\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let a: dict[str] = [1]\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let d: array[i32] = dict(1)\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("fn f():\n    let a: array[i32] = [1]\n    return a\nf()\n"), cnor_error_array_returned);
+    CHECK_EQ(failure_of("fn f():\n    let d: dict[i32] = dict(1)\n    return d\nf()\n"), cnor_error_dict_returned);
+    {
+        const outcome_t out = run_source("let a: array[i32] = [1]\nlet b: array[str] = a\n");
+        CHECK(!out.compiled);
+        CHECK(strcmp(out.name, "expected array[str], found array[i32]") == 0);
+    }
+}
+
+
+CNOR_TEST(imports_collection_element_types)
+{
+    static const memory_file_t files[] = {
+        {"main.cn", "import \"types.cn\"\nlet modes: array[Mode] = [Mode.off, Mode.on]\n"
+            "let mut settings: dict[Mode] = dict(1)\nsettings[\"mode\"] = last(modes)\n"
+            "let mut result = 0\nmatch settings[\"mode\"]:\n"
+            "    Mode.off => result = 3\n    Mode.on => result = 7\nresult\n"},
+        {"types.cn", "enum Mode:\n    off\n    on\n"
+            "fn last(modes: array[Mode]) -> Mode:\n    return modes[len(modes) - 1]\n"},
+    };
+    memory_loader_t loader;
+    outcome_t out;
+    run_program(files, 2U, lh_null, 0U, &loader, 2, &out);
+    CHECK(out.compiled);
+    CHECK_EQ(out.code, cnor_error_none);
+    CHECK_EQ(out.value, 7);
+    {
+        static const memory_file_t invalid[] = {
+            {"main.cn", "import \"types.cn\"\nlet a: array[str] = [\"x\"]\nlast(a)\n"},
+            {"types.cn", "enum Mode:\n    off\n"
+                "fn last(a: array[Mode]) -> Mode:\n    return a[0]\n"},
+        };
+        run_program(invalid, 2U, lh_null, 0U, &loader, 1, &out);
+        CHECK(!out.compiled);
+        CHECK_EQ(out.code, cnor_error_type_mismatch);
+        CHECK(strcmp(out.file, "main.cn") == 0);
+    }
+}
+
+CNOR_TEST(handles_collection_boundaries_and_preserves_untyped_behavior)
+{
+    CHECK_EQ(value_of("let a = [1, \"two\", true]\nlen(a)\n"), 3);
+    CHECK_EQ(value_of("let mut a = [0; 1]\na[0] = \"text\"\nlen(a[0])\n"), 4);
+    CHECK_EQ(value_of("let mut d = dict(1)\nd[\"x\"] = 1\nd[\"x\"] = \"text\"\nlen(d[\"x\"])\n"), 4);
+    CHECK_EQ(value_of("let n = 7\nfn f() -> i32:\n"
+        "    let n: array[i32] = [n, n + 1]\n    return n[1]\nf()\n"), 8);
+    CHECK_EQ(value_of("fn f(a: array[i32]) -> i32:\n    return len(a)\n"
+        "let a: array[i32] = []\nf(a)\n"), 0);
+    CHECK_EQ(value_of("native fn echo(a: array[i32]) -> array[i32]\n"
+        "let a: array[i32] = [3]\nlet b = echo(a)\nb[0]\n"), 3);
+    CHECK_EQ(value_of("let mut a: array[i32] = [1]\na[0] += echo(2)\na[0]\n"), 3);
+    m_note_count = 0U;
+    CHECK_EQ(value_of("let a: array[i32] = [note(9); 3]\na[0] + a[1] + a[2]\n"), 27);
+    CHECK_EQ(m_note_count, 1U);
+    CHECK_EQ(failure_of("let a = [0; 65535]\n"), cnor_error_too_many_globals);
+    CHECK_EQ(failure_of("fn f():\n    let a = [0; 65535]\nf()\n"), cnor_error_too_many_locals);
+    CHECK_EQ(failure_of("let a = [0; 65536]\n"), cnor_error_too_many_globals);
+    CHECK_EQ(failure_of("let a: array[i32] = [1]\na[\"x\"]\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let d: dict[i32] = dict(1)\nd[0]\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let mut a: array[i32] = [1]\na[\"x\"] = 2\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let mut d: dict[i32] = dict(1)\nd[0] = 2\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let a: array[i32] = [1]\nlet alias = a\nlet s: str = alias[0]\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("enum A:\n    x\nenum B:\n    x\nlet a: array[A] = [B.x]\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("let mut a: array[bool] = [true]\na[0] += true\n"), cnor_error_operand_type);
+    CHECK_EQ(failure_of("let a: array[i32] = [1]\nlet mut n = a[0]\nn += \"x\"\n"), cnor_error_operand_type);
+    CHECK_EQ(failure_of("let mut a: array[i32] = [1]\na += a\n"), cnor_error_operand_type);
+    CHECK_EQ(failure_of("struct P:\n    a: array[i32]\n"), cnor_error_type_mismatch);
+    CHECK_EQ(failure_of("struct P:\n    d: dict[str]\n"), cnor_error_type_mismatch);
+}
+
 static const cnor_test_case_t m_cases[] = {
+    CNOR_TEST_CASE(imports_collection_element_types),
+    CNOR_TEST_CASE(handles_collection_boundaries_and_preserves_untyped_behavior),
+    CNOR_TEST_CASE(declares_array_lists_and_typed_collections),
+    CNOR_TEST_CASE(carries_element_types_through_calls_and_loops),
+    CNOR_TEST_CASE(rejects_incompatible_collection_values),
+    CNOR_TEST_CASE(has_nominal_records_and_enums),
+    CNOR_TEST_CASE(keeps_record_references_within_their_lifetime),
+    CNOR_TEST_CASE(checks_record_fields_and_enum_identity),
+    CNOR_TEST_CASE(imports_nominal_types_without_a_file_system),
     CNOR_TEST_CASE(has_the_bitwise_operators),
 CNOR_TEST_CASE(catches_an_error),
 CNOR_TEST_CASE(catches_an_error_from_a_function),

@@ -43,7 +43,7 @@ static const lh_char_t *const m_messages[cnor_error_count] = {
     "files import each other",
     "imports nested too deep",
     "too many files",
-    "an array or a dictionary is only a declaration",
+    "an array, dictionary or struct constructor is only allowed in a declaration",
     "image shorter than its header",
     "bad image signature",
     "unsupported image version",
@@ -72,6 +72,7 @@ static const lh_char_t *const m_messages[cnor_error_count] = {
     "the separator is empty",
     "the array is too small",
     "no function of that name",
+    "a struct must be constructed in its declaration and passed by reference; it cannot be stored or returned",
 };
 
 const lh_str_ptr
@@ -157,6 +158,7 @@ static const lh_char_t *const m_names[cnor_error_count] = {
     "empty_separator",
     "array_too_small",
     "unknown_function",
+    "struct_lifetime",
 };
 
 const lh_str_ptr

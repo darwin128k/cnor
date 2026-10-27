@@ -16,7 +16,7 @@ cnor_compile_value_or_none(cnor_compiler_t *self, const cnor_node_t *value)
 {
     if (value != lh_null)
     {
-        return cnor_compile_expr(self, value);
+        return cnor_compile_storable(self, value);
     }
     self->type = cnor_static_none;
     return cnor_emit_op(self, cnor_op_push_none);
@@ -94,64 +94,53 @@ cnor_compile_let_global(cnor_compiler_t *self, const cnor_node_t *node, cnor_sta
     return cnor_compile_store(self, &binding);
 }
 
-/* A top-level array: its elements live in the globals, so they outlive the
- * frame of the top-level code that makes them. */
+/* Fixed arrays use one header slot and one slot per element, globally or locally. */
 static lh_bool_t
-cnor_compile_let_global_array(cnor_compiler_t *self, const cnor_node_t *node)
+cnor_compile_let_array(cnor_compiler_t *self, const cnor_node_t *node, cnor_static_type_t type)
 {
-    const cnor_node_t *const array = node->data.let.init;
+    const cnor_node_t *array = node->data.let.init;
+    const cnor_node_t *value = array->data.array.value;
     const lh_u32_t count = array->data.array.count;
-    const cnor_binding_t binding = cnor_scope_resolve(self, node->name);
-
-    cnor_scope_global_at(&self->scope, binding.index)->type = cnor_static_array;
-    if (binding.index + count + 1U > self->globals_ready)
-    {
-        self->globals_ready = binding.index + count + 1U;
-    }
-    /* The value every element holds. */
-    if (!cnor_compile_expr(self, array->data.array.value))
-    {
-        return lh_bool_false;
-    }
-    return cnor_emit_insn(self, cnor_op_array_new_global, binding.index, count);
-}
-
-/* `let mut name = [value; count]`: the name takes a slot for the array and a
- * slot per element, and every element holds the value. */
-static lh_bool_t
-cnor_compile_let_array(cnor_compiler_t *self, const cnor_node_t *node, const cnor_node_t *array)
-{
-    const lh_u32_t count = array->data.array.count;
+    const lh_bool_t global = cnor_compile_at_top_level(self);
     cnor_slot_t slot;
-
-    if (cnor_compile_at_top_level(self))
+    lh_u32_t index;
+    if (count >= CNOR_SLOT_MAX)
+        return cnor_compile_fail(self, node, global ? cnor_error_too_many_globals : cnor_error_too_many_locals);
+    /* Initializers see the outer binding, and run from left to right. */
+    for (; value != lh_null; value = array->data.array.is_list ? value->next : lh_null)
     {
-        /* A global array would outlive the frame its elements live in. */
-        return cnor_compile_fail(self, node, cnor_error_not_a_declaration);
+        if (!cnor_compile_storable(self, value)
+            || !cnor_type_require(self, value, cnor_type_element(type), self->type)) return lh_bool_false;
     }
-    if (!cnor_scope_add_local(self, node, node->name, node->data.let.is_mutable,
-                              cnor_static_array, (lh_u16_t) count, &slot))
+    if (global)
     {
+        const cnor_binding_t binding = cnor_scope_resolve(self, node->name);
+        slot = binding.index;
+        cnor_scope_global_at(&self->scope, slot)->type = type;
+        if (slot + count + 1U > self->globals_ready) self->globals_ready = slot + count + 1U;
+    }
+    else if (!cnor_scope_add_local(self, node, node->name, node->data.let.is_mutable,
+                                  type, (lh_u16_t) count, &slot)) return lh_bool_false;
+    if (array->data.array.is_list && !cnor_emit_op(self, cnor_op_push_none)) return lh_bool_false;
+    if (!cnor_emit_insn(self, global ? cnor_op_array_new_global : cnor_op_array_new, slot, count))
         return lh_bool_false;
-    }
-    /* The value every element holds. */
-    if (!cnor_compile_expr(self, array->data.array.value))
-    {
-        return lh_bool_false;
-    }
-    /* `array_new` fills the elements and writes the array's value. */
-    return cnor_emit_insn(self, cnor_op_array_new, slot, count);
+    if (array->data.array.is_list)
+        for (index = count; index > 0U; --index)
+            if (!cnor_emit_insn(self, global ? cnor_op_store_global : cnor_op_store_local,
+                               slot + index, 0U)) return lh_bool_false;
+    return lh_bool_true;
 }
 
 /* A top-level dictionary: its pairs live in the globals, so they outlive the
  * frame of the top-level code that makes them. */
 static lh_bool_t
-cnor_compile_let_global_dict(cnor_compiler_t *self, const cnor_node_t *node, lh_u32_t room)
+cnor_compile_let_global_dict(cnor_compiler_t *self, const cnor_node_t *node, lh_u32_t room,
+                              cnor_static_type_t type)
 {
     const cnor_binding_t binding = cnor_scope_resolve(self, node->name);
     const lh_u32_t slots = room * 2U + 3U;
 
-    cnor_scope_global_at(&self->scope, binding.index)->type = cnor_static_dict;
+    cnor_scope_global_at(&self->scope, binding.index)->type = type;
     if (binding.index + slots > self->globals_ready)
     {
         self->globals_ready = binding.index + slots;
@@ -162,7 +151,8 @@ cnor_compile_let_global_dict(cnor_compiler_t *self, const cnor_node_t *node, lh_
 /* `let mut name = dict(n)`: the name takes a slot for the dictionary, two
  * for its header and two per key and value. */
 static lh_bool_t
-cnor_compile_let_dict(cnor_compiler_t *self, const cnor_node_t *node, lh_u32_t room)
+cnor_compile_let_dict(cnor_compiler_t *self, const cnor_node_t *node, lh_u32_t room,
+                       cnor_static_type_t type)
 {
     cnor_slot_t slot;
 
@@ -171,6 +161,8 @@ cnor_compile_let_dict(cnor_compiler_t *self, const cnor_node_t *node, lh_u32_t r
     {
         return lh_bool_false;
     }
+    ((struct cnor_local_decl *) lh_array_get_ptr(&self->scope.locals,
+        lh_array_get_size(&self->scope.locals) - 1U))->type = type;
     /* `dict_new` writes the room and the dictionary's value. */
     return cnor_emit_insn(self, cnor_op_dict_new, slot, room);
 }
@@ -183,20 +175,18 @@ cnor_compile_let(cnor_compiler_t *self, const cnor_node_t *node)
     cnor_binding_t binding;
     cnor_slot_t slot;
 
+    if (node->data.let.init != lh_null && node->data.let.init->kind == cnor_node_call)
+    {
+        const struct cnor_named_type *named = cnor_named_find(self, node->data.let.init->name);
+        if (named != lh_null && named->node->kind == cnor_node_struct)
+            return cnor_compile_struct_let(self, node, named);
+    }
     /* An array initializer: the name takes the slots of the elements. */
     if (node->data.let.init != lh_null && node->data.let.init->kind == cnor_node_array)
     {
-        if (annotation != cnor_type_none
-            && !cnor_type_require(self, node, cnor_type_of_annotation(annotation),
-                                  cnor_static_array))
-        {
-            return lh_bool_false;
-        }
-        if (cnor_compile_at_top_level(self))
-        {
-            return cnor_compile_let_global_array(self, node);
-        }
-        return cnor_compile_let_array(self, node, node->data.let.init);
+        type = annotation == cnor_type_none ? cnor_static_array : cnor_type_of_node(self, node, annotation);
+        if (!cnor_type_require(self, node, cnor_static_array, cnor_type_base(type))) return lh_bool_false;
+        return cnor_compile_let_array(self, node, type);
     }
     /* A dictionary initializer: `dict(n)` names the room the dictionary has.
      * A name of the script's own wins, as it does for `len`. */
@@ -210,17 +200,13 @@ cnor_compile_let(cnor_compiler_t *self, const cnor_node_t *node)
             {
                 return cnor_compile_fail(self, node, cnor_error_dict_room);
             }
-            if (annotation != cnor_type_none
-                && !cnor_type_require(self, node, cnor_type_of_annotation(annotation),
-                                      cnor_static_dict))
-            {
-                return lh_bool_false;
-            }
+            type = annotation == cnor_type_none ? cnor_static_dict : cnor_type_of_node(self, node, annotation);
+            if (!cnor_type_require(self, node, cnor_static_dict, cnor_type_base(type))) return lh_bool_false;
             if (cnor_compile_at_top_level(self))
             {
-                return cnor_compile_let_global_dict(self, node, room);
+                return cnor_compile_let_global_dict(self, node, room, type);
             }
-            return cnor_compile_let_dict(self, node, room);
+            return cnor_compile_let_dict(self, node, room, type);
         }
     }
     /* The initializer is compiled before the name exists, so `let x = x + 1`
@@ -228,11 +214,12 @@ cnor_compile_let(cnor_compiler_t *self, const cnor_node_t *node)
      * would be this global before its `let`). */
     if (!cnor_compile_value_or_none(self, node->data.let.init)
         || (annotation != cnor_type_none
-            && !cnor_type_require(self, node, cnor_type_of_annotation(annotation), self->type)))
+            && !cnor_type_require(self, node, cnor_type_of_node(self, node, annotation), self->type)))
     {
         return lh_bool_false;
     }
-    type = cnor_type_of_variable(annotation, self->type);
+    type = annotation == cnor_type_none ? cnor_type_of_variable(annotation, self->type)
+                                      : cnor_type_of_node(self, node, annotation);
     if (cnor_compile_at_top_level(self))
     {
         return cnor_compile_let_global(self, node, type);
@@ -244,6 +231,37 @@ cnor_compile_let(cnor_compiler_t *self, const cnor_node_t *node)
     binding.kind = cnor_binding_local;
     binding.index = slot;
     return cnor_compile_store(self, &binding);
+}
+
+static lh_bool_t
+cnor_compile_collection_value(cnor_compiler_t *self, const cnor_node_t *value,
+                               cnor_static_type_t collection)
+{
+    return cnor_compile_storable(self, value)
+        && cnor_type_require(self, value, cnor_type_element(collection), self->type);
+}
+
+static lh_bool_t
+cnor_compile_collection_op(cnor_compiler_t *self, const cnor_node_t *node,
+                            cnor_static_type_t collection)
+{
+    static const cnor_binary_op_t binary_ops[cnor_assign_count] = {
+        cnor_binary_add, cnor_binary_add, cnor_binary_sub, cnor_binary_mul, cnor_binary_div,
+        cnor_binary_mod, cnor_binary_band, cnor_binary_bor, cnor_binary_bxor
+    };
+    static const cnor_op_t ops[cnor_assign_count] = {
+        cnor_op_add, cnor_op_add, cnor_op_sub, cnor_op_mul, cnor_op_div,
+        cnor_op_mod, cnor_op_band, cnor_op_bor, cnor_op_bxor
+    };
+    cnor_node_t binary = {0};
+    cnor_static_type_t result;
+    binary.line = node->line;
+    binary.data.binary.op = binary_ops[node->data.assign.op];
+    if (!cnor_compile_storable(self, node->data.assign.value)
+        || !cnor_type_binary(self, &binary, cnor_type_element(collection), self->type, &result)
+        || !cnor_type_require(self, node, cnor_type_element(collection), result)) return lh_bool_false;
+    self->type = result;
+    return cnor_emit_op(self, ops[node->data.assign.op]);
 }
 
 /* `settings["key"] = value`: a pair of the dictionary in @p binding. */
@@ -258,10 +276,10 @@ cnor_compile_assign_dict(cnor_compiler_t *self, const cnor_node_t *node,
         /* A global dictionary: its value goes on the stack, then the key and
          * the value. */
         if (!cnor_compile_expr(self, base)
-            || !cnor_type_require(self, target, cnor_static_dict, self->type)
+            || !cnor_type_require(self, target, binding->type, self->type)
             || !cnor_compile_expr(self, target->data.index.index)
             || !cnor_type_require(self, target, cnor_static_str, self->type)
-            || !cnor_compile_expr(self, node->data.assign.value))
+            || !cnor_compile_collection_value(self, node->data.assign.value, binding->type))
         {
             return lh_bool_false;
         }
@@ -274,7 +292,7 @@ cnor_compile_assign_dict(cnor_compiler_t *self, const cnor_node_t *node,
     /* The key, then the value; `dict_set_l` takes both. */
     if (!cnor_compile_expr(self, target->data.index.index)
         || !cnor_type_require(self, target, cnor_static_str, self->type)
-        || !cnor_compile_expr(self, node->data.assign.value))
+        || !cnor_compile_collection_value(self, node->data.assign.value, binding->type))
     {
         return lh_bool_false;
     }
@@ -294,23 +312,23 @@ cnor_compile_assign_index(cnor_compiler_t *self, const cnor_node_t *node,
         return cnor_compile_fail(self, target, cnor_error_not_assignable);
     }
     binding = cnor_scope_resolve(self, base->name);
-    if (binding.type == cnor_static_dict)
+    if (cnor_type_base(binding.type) == cnor_static_dict)
     {
         return cnor_compile_assign_dict(self, node, target, &binding);
     }
-    if (binding.kind != cnor_binding_local || binding.type != cnor_static_array)
+    if (binding.kind != cnor_binding_local || cnor_type_base(binding.type) != cnor_static_array)
     {
-        if (binding.type != cnor_static_array)
+        if (cnor_type_base(binding.type) != cnor_static_array)
         {
             return cnor_compile_fail(self, target, cnor_error_not_assignable);
         }
         /* A global array: its value goes on the stack, then the index and the
          * value. */
         if (!cnor_compile_expr(self, base)
-            || !cnor_type_require(self, target, cnor_static_array, self->type)
+            || !cnor_type_require(self, target, binding.type, self->type)
             || !cnor_compile_expr(self, target->data.index.index)
             || !cnor_type_require(self, target, cnor_static_i32, self->type)
-            || !cnor_compile_expr(self, node->data.assign.value))
+            || !cnor_compile_collection_value(self, node->data.assign.value, binding.type))
         {
             return lh_bool_false;
         }
@@ -323,7 +341,7 @@ cnor_compile_assign_index(cnor_compiler_t *self, const cnor_node_t *node,
     /* The index, then the value; `array_set_l` takes both. */
     if (!cnor_compile_expr(self, target->data.index.index)
         || !cnor_type_require(self, target, cnor_static_i32, self->type)
-        || !cnor_compile_expr(self, node->data.assign.value))
+        || !cnor_compile_collection_value(self, node->data.assign.value, binding.type))
     {
         return lh_bool_false;
     }
@@ -354,14 +372,24 @@ static lh_bool_t
 cnor_compile_assign_name_op(cnor_compiler_t *self, const cnor_node_t *node,
                              const cnor_binding_t *binding)
 {
+    static const cnor_binary_op_t binary_ops[cnor_assign_count] = {
+        cnor_binary_add, cnor_binary_add, cnor_binary_sub, cnor_binary_mul, cnor_binary_div,
+        cnor_binary_mod, cnor_binary_band, cnor_binary_bor, cnor_binary_bxor
+    };
+    cnor_node_t binary = {0};
+    cnor_static_type_t result;
+    binary.line = node->line;
+    binary.data.binary.op = binary_ops[node->data.assign.op];
     if (!cnor_compile_expr(self, node->data.assign.target)
-        || !cnor_compile_expr(self, node->data.assign.value)
+        || !cnor_compile_storable(self, node->data.assign.value)
+        || !cnor_type_binary(self, &binary, binding->type, self->type, &result)
         || !cnor_emit_op(self, m_assign_ops[node->data.assign.op]))
     {
         return lh_bool_false;
     }
     /* The result is what is stored, so it must have the type of the target. */
-    return cnor_type_require(self, node, binding->type, self->type)
+    self->type = result;
+    return cnor_type_require(self, node, binding->type, result)
            && cnor_compile_store(self, binding);
 }
 
@@ -375,7 +403,6 @@ cnor_compile_assign_index_op(cnor_compiler_t *self, const cnor_node_t *node,
                               const cnor_node_t *target)
 {
     const cnor_node_t *const base = target->data.index.target;
-    const cnor_op_t op = m_assign_ops[node->data.assign.op];
     cnor_binding_t binding;
 
     if (base->kind != cnor_node_ident)
@@ -383,7 +410,7 @@ cnor_compile_assign_index_op(cnor_compiler_t *self, const cnor_node_t *node,
         return cnor_compile_fail(self, target, cnor_error_not_assignable);
     }
     binding = cnor_scope_resolve(self, base->name);
-    if (binding.type != cnor_static_array && binding.type != cnor_static_dict)
+    if (cnor_type_base(binding.type) != cnor_static_array && cnor_type_base(binding.type) != cnor_static_dict)
     {
         return cnor_compile_fail(self, target, cnor_error_not_assignable);
     }
@@ -397,26 +424,24 @@ cnor_compile_assign_index_op(cnor_compiler_t *self, const cnor_node_t *node,
          * keeps the index for the write. */
         if (!cnor_compile_expr(self, target->data.index.index)
             || !cnor_type_require(self, target,
-                                  binding.type == cnor_static_dict ? cnor_static_str
+                                  cnor_type_base(binding.type) == cnor_static_dict ? cnor_static_str
                                                                     : cnor_static_i32,
                                   self->type)
             || !cnor_emit_op(self, cnor_op_dup))
         {
             return lh_bool_false;
         }
-        if (binding.type == cnor_static_dict)
+        if (cnor_type_base(binding.type) == cnor_static_dict)
         {
             if (!cnor_emit_insn(self, cnor_op_dict_get_l, binding.index, 0U)
-                || !cnor_compile_expr(self, node->data.assign.value)
-                || !cnor_emit_op(self, op))
+                || !cnor_compile_collection_op(self, node, binding.type))
             {
                 return lh_bool_false;
             }
             return cnor_emit_insn(self, cnor_op_dict_set_l, binding.index, 0U);
         }
         if (!cnor_emit_insn(self, cnor_op_array_get_l, binding.index, 0U)
-            || !cnor_compile_expr(self, node->data.assign.value)
-            || !cnor_emit_op(self, op))
+            || !cnor_compile_collection_op(self, node, binding.type))
         {
             return lh_bool_false;
         }
@@ -428,7 +453,7 @@ cnor_compile_assign_index_op(cnor_compiler_t *self, const cnor_node_t *node,
      * has no room to move it, so the value waits in a slot. */
     {
         const cnor_static_type_t index_type =
-            binding.type == cnor_static_dict ? cnor_static_str : cnor_static_i32;
+            cnor_type_base(binding.type) == cnor_static_dict ? cnor_static_str : cnor_static_i32;
         cnor_slot_t slot;
 
         if (!cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false,
@@ -444,7 +469,7 @@ cnor_compile_assign_index_op(cnor_compiler_t *self, const cnor_node_t *node,
         {
             return lh_bool_false;
         }
-        if (binding.type == cnor_static_dict)
+        if (cnor_type_base(binding.type) == cnor_static_dict)
         {
             if (!cnor_emit_op(self, cnor_op_dict_get))
             {
@@ -457,8 +482,7 @@ cnor_compile_assign_index_op(cnor_compiler_t *self, const cnor_node_t *node,
         }
         /* The value on the right, and the operation: the result waits in the
          * slot. */
-        if (!cnor_compile_expr(self, node->data.assign.value)
-            || !cnor_emit_op(self, op)
+        if (!cnor_compile_collection_op(self, node, binding.type)
             || !cnor_emit_insn(self, cnor_op_store_local, slot, 0U))
         {
             return lh_bool_false;
@@ -472,7 +496,7 @@ cnor_compile_assign_index_op(cnor_compiler_t *self, const cnor_node_t *node,
         {
             return lh_bool_false;
         }
-        if (binding.type == cnor_static_dict)
+        if (cnor_type_base(binding.type) == cnor_static_dict)
         {
             return cnor_emit_op(self, cnor_op_dict_set);
         }
@@ -494,6 +518,7 @@ cnor_compile_assign(cnor_compiler_t *self, const cnor_node_t *node)
         }
         return cnor_compile_assign_index(self, node, target);
     }
+    if (target->kind == cnor_node_member) return cnor_compile_member_assign(self, node);
     if (target->kind != cnor_node_ident)
     {
         return cnor_compile_fail(self, target, cnor_error_not_assignable);
@@ -515,11 +540,13 @@ cnor_compile_assign(cnor_compiler_t *self, const cnor_node_t *node)
     {
         return lh_bool_false;
     }
+    if (cnor_named_is_struct(self, binding.type))
+        return cnor_compile_fail(self, node, cnor_error_struct_lifetime);
     if (node->data.assign.op != cnor_assign_set)
     {
         return cnor_compile_assign_name_op(self, node, &binding);
     }
-    return cnor_compile_expr(self, node->data.assign.value)
+    return cnor_compile_storable(self, node->data.assign.value)
            && cnor_type_require(self, node, binding.type, self->type)
            && cnor_compile_store(self, &binding);
 }
@@ -554,13 +581,15 @@ cnor_compile_return(cnor_compiler_t *self, const cnor_node_t *node)
     {
         return lh_bool_false;
     }
-    if (self->type == cnor_static_array)
+    if (cnor_named_is_struct(self, self->type))
+        return cnor_compile_fail(self, node, cnor_error_struct_lifetime);
+    if (cnor_type_base(self->type) == cnor_static_array)
     {
         /* The elements of an array live in a frame or in the globals: a
          * returned array would point at a frame that is gone. */
         return cnor_compile_fail(self, node, cnor_error_array_returned);
     }
-    if (self->type == cnor_static_dict)
+    if (cnor_type_base(self->type) == cnor_static_dict)
     {
         /* The pairs of a dictionary live in a frame or in the globals: a
          * returned dictionary would point at a frame that is gone. */

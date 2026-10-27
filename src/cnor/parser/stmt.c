@@ -16,7 +16,7 @@ cnor_parser_type_of(lh_str_view_t name)
 {
     lh_uint_t i;
 
-    for (i = 1U; i < (lh_uint_t) cnor_type_count; ++i)
+    for (i = 1U; i < (lh_uint_t) cnor_type_named; ++i)
     {
         if (lh_str_view_equals(&name, &m_type_names[i], lh_bool_false))
         {
@@ -27,7 +27,7 @@ cnor_parser_type_of(lh_str_view_t name)
 }
 
 lh_bool_t
-cnor_parser_type(cnor_parser_t *self, cnor_type_t *out, lh_str_view_t *name)
+cnor_parser_type(cnor_parser_t *self, cnor_type_t *out, cnor_node_t *owner)
 {
     if (!cnor_parser_at(self, cnor_token_ident))
     {
@@ -38,13 +38,35 @@ cnor_parser_type(cnor_parser_t *self, cnor_type_t *out, lh_str_view_t *name)
     if (*out == cnor_type_none)
     {
         *out = cnor_type_named;
-        if (!cnor_arena_copy_text(self->arena, cnor_parser_text(self), name))
+        if (!cnor_arena_copy_text(self->arena, cnor_parser_text(self), &owner->type_name))
         {
             cnor_parser_fail(self, cnor_error_no_memory);
             return lh_bool_false;
         }
     }
-    return cnor_parser_advance(self);
+    if (!cnor_parser_advance(self)) return lh_bool_false;
+    if (cnor_parser_accept_punct(self, cnor_punct_lbracket))
+    {
+        if ((*out != cnor_type_array && *out != cnor_type_dict)
+            || !cnor_parser_at(self, cnor_token_ident))
+        {
+            cnor_parser_fail(self, cnor_error_unexpected_token);
+            return lh_bool_false;
+        }
+        owner->element_type = cnor_parser_type_of(cnor_parser_text(self));
+        if (owner->element_type == cnor_type_none)
+        {
+            owner->element_type = cnor_type_named;
+            if (!cnor_arena_copy_text(self->arena, cnor_parser_text(self), &owner->element_type_name))
+            {
+                cnor_parser_fail(self, cnor_error_no_memory);
+                return lh_bool_false;
+            }
+        }
+        if (!cnor_parser_advance(self)
+            || !cnor_parser_expect_punct(self, cnor_punct_rbracket)) return lh_bool_false;
+    }
+    return lh_bool_true;
 }
 
 /* -- simple statements ----------------------------------------------------- */
@@ -73,7 +95,7 @@ cnor_parser_let(cnor_parser_t *self)
         return lh_null;
     }
     if (cnor_parser_accept_punct(self, cnor_punct_colon)
-        && !cnor_parser_type(self, &node->data.let.type, &node->type_name))
+        && !cnor_parser_type(self, &node->data.let.type, node))
     {
         return lh_null;
     }

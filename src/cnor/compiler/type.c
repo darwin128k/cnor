@@ -16,6 +16,31 @@
  *   on those operand types; with `any` involved it is left to run time.
  */
 
+/* Collection annotations do not change runtime values or the image format. */
+cnor_static_type_t
+cnor_type_base(cnor_static_type_t type)
+{
+    if ((lh_u32_t) type >= CNOR_TYPED_DICT_BASE) return cnor_static_dict;
+    if ((lh_u32_t) type >= CNOR_TYPED_ARRAY_BASE) return cnor_static_array;
+    return type;
+}
+
+cnor_static_type_t
+cnor_type_element(cnor_static_type_t type)
+{
+    const cnor_static_type_t base = cnor_type_base(type);
+    if (base == type) return cnor_static_any;
+    return (cnor_static_type_t) ((lh_u32_t) type -
+        (base == cnor_static_array ? CNOR_TYPED_ARRAY_BASE : CNOR_TYPED_DICT_BASE));
+}
+
+cnor_static_type_t
+cnor_type_collection(cnor_static_type_t base, cnor_static_type_t element)
+{
+    return (cnor_static_type_t) ((base == cnor_static_array ? CNOR_TYPED_ARRAY_BASE : CNOR_TYPED_DICT_BASE)
+                                + (lh_u32_t) element);
+}
+
 /* -- names ----------------------------------------------------------------- */
 
 static const lh_char_t *const m_type_names[cnor_static_type_count] = {
@@ -37,7 +62,7 @@ static const lh_char_t *const m_binary_spellings[cnor_binary_count] = {
 const lh_char_t *
 cnor_type_name(cnor_static_type_t type)
 {
-    return m_type_names[type];
+    return type >= cnor_static_type_count ? "user-defined type" : m_type_names[type];
 }
 
 cnor_static_type_t
@@ -88,6 +113,27 @@ cnor_type_detail_put(cnor_type_detail_t *self, const lh_char_t *text)
     {
         self->text[self->size++] = *text;
     }
+}
+
+static void
+cnor_type_detail_type(cnor_compiler_t *self, cnor_type_detail_t *detail, cnor_static_type_t type)
+{
+    const struct cnor_named_type *named = cnor_named_of(self, type);
+    lh_usize_t i;
+    if (cnor_type_base(type) != type)
+    {
+        cnor_type_detail_put(detail, cnor_type_base(type) == cnor_static_array ? "array[" : "dict[");
+        cnor_type_detail_type(self, detail, cnor_type_element(type));
+        cnor_type_detail_put(detail, "]");
+        return;
+    }
+    if (named == lh_null)
+    {
+        cnor_type_detail_put(detail, cnor_type_name(type));
+        return;
+    }
+    for (i = 0U; i < named->node->name.size && detail->size < CNOR_DIAG_NAME_CAPACITY; ++i)
+        detail->text[detail->size++] = ((const lh_char_t *) named->node->name.begin)[i];
 }
 
 static lh_bool_t
@@ -149,9 +195,9 @@ cnor_type_require(cnor_compiler_t *self, const cnor_node_t *node, cnor_static_ty
     }
     detail.size = 0U;
     cnor_type_detail_put(&detail, "expected ");
-    cnor_type_detail_put(&detail, cnor_type_name(wanted));
+    cnor_type_detail_type(self, &detail, wanted);
     cnor_type_detail_put(&detail, ", found ");
-    cnor_type_detail_put(&detail, cnor_type_name(found));
+    cnor_type_detail_type(self, &detail, found);
     return cnor_type_fail(self, node, cnor_error_type_mismatch, &detail);
 }
 
@@ -166,7 +212,7 @@ cnor_type_require_text(cnor_compiler_t *self, const cnor_node_t *node, const lh_
     cnor_type_detail_put(&detail, "expected ");
     cnor_type_detail_put(&detail, wanted);
     cnor_type_detail_put(&detail, ", found ");
-    cnor_type_detail_put(&detail, cnor_type_name(found));
+    cnor_type_detail_type(self, &detail, found);
     return cnor_type_fail(self, node, cnor_error_type_mismatch, &detail);
 }
 
@@ -327,11 +373,11 @@ cnor_type_binary(cnor_compiler_t *self, const cnor_node_t *node, cnor_static_typ
         return lh_bool_true;
     }
     detail.size = 0U;
-    cnor_type_detail_put(&detail, cnor_type_name(left));
+    cnor_type_detail_type(self, &detail, left);
     cnor_type_detail_put(&detail, " ");
     cnor_type_detail_put(&detail, m_binary_spellings[node->data.binary.op]);
     cnor_type_detail_put(&detail, " ");
-    cnor_type_detail_put(&detail, cnor_type_name(right));
+    cnor_type_detail_type(self, &detail, right);
     return cnor_type_fail(self, node, cnor_error_operand_type, &detail);
 }
 
@@ -349,6 +395,6 @@ cnor_type_negate(cnor_compiler_t *self, const cnor_node_t *node, cnor_static_typ
     }
     detail.size = 0U;
     cnor_type_detail_put(&detail, "-");
-    cnor_type_detail_put(&detail, cnor_type_name(operand));
+    cnor_type_detail_type(self, &detail, operand);
     return cnor_type_fail(self, node, cnor_error_operand_type, &detail);
 }

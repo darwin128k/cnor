@@ -60,6 +60,13 @@ enum cnor_static_type
 /** @copybrief cnor_static_type */
 typedef enum cnor_static_type cnor_static_type_t;
 
+/** @brief Typed collections are compiler-only; element identifiers fit below this tag. */
+#define CNOR_TYPED_ARRAY_BASE 0x100000U
+#define CNOR_TYPED_DICT_BASE  0x200000U
+cnor_static_type_t cnor_type_base(cnor_static_type_t type);
+cnor_static_type_t cnor_type_element(cnor_static_type_t type);
+cnor_static_type_t cnor_type_collection(cnor_static_type_t base, cnor_static_type_t element);
+
 /* -- files (module.c, path.c) ---------------------------------------------- */
 
 /**
@@ -356,6 +363,8 @@ struct cnor_compiler
     lh_u32_t globals_ready;         /**< Top-level code: globals whose `let` has run. */
     cnor_static_type_t type;        /**< Of the expression compiled last. */
     cnor_static_type_t returns;     /**< Declared return type; `any` without one. */
+    lh_array_t named_types;         /**< User-defined type declarations. */
+    lh_array_t annotations;         /**< Resolved annotations, keyed by AST node. */
     lh_array_t calls;               /**< struct cnor_call_edge, from function code. */
     lh_array_t early_calls;         /**< struct cnor_early_call, from top-level code. */
 };
@@ -382,6 +391,32 @@ cnor_compile_fail_text(cnor_compiler_t *self, cnor_line_t line, cnor_error_t cod
 lh_bool_t
 cnor_compile_fail_binding(cnor_compiler_t *self, const cnor_node_t *node,
                           const cnor_binding_t *binding);
+
+/* named.c: nominal types use existing frame arrays and integer constants. */
+struct cnor_named_type
+{
+    const cnor_node_t *node;
+    cnor_module_index_t module;
+    cnor_static_type_t type;
+};
+struct cnor_annotation
+{
+    const cnor_node_t *node;
+    cnor_static_type_t type;
+};
+lh_bool_t cnor_named_prepare(cnor_compiler_t *self);
+cnor_static_type_t cnor_type_of_node(cnor_compiler_t *self, const cnor_node_t *node,
+                                     cnor_type_t annotation);
+const struct cnor_named_type *cnor_named_find(cnor_compiler_t *self, lh_str_view_t name);
+const struct cnor_named_type *cnor_named_of(cnor_compiler_t *self, cnor_static_type_t type);
+lh_bool_t cnor_named_is_struct(cnor_compiler_t *self, cnor_static_type_t type);
+lh_bool_t cnor_compile_member(cnor_compiler_t *self, const cnor_node_t *node);
+lh_bool_t cnor_compile_member_assign(cnor_compiler_t *self, const cnor_node_t *node);
+lh_bool_t cnor_compile_struct_let(cnor_compiler_t *self, const cnor_node_t *node,
+                                   const struct cnor_named_type *type);
+lh_bool_t cnor_compile_storable(cnor_compiler_t *self, const cnor_node_t *node);
+lh_bool_t cnor_named_pattern(cnor_compiler_t *self, const cnor_node_t *node,
+                              cnor_static_type_t *type, lh_u32_t *value);
 
 /* path.c */
 

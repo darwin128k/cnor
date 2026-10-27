@@ -229,9 +229,15 @@ cnor_match_check_patterns(cnor_compiler_t *self, const cnor_node_t *arm,
     {
         const cnor_node_t *pattern = arm->data.arm.pattern;
 
+        cnor_static_type_t pattern_type = pattern != lh_null ? cnor_type_of_literal(pattern) : cnor_static_any;
+        if (pattern != lh_null && pattern->kind == cnor_node_member)
+        {
+            lh_u32_t value;
+            if (!cnor_named_pattern(self, pattern, &pattern_type, &value)) return lh_bool_false;
+        }
         if (pattern != lh_null
-            && !cnor_type_comparable(subject, cnor_type_of_literal(pattern))
-            && !cnor_type_require(self, pattern, subject, cnor_type_of_literal(pattern)))
+            && !cnor_type_comparable(subject, pattern_type)
+            && !cnor_type_require(self, pattern, subject, pattern_type))
         {
             return lh_bool_false;
         }

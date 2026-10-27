@@ -176,11 +176,11 @@ cnor_compile_for_collection(cnor_compiler_t *self, const cnor_node_t *node)
         return lh_bool_false;
     }
     type = self->type;
-    if (type == cnor_static_array)
+    if (cnor_type_base(type) == cnor_static_array)
     {
         element = cnor_op_array_get_l;
     }
-    else if (type == cnor_static_dict)
+    else if (cnor_type_base(type) == cnor_static_dict)
     {
         /* A dictionary is walked by its keys. */
         element = cnor_op_dict_key_l;
@@ -211,7 +211,9 @@ cnor_compile_for_collection(cnor_compiler_t *self, const cnor_node_t *node)
                                  0U, &index)
         || !cnor_emit_insn(self, cnor_op_store_local, index, 0U)
         /* The variable of the loop. */
-        || !cnor_scope_add_local(self, node, node->name, lh_bool_false, cnor_static_any, 0U, &var))
+        || !cnor_scope_add_local(self, node, node->name, lh_bool_false,
+                                 cnor_type_base(type) == cnor_static_dict ? cnor_static_str : cnor_type_element(type),
+                                 0U, &var))
     {
         return lh_bool_false;
     }

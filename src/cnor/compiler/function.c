@@ -18,9 +18,17 @@ cnor_compile_declaration(cnor_compiler_t *self, const cnor_node_t *node)
         lh_u32_t room = 0U;
         lh_u16_t count;
 
-        if (init != lh_null && init->kind == cnor_node_array)
+        const struct cnor_named_type *named =
+            init != lh_null && init->kind == cnor_node_call ? cnor_named_find(self, init->name) : lh_null;
+        if (named != lh_null && named->node->kind == cnor_node_struct)
+        {
+            count = (lh_u16_t) (named->node->data.fn.param_count + 1U);
+        }
+        else if (init != lh_null && init->kind == cnor_node_array)
         {
             /* An array takes a slot for itself and a slot per element. */
+            if (init->data.array.count >= CNOR_SLOT_MAX)
+                return cnor_compile_fail(self, node, cnor_error_too_many_globals);
             count = (lh_u16_t) (init->data.array.count + 1U);
         }
         else if (cnor_compiler_dict_form(init, &room) == cnor_dict_declared
@@ -258,7 +266,7 @@ cnor_compile_params(cnor_compiler_t *self, const cnor_node_t *param)
     for (; param != lh_null; param = param->next)
     {
         cnor_slot_t slot;
-        const cnor_static_type_t type = cnor_type_of_annotation(param->data.param.type);
+        const cnor_static_type_t type = cnor_type_of_node(self, param, param->data.param.type);
 
         /* An array parameter is a reference to the elements, so it is mutable:
          * writing into it is what it is for. A dictionary parameter is a
@@ -266,7 +274,8 @@ cnor_compile_params(cnor_compiler_t *self, const cnor_node_t *param)
          * parameters hold a value, and writing to one changes nothing
          * outside. */
         if (!cnor_scope_add_local(self, param, param->name,
-                                  (type == cnor_static_array || type == cnor_static_dict)
+                                  (cnor_type_base(type) == cnor_static_array || cnor_type_base(type) == cnor_static_dict
+                                   || cnor_named_is_struct(self, type))
                                       ? lh_bool_true
                                       : lh_bool_false,
                                   type, 0U, &slot))
@@ -360,7 +369,7 @@ cnor_compile_function(cnor_compiler_t *self, cnor_function_index_t index)
     const cnor_node_t *node = cnor_scope_function_at(&self->scope, index)->node;
 
     cnor_compile_begin_function(self, index);
-    self->returns = cnor_type_of_annotation(node->data.fn.returns);
+    self->returns = cnor_type_of_node(self, node, node->data.fn.returns);
     self->emit.line = node->line;
     if (!cnor_compile_params(self, node->data.fn.params)
         || !cnor_compile_block(self, node->data.fn.body))

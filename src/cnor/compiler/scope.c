@@ -391,7 +391,7 @@ cnor_scope_add_global(cnor_compiler_t *self, const cnor_node_t *node, lh_u16_t c
     }
     decl.key = cnor_scope_key(node->name, self->module);
     decl.is_mutable = node->data.let.is_mutable;
-    decl.type = cnor_type_of_annotation(node->data.let.type);
+    decl.type = cnor_type_of_node(self, node, node->data.let.type);
     cnor_name_index_add(&self->scope.top, decl.key, cnor_binding_global,
                         (lh_u16_t) lh_array_push_back(&self->scope.globals, &decl));
     /* The elements of an array follow its own slot: they live in the globals
@@ -473,7 +473,7 @@ cnor_scope_add_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view
     /* An array takes a slot for its value and a slot per element; the others
      * take one. A dictionary is a value here: the pairs it holds live where it
      * was made, and only its declaration takes them. */
-    const lh_u32_t slots = (type == cnor_static_array) ? (lh_u32_t) count + 1U : 1U;
+    const lh_u32_t slots = (cnor_type_base(type) == cnor_static_array) ? (lh_u32_t) count + 1U : 1U;
 
     return cnor_scope_take_local(self, node, name, is_mutable, type, count, slots, slot);
 }

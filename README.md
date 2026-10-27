@@ -149,6 +149,45 @@ if (cnor_compiler_compile_source(source, lh_null, &image, &diag))
 }
 ```
 
+## Records and enumerations
+
+```cn
+enum State:
+    idle
+    active
+
+struct Player:
+    hp: i32
+    state: State
+
+let mut player = Player(100, State.idle)
+player.hp -= 10
+player.state = State.active
+println(player.hp)
+```
+
+Field names, constructor arguments and enum types are checked at compile
+time. Records use fixed frame/global storage and can be passed to functions
+by reference; they cannot be copied or returned. Fields currently support
+scalars and enums. See [the language specification](docs/lang-spec.md#66-named-records-and-enumerations)
+and [the runnable example](examples/records.cn).
+
+## Typed collections
+
+```cn
+let mut scores: array[i32] = [10, 20, 30]
+scores[0] += 5
+
+let mut labels: dict[str] = dict(4)
+labels["name"] = "cnor"
+```
+
+An annotation checks initializer values, writes and element uses at compile
+time. Helper parameters use the same type (`fn total(a: array[i32]) -> i32:`).
+Bare `array` / `dict` remain untyped; `[0; 32]` still fills an array, and
+`[]` makes an empty one. See [the example](examples/collections.cn) and
+[the collection rules](docs/lang-spec.md#67-typed-collections-and-array-lists).
+
 ## License
 
 MIT, see [LICENSE.md](LICENSE.md).

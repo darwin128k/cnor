@@ -23,7 +23,7 @@
  * @def CNOR_DIAG_NAME_CAPACITY
  * @brief Bytes of a name a diagnostic keeps; longer names are cut.
  */
-#define CNOR_DIAG_NAME_CAPACITY 32U
+#define CNOR_DIAG_NAME_CAPACITY 64U
 
 /**
  * @def CNOR_DIAG_FILE_CAPACITY

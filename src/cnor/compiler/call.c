@@ -19,7 +19,7 @@ cnor_compile_args(cnor_compiler_t *self, const cnor_node_t *node, const cnor_nod
         if (params != lh_null)
         {
             if (!cnor_type_require(self, arg,
-                                   cnor_type_of_annotation(params->data.param.type), self->type))
+                                   cnor_type_of_node(self, params, params->data.param.type), self->type))
             {
                 return lh_bool_false;
             }
@@ -31,9 +31,9 @@ cnor_compile_args(cnor_compiler_t *self, const cnor_node_t *node, const cnor_nod
 
 /* The type a declaration's `->` names; `any` without one. */
 static cnor_static_type_t
-cnor_compile_result_type(const cnor_node_t *declaration)
+cnor_compile_result_type(cnor_compiler_t *self, const cnor_node_t *declaration)
 {
-    return declaration != lh_null ? cnor_type_of_annotation(declaration->data.fn.returns)
+    return declaration != lh_null ? cnor_type_of_node(self, declaration, declaration->data.fn.returns)
                                   : cnor_static_any;
 }
 
@@ -54,7 +54,7 @@ cnor_compile_call_function(cnor_compiler_t *self, const cnor_node_t *node, lh_u1
         return lh_bool_false;
     }
     cnor_order_call(self, node, index);
-    self->type = cnor_compile_result_type(declaration);
+    self->type = cnor_compile_result_type(self, declaration);
     return cnor_emit_insn(self, cnor_op_call, index, node->data.call.argc);
 }
 
@@ -74,7 +74,7 @@ cnor_compile_call_native(cnor_compiler_t *self, const cnor_node_t *node, lh_u16_
     {
         return lh_bool_false;
     }
-    self->type = cnor_compile_result_type(native->node);
+    self->type = cnor_compile_result_type(self, native->node);
     return cnor_emit_insn(self, cnor_op_native, cnor_scope_import_native(self, index), argc);
 }
 
@@ -98,6 +98,12 @@ cnor_compile_call_string_builtin(cnor_compiler_t *self, const cnor_node_t *node,
         if (!cnor_compile_expr(self, arg))
         {
             return lh_bool_false;
+        }
+        if (builtin == cnor_builtin_split_into && index == 2U
+            && cnor_type_base(self->type) == cnor_static_array
+            && cnor_type_element(self->type) == cnor_static_str)
+        {
+            continue;
         }
         if (!cnor_type_require(self, arg, params[index], self->type))
         {
@@ -140,8 +146,8 @@ cnor_compile_call_builtin(cnor_compiler_t *self, const cnor_node_t *node)
         return lh_bool_false;
     }
     /* The length of a text, of an array or of a dictionary. */
-    if (self->type != cnor_static_str && self->type != cnor_static_array
-        && self->type != cnor_static_dict
+    if (self->type != cnor_static_str && cnor_type_base(self->type) != cnor_static_array
+        && cnor_type_base(self->type) != cnor_static_dict
         && !cnor_type_require(self, node->data.call.args, cnor_static_str, self->type))
     {
         return lh_bool_false;
@@ -196,6 +202,8 @@ cnor_compile_call_value(cnor_compiler_t *self, const cnor_node_t *node,
 lh_bool_t
 cnor_compile_call(cnor_compiler_t *self, const cnor_node_t *node)
 {
+    if (cnor_named_find(self, node->name) != lh_null)
+        return cnor_compile_fail(self, node, cnor_error_not_a_declaration);
     const cnor_binding_t binding = cnor_scope_resolve(self, node->name);
 
     switch (binding.kind)

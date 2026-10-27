@@ -368,13 +368,15 @@ CNOR_TEST(reports_the_line_a_syntax_error_is_on)
     done(&p);
 }
 
-CNOR_TEST(refuses_a_type_it_has_never_heard_of)
+CNOR_TEST(keeps_a_named_type_for_the_compiler)
 {
     parsed_t p;
 
     parse(&p, "fn f(x: widget) -> i32:\n    return 1\n");
-    CHECK(p.tree == lh_null);
-    CHECK_EQ(p.error, cnor_error_unknown_type);
+    CHECK(p.tree != lh_null);
+    CHECK_EQ(p.tree->data.fn.params->data.param.type, cnor_type_named);
+    CHECK_EQ(lh_str_view_get_size(&p.tree->data.fn.params->type_name), 6U);
+    CHECK(memcmp(lh_str_view_get_data(&p.tree->data.fn.params->type_name), "widget", 6U) == 0);
     done(&p);
 }
 
@@ -525,7 +527,60 @@ CNOR_TEST(reads_imports_at_the_top_of_a_file_only)
     done(&p);
 }
 
+
+CNOR_TEST(reads_collection_annotations_and_lists)
+{
+    parsed_t p;
+    parse(&p, "let a: array[i32] = [1, 2, 3,]\n");
+    CHECK(p.tree != lh_null);
+    CHECK_EQ(p.tree->data.let.type, cnor_type_array);
+    CHECK_EQ(p.tree->element_type, cnor_type_i32);
+    CHECK(init_of(p.tree)->data.array.is_list);
+    CHECK_EQ(init_of(p.tree)->data.array.count, 3U);
+    CHECK_EQ(cnor_node_list_length(init_of(p.tree)->data.array.value), 3U);
+    done(&p);
+    parse(&p, "let a = []\n");
+    CHECK(p.tree != lh_null);
+    CHECK(init_of(p.tree)->data.array.is_list);
+    CHECK_EQ(init_of(p.tree)->data.array.count, 0U);
+    CHECK(init_of(p.tree)->data.array.value == lh_null);
+    done(&p);
+    parse(&p, "fn f(d: dict[State]) -> array[str]:\n    return\n");
+    CHECK(p.tree != lh_null);
+    CHECK_EQ(p.tree->element_type, cnor_type_str);
+    CHECK_EQ(p.tree->data.fn.params->element_type, cnor_type_named);
+    CHECK_EQ(lh_str_view_get_size(&p.tree->data.fn.params->element_type_name), 5U);
+    done(&p);
+    parse(&p, "let a = [0; 4]\n");
+    CHECK(p.tree != lh_null);
+    CHECK(!init_of(p.tree)->data.array.is_list);
+    CHECK_EQ(init_of(p.tree)->data.array.count, 4U);
+    done(&p);
+}
+
+CNOR_TEST(refuses_malformed_lists_and_collection_annotations)
+{
+    static const char *const cases[] = {
+        "let a = [1,, 2]\n", "let a = [1, 2; 3]\n", "let a = [1 2]\n",
+        "let a = [; 3]\n", "let a = [1,\n", "let a = [1; 2, 3]\n",
+        "let a: array[] = []\n", "let a: array[i32, str] = []\n",
+        "let a: array[array[i32]] = []\n", "let a: i32[str] = 1\n",
+        "let a: array[i32 = []\n",
+    };
+    size_t i;
+    for (i = 0U; i < sizeof(cases) / sizeof(cases[0]); ++i)
+    {
+        parsed_t p;
+        parse(&p, cases[i]);
+        CHECK(p.tree == lh_null);
+        CHECK(p.error != cnor_error_none);
+        done(&p);
+    }
+}
+
 static const cnor_test_case_t m_cases[] = {
+    CNOR_TEST_CASE(reads_collection_annotations_and_lists),
+    CNOR_TEST_CASE(refuses_malformed_lists_and_collection_annotations),
     CNOR_TEST_CASE(reads_a_function_with_a_body),
     CNOR_TEST_CASE(reads_several_functions_into_one_list),
     CNOR_TEST_CASE(binds_names_with_let),
@@ -550,7 +605,7 @@ static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(reads_a_native_declaration),
     CNOR_TEST_CASE(keeps_names_out_of_the_source_buffer),
     CNOR_TEST_CASE(reports_the_line_a_syntax_error_is_on),
-    CNOR_TEST_CASE(refuses_a_type_it_has_never_heard_of),
+    CNOR_TEST_CASE(keeps_a_named_type_for_the_compiler),
     CNOR_TEST_CASE(refuses_a_block_with_nothing_in_it),
     CNOR_TEST_CASE(refuses_source_with_nothing_in_it_at_all),
     CNOR_TEST_CASE(refuses_a_bad_character_with_its_line),

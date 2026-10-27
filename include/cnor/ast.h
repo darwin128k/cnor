@@ -29,6 +29,8 @@ enum cnor_node_kind
     cnor_node_fn = 0,     /**< `fn name(params) -> type:` + body. */
     cnor_node_native_fn,  /**< `native fn name(params) -> type`. */
     cnor_node_import,     /**< `import "path"`; the unescaped path is in `name`. */
+    cnor_node_struct,     /**< Named record declaration; fields in data.fn.params. */
+    cnor_node_enum,       /**< Named enumeration; members in data.fn.params. */
     cnor_node_param,      /**< One parameter: `name: type`. */
     /* statements */
     cnor_node_let,        /**< `let [mut] name [: type] [= init]`. */
@@ -57,9 +59,7 @@ enum cnor_node_kind
     cnor_node_unary,      /**< `op operand`. */
     cnor_node_index,      /**< `target[index]`. */
     cnor_node_ternary,    /**< `value if condition else other`. */
-    cnor_node_array,      /**< `[value; count]`: an array of `count` elements. */
-    cnor_node_struct,     /**< Named record declaration; fields in data.fn.params. */
-    cnor_node_enum,       /**< Named enumeration; members in data.fn.params. */
+    cnor_node_array,      /**< `[value; count]` or `[a, b, c]`: a fixed array. */
     cnor_node_member,     /**< `target.name`; target in data.index.target. */
     cnor_node_kind_count  /**< Number of kinds; not a kind itself. */
 };
@@ -68,8 +68,8 @@ typedef enum cnor_node_kind cnor_node_kind_t;
 
 /**
  * @enum cnor_type
- * @brief A type annotation as written. Annotations are parsed and kept, but not
- *        checked yet: values carry their kind at run time.
+ * @brief A type annotation as written. The compiler checks annotations;
+ *        named annotations keep their spelling in the owning node.
  */
 enum cnor_type
 {
@@ -264,8 +264,9 @@ union cnor_node_data
     } ternary;
     struct
     {
-        cnor_node_t *value; /**< The value every element holds. */
+        cnor_node_t *value; /**< Fill expression, or a list of initializer expressions. */
         lh_u32_t count;     /**< How many elements. */
+        lh_bool_t is_list;  /**< `value` is a list of elements, rather than a fill. */
     } array;
 };
 
@@ -278,6 +279,8 @@ struct cnor_node
     cnor_node_kind_t kind;     /**< Which construct. */
     cnor_line_t line;          /**< Line it starts on. */
     lh_str_view_t name;        /**< Name or literal text; arena-owned. */
+    cnor_type_t element_type; /**< Optional array/dict value annotation. */
+    lh_str_view_t element_type_name; /**< Named element annotation. */
     lh_str_view_t type_name;  /**< User-defined annotation, empty for built-ins. */
     cnor_node_t *next;         /**< Next sibling in a list. */
     union cnor_node_data data; /**< Per-kind members. */

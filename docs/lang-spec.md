@@ -156,34 +156,38 @@ ambiguity Python has.
 ```
 program     := { import } { top_level }
 import      := "import" STRING end
-top_level   := fn_decl | native_decl | statement
+top_level   := fn_decl | native_decl | struct_decl | enum_decl | statement
+struct_decl := "struct" IDENT ":" NEWLINE INDENT { IDENT ":" type end } DEDENT
+enum_decl   := "enum" IDENT ":" NEWLINE INDENT { IDENT end } DEDENT
 fn_decl     := "fn" IDENT "(" [ params ] ")" [ "->" type ] ":" block
 native_decl := "native" "fn" IDENT "(" [ params ] ")" [ "->" type ] end
 params      := param { "," param }
 param       := IDENT ":" type
-type        := "i32" | "u32" | "f32" | "bool" | "str" | "array" | "dict" | "function"
+type        := "i32" | "u32" | "f32" | "bool" | "str" | "array" | "dict" | "function" | IDENT
+              | "array" "[" element_type "]" | "dict" "[" element_type "]"
+element_type := "i32" | "u32" | "f32" | "bool" | "str" | "function" | IDENT
 block       := NEWLINE INDENT statement { statement } DEDENT
 statement   := simple end | compound
 simple      := let | assign | expr | "return" [ expr ] | "break" | "continue" | "raise"
 let         := "let" [ "mut" ] IDENT [ ":" type ] [ "=" expr ]
 assign      := target ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" ) expr
-target      := IDENT | IDENT "[" expr "]"
+target      := IDENT | IDENT "[" expr "]" | IDENT "." IDENT
 compound    := if | while | for | match | try
 if          := "if" expr ":" block [ "else" ( ":" block | if ) ]
 while       := "while" expr ":" block
 for         := "for" IDENT "in" ( expr ".." expr | expr ) ":" block
 match       := "match" expr ":" NEWLINE INDENT arm { arm } DEDENT
-arm         := ( literal | "-" literal | "_" ) "=>" simple [ "," ] end
+arm         := ( literal | "-" literal | IDENT "." IDENT | "_" ) "=>" simple [ "," ] end
 try         := "try" ":" block [ "catch" [ IDENT ] ":" block ] [ "finally" ":" block ]
 end         := [ ";" ] ( NEWLINE | DEDENT | EOF )      (or ";" then more on the line)
 expr        := binary [ "if" binary "else" expr ]
-postfix     := primary { "[" expr "]" }
+postfix     := primary { "[" expr "]" | "." IDENT }
 primary     := literal | IDENT | IDENT "(" [ args ] ")" | "(" expr ")" | array
-array       := "[" expr ";" INT "]"
+array       := "[" ( expr ";" INT | [ expr { "," expr } [ "," ] ] ) "]"
 literal     := INT | REAL | STRING | "true" | "false" | "none"
 ```
 
-**[cnor]** An array literal (`[value; count]`) is a declaration, not a value:
+**[cnor]** An array literal (`[value; count]` or `[a, b, c]`) is a declaration, not a value:
 its elements are slots of a frame or of the globals, so it is only a `let`'s
 initializer. An array is written `let mut scores = [0; 32]`, and read and
 written with the index: `scores[i]` and `scores[i] = v`. The bounds are
@@ -354,11 +358,11 @@ the machine when an operator executes, as before.
   an `i32` parameter refuses `1.5`, an `f32` one refuses `1`. `none` is
   accepted only where no type is declared. An `array` is only an array: it is
   not a number and not text, so it cannot be used as one.
-- **Arrays.** An array's elements hold whatever they were given, so an element
-  is of type `any`. The array itself cannot be read as a value: `scores` is an
+- **Arrays.** An untyped array's elements hold whatever they were given, so an element
+  is of type `any`; an `array[T]` element has static type `T` (section 6.7). The array itself cannot be read as a value: `scores` is an
   error, `scores[i]` is the element.
-- **Dictionaries.** A dictionary's pairs hold whatever they were given, so a
-  value is of type `any`. The dictionary itself cannot be read as a value:
+- **Dictionaries.** An untyped dictionary's pairs hold whatever they were given, so a
+  value is of type `any`; a `dict[T]` value has static type `T` (section 6.7). The dictionary itself cannot be read as a value:
   `settings` is an error, `settings["hp"]` is the value. A key is a text: a
   number where one is required is an error.
 - **Variables.** `let x: T = e` requires `e` to be a `T`; `let x: T` without
@@ -496,6 +500,138 @@ closures, a preprocessor, metatables.
 
 ---
 
+### 6.6 Named records and enumerations
+
+`struct` and `enum` declare nominal types at the top level. They can appear
+before or after code that uses them. Their names participate in the same
+module/import lookup as other declarations, and may be used in variable,
+parameter and return annotations. A type and another top-level declaration
+cannot share a name in the same module. Imported types are visible through
+direct imports; ambiguous imported type names are rejected.
+
+```cn
+enum State:
+    idle
+    active
+
+struct Player:
+    hp: i32
+    state: State
+
+fn damage(p: Player, amount: i32):
+    p.hp -= amount
+
+let mut player: Player = Player(100, State.idle)
+damage(player, 10)
+player.state = State.active
+println(player.hp)
+
+match player.state:
+    State.idle => println("idle"),
+    State.active => println("active"),
+```
+
+A record constructor is a `let` initializer. Its arguments correspond to
+fields in declaration order; every field must be supplied exactly once.
+Reads and assignments use `record.field`, including compound assignments
+such as `record.hp += 1`. Unknown fields and incompatible values are compile
+errors. Fields can hold scalar types (`i32`, `u32`, `f32`, `bool`, `str`) or
+an enum. Nested records, collection fields and function fields are currently
+rejected. A record must have at least one field; names must be unique.
+
+A record's fields occupy fixed slots in its declaring frame, or global slots
+for a top-level declaration. There is no runtime allocation for constructing
+it. A function parameter borrows its fields by reference: writes in the
+function are visible to the caller. Record parameters allow field mutation,
+as array and dictionary parameters do. Elsewhere, field mutation requires a
+`let mut` binding. A record cannot be copied into another binding or
+collection, rebound or returned, because that could outlive its frame;
+`struct_lifetime` reports such uses. These are static checks; as with existing
+collections, an untyped host/native boundary is responsible for the lifetime
+of values it retains or returns.
+
+Enums have one or more unique member names, written one per line. They have
+no payloads or explicit numeric initializers. Members are numbered from zero
+in declaration order and compile to integer constants, but their static type
+is their declaring enum. Different enums and integers are incompatible;
+arithmetic on enum values is rejected. Enum values can be assigned, passed,
+returned, compared with `==` / `!=`, and used as `match` patterns.
+
+Records compile to the existing array instructions; enums to the existing
+integer instructions. No additional VM instructions, filesystem support,
+garbage collector or image-format revision is required.
+
+---
+
+### 6.7 Typed collections and array lists
+
+Element annotations are optional. Existing `array`, `dict`, `[fill; count]`
+and `dict(capacity)` code remains untyped and may hold mixed scalar values.
+An explicit `array[T]` or `dict[T]` keeps its element type through declarations,
+aliases, indexing, function parameters and imported functions. `dict[T]`
+always has string keys; `T` describes the values, not the keys.
+
+```cn
+fn total(values: array[i32]) -> i32:
+    let mut sum = 0
+    for value in values:
+        sum += value
+    return sum
+
+let mut scores: array[i32] = [10, 20, 30]
+scores[0] += 5
+println(total(scores))
+
+let mut labels: dict[str] = dict(4)
+labels["name"] = "cnor"
+labels["name"] += " collections"
+
+let mut parts: array[str] = [""; 4]
+let count = split_into("one,two,three", ",", parts)
+```
+
+`[a, b, c]` allocates a fixed array with those elements. `[]`, `[value]`,
+a trailing comma and lists spanning multiple lines are supported. List
+expressions run exactly once each, from left to right, before the new local
+binding is introduced. `[fill; count]` still evaluates its fill expression
+once. Both forms are `let` initializers, not temporary array values; their
+storage is reserved in the declaring frame or in the globals. Without an
+annotation both forms are untyped, so `[1, "two"]` remains valid.
+
+The compiler checks every explicitly typed initializer, index assignment and
+compound assignment against `T`. Array iteration gives `T`; dictionary
+iteration gives string keys. Reads from a typed collection have static type
+`T`, so incompatible uses of an element are diagnosed before execution.
+`len` accepts either typed or untyped collections. `split_into` accepts an
+untyped array or `array[str]` and refuses other typed arrays.
+
+Mutable collection signatures are invariant: `array[i32]` and `array[str]`
+are incompatible, as are typed and untyped collection signatures. This prevents
+a typed array from being passed to an untyped parameter that might write a
+value of another type. To use a typed array in a helper, give its parameter
+the same annotation. An unannotated alias (`let other = scores`) preserves the
+original annotation. As in the rest of the language, values statically known
+only as `any` are accepted and the host/native boundary is responsible for
+what it supplies; annotations do not add runtime element tags or validation.
+
+An element type may be a scalar, a function value, or a named enum (including
+one loaded through an import). Different enum types remain distinct inside
+collections. Nested collection annotations and struct elements are currently
+rejected. Collections still cannot be returned from script functions; their
+existing frame lifetime and fixed capacity rules are unchanged.
+
+A missing dictionary key still yields `none`, including in a typed dictionary.
+The element annotation checks stored values and does not prove key presence;
+check the result against `none` before using a possibly absent value. Bounds,
+missing-value arithmetic and capacity failures retain their runtime checks.
+
+Typed collections use the same runtime values and bytecode instructions as
+untyped collections. No image-format change, filesystem or garbage collector
+is needed. Diagnostic detail capacity is 64 bytes so ordinary collection type
+mismatches can include both complete type names.
+
+---
+
 ## 7. The `.cnb` image format, v14
 
 **[cnor]** v1 replaced the original header (whose layout used `sizeof` and
@@ -559,7 +695,7 @@ version, and an image produced by a newer version is rejected rather than
 
 ```
 fn let mut if else match for in while return break continue
-true false none and or not import native try catch finally raise
+true false none and or not import native try catch finally raise struct enum
 ```
 
 **[cnor]** `in` (for `for`) and `none` (the literal) were missing from the

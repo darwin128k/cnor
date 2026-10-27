@@ -19,6 +19,9 @@ cnor_compile_nothing(cnor_compiler_t *self, const cnor_node_t *node)
  * node kinds.
  */
 static const cnor_compile_rule_t m_rules[cnor_node_kind_count] = {
+    [cnor_node_struct] = {lh_null, cnor_compile_nothing},
+    [cnor_node_enum] = {lh_null, cnor_compile_nothing},
+    [cnor_node_member] = {cnor_compile_member, lh_null},
     [cnor_node_fn] = {lh_null, cnor_compile_nothing},
     [cnor_node_native_fn] = {lh_null, cnor_compile_nothing},
     [cnor_node_import] = {lh_null, cnor_compile_nothing},

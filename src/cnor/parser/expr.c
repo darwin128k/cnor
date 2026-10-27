@@ -98,39 +98,44 @@ cnor_parser_parenthesized(cnor_parser_t *self)
     return node;
 }
 
-/* `[value; count]`: an array of `count` elements, every one of them `value`. */
+/* Both `[fill; count]` and an explicit list `[a, b, c]`. */
 static cnor_node_t *
 cnor_parser_array(cnor_parser_t *self)
 {
     cnor_node_t *node = cnor_parser_node(self, cnor_node_array);
-    cnor_node_t *value;
-    cnor_node_t *count;
-
-    if (node == lh_null)
+    cnor_node_list_t values = {lh_null, lh_null};
+    if (node == lh_null || !cnor_parser_advance(self)) return lh_null;
+    node->data.array.is_list = lh_bool_true;
+    if (!cnor_parser_at_punct(self, cnor_punct_rbracket))
     {
-        return lh_null;
+        cnor_node_t *first = cnor_parser_expr(self);
+        if (first == lh_null) return lh_null;
+        if (cnor_parser_accept_punct(self, cnor_punct_semicolon))
+        {
+            cnor_node_t *count = cnor_parser_expr(self);
+            if (count == lh_null) return lh_null;
+            if (count->kind != cnor_node_int) return cnor_parser_fail(self, cnor_error_bad_number);
+            node->data.array.value = first;
+            node->data.array.count = count->data.int_.value;
+            node->data.array.is_list = lh_bool_false;
+        }
+        else
+        {
+            cnor_node_list_append(&values, first);
+            node->data.array.count = 1U;
+            while (cnor_parser_accept_punct(self, cnor_punct_comma)
+                   && !cnor_parser_at_punct(self, cnor_punct_rbracket))
+            {
+                cnor_node_t *value = cnor_parser_expr(self);
+                if (value == lh_null) return lh_null;
+                if (++node->data.array.count >= CNOR_SLOT_MAX)
+                    return cnor_parser_fail(self, cnor_error_too_many_locals);
+                cnor_node_list_append(&values, value);
+            }
+            node->data.array.value = values.head;
+        }
     }
-    cnor_parser_advance(self);
-    value = cnor_parser_expr(self);
-    if (value == lh_null || !cnor_parser_expect_punct(self, cnor_punct_semicolon))
-    {
-        return lh_null;
-    }
-    count = cnor_parser_expr(self);
-    if (count == lh_null)
-    {
-        return lh_null;
-    }
-    if (count->kind != cnor_node_int)
-    {
-        return cnor_parser_fail(self, cnor_error_bad_number);
-    }
-    if (!cnor_parser_expect_punct(self, cnor_punct_rbracket))
-    {
-        return lh_null;
-    }
-    node->data.array.value = value;
-    node->data.array.count = count->data.int_.value;
+    if (!cnor_parser_expect_punct(self, cnor_punct_rbracket)) return lh_null;
     return node;
 }
 

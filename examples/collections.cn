@@ -1,0 +1,19 @@
+# Explicit element types work with lists, fills, parameters and dictionaries.
+fn total(values: array[i32]) -> i32:
+    let mut sum = 0
+    for value in values:
+        sum += value
+    return sum
+
+let mut scores: array[i32] = [10, 20, 30]
+scores[0] += 5
+println("total =", total(scores))
+
+let mut labels: dict[str] = dict(4)
+labels["name"] = "cnor"
+labels["name"] += " collections"
+println(labels["name"])
+
+let mut parts: array[str] = [""; 4]
+let count = split_into("one,two,three", ",", parts)
+println("parts =", count, parts[0], parts[1], parts[2])

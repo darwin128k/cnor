@@ -50,6 +50,8 @@ cnor_compiler_init(cnor_compiler_t *self, const cnor_compiler_config_t *config, 
     cnor_constant_pool_init(&self->constants);
     cnor_modules_init(self);
     cnor_order_init(self);
+    lh_array_init(&self->named_types, sizeof(struct cnor_named_type));
+    lh_array_init(&self->annotations, sizeof(struct cnor_annotation));
     self->loop_depth = 0U;
     self->try_depth = 0U;
     self->function = 0U;
@@ -62,6 +64,8 @@ cnor_compiler_init(cnor_compiler_t *self, const cnor_compiler_config_t *config, 
 static void
 cnor_compiler_deinit(cnor_compiler_t *self)
 {
+    lh_array_deinit(&self->annotations);
+    lh_array_deinit(&self->named_types);
     cnor_order_deinit(self);
     cnor_modules_deinit(self);
     cnor_emit_deinit(&self->emit);
@@ -252,7 +256,8 @@ cnor_compiler_compile(const cnor_node_t *program, const cnor_compiler_config_t *
         return cnor_diag_set(diag, cnor_error_empty_block, 0U, 0U);
     }
     cnor_compiler_init(&compiler, config != lh_null ? config : &defaults, diag);
-    ok = cnor_modules_load(&compiler, program) && cnor_compile_declare(&compiler)
+    ok = cnor_modules_load(&compiler, program) && cnor_named_prepare(&compiler)
+         && cnor_compile_declare(&compiler)
          && cnor_compile_bodies(&compiler) && cnor_compiler_relocate(&compiler)
          && cnor_compiler_write_image(&compiler, out);
     if (!ok && cnor_module_count(&compiler) > 0U)

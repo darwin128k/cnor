@@ -133,6 +133,7 @@ set(CNOR_COMPILER_SOURCES
         ${CNOR_SRC_PATH}/cnor/compiler/function.c
         ${CNOR_SRC_PATH}/cnor/compiler/path.c
         ${CNOR_SRC_PATH}/cnor/compiler/module.c
+        ${CNOR_SRC_PATH}/cnor/compiler/named.c
         ${CNOR_SRC_PATH}/cnor/compiler/type.c
         ${CNOR_SRC_PATH}/cnor/compiler/order.c
 )

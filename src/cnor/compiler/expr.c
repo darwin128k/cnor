@@ -299,7 +299,7 @@ cnor_compile_index_array(cnor_compiler_t *self, const cnor_node_t *node,
         return lh_bool_false;
     }
     /* The elements hold whatever they were given. */
-    self->type = cnor_static_any;
+    self->type = cnor_type_element(binding->type);
     return cnor_emit_insn(self, cnor_op_array_get_l, binding->index, 0U);
 }
 
@@ -311,8 +311,8 @@ cnor_compile_index_array_value(cnor_compiler_t *self, const cnor_node_t *node)
 {
     cnor_static_type_t target_type = cnor_static_any;
 
-    if (!cnor_compile_expr(self, node->data.index.target)
-        || !cnor_type_require(self, node, cnor_static_array, target_type))
+    if (!cnor_compile_typed(self, node->data.index.target, &target_type)
+        || !cnor_type_require(self, node, cnor_static_array, cnor_type_base(target_type)))
     {
         return lh_bool_false;
     }
@@ -321,7 +321,7 @@ cnor_compile_index_array_value(cnor_compiler_t *self, const cnor_node_t *node)
     {
         return lh_bool_false;
     }
-    self->type = cnor_static_any;
+    self->type = cnor_type_element(target_type);
     return cnor_emit_op(self, cnor_op_array_get);
 }
 
@@ -337,7 +337,7 @@ cnor_compile_index_dict(cnor_compiler_t *self, const cnor_node_t *node,
         return lh_bool_false;
     }
     /* The pairs hold whatever they were given. */
-    self->type = cnor_static_any;
+    self->type = cnor_type_element(binding->type);
     return cnor_emit_insn(self, cnor_op_dict_get_l, binding->index, 0U);
 }
 
@@ -348,8 +348,8 @@ cnor_compile_index_dict_value(cnor_compiler_t *self, const cnor_node_t *node)
 {
     cnor_static_type_t target_type = cnor_static_any;
 
-    if (!cnor_compile_expr(self, node->data.index.target)
-        || !cnor_type_require(self, node, cnor_static_dict, target_type))
+    if (!cnor_compile_typed(self, node->data.index.target, &target_type)
+        || !cnor_type_require(self, node, cnor_static_dict, cnor_type_base(target_type)))
     {
         return lh_bool_false;
     }
@@ -358,8 +358,30 @@ cnor_compile_index_dict_value(cnor_compiler_t *self, const cnor_node_t *node)
     {
         return lh_bool_false;
     }
-    self->type = cnor_static_any;
+    self->type = cnor_type_element(target_type);
     return cnor_emit_op(self, cnor_op_dict_get);
+}
+
+/* Index an expression once, including a typed collection chosen by a ternary. */
+static lh_bool_t
+cnor_compile_index_value(cnor_compiler_t *self, const cnor_node_t *node)
+{
+    cnor_static_type_t type;
+    cnor_static_type_t base;
+    cnor_static_type_t index_type;
+    cnor_op_t op;
+    if (!cnor_compile_typed(self, node->data.index.target, &type)) return lh_bool_false;
+    base = cnor_type_base(type);
+    index_type = base == cnor_static_dict ? cnor_static_str : cnor_static_i32;
+    op = base == cnor_static_dict ? cnor_op_dict_get
+         : base == cnor_static_array ? cnor_op_array_get : cnor_op_index;
+    if (base != cnor_static_array && base != cnor_static_dict
+        && !cnor_type_require(self, node, cnor_static_str, type)) return lh_bool_false;
+    if (!cnor_compile_expr(self, node->data.index.index)
+        || !cnor_type_require(self, node, index_type, self->type)) return lh_bool_false;
+    self->type = base == cnor_static_array || base == cnor_static_dict
+        ? cnor_type_element(type) : cnor_static_str;
+    return cnor_emit_op(self, op);
 }
 
 /* `text[i]`: a one-character string of a string, at an integer.
@@ -379,11 +401,12 @@ cnor_compile_index(cnor_compiler_t *self, const cnor_node_t *node)
     cnor_slot_t b;
     lh_u32_t k;
 
+    if (target->kind != cnor_node_ident) return cnor_compile_index_value(self, node);
     if (target->kind == cnor_node_ident)
     {
         const cnor_binding_t binding = cnor_scope_resolve(self, target->name);
 
-        if (binding.type == cnor_static_dict)
+        if (cnor_type_base(binding.type) == cnor_static_dict)
         {
             if (binding.kind == cnor_binding_local)
             {
@@ -392,7 +415,7 @@ cnor_compile_index(cnor_compiler_t *self, const cnor_node_t *node)
             /* A global dictionary: its value is on the stack. */
             return cnor_compile_index_dict_value(self, node);
         }
-        if (binding.type == cnor_static_array)
+        if (cnor_type_base(binding.type) == cnor_static_array)
         {
             if (binding.kind == cnor_binding_local)
             {

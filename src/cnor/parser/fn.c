@@ -18,7 +18,7 @@ cnor_parser_param(cnor_parser_t *self)
     }
     if (!cnor_parser_take_name(self, param) || !cnor_parser_advance(self)
         || !cnor_parser_expect_punct(self, cnor_punct_colon)
-        || !cnor_parser_type(self, &param->data.param.type, &param->type_name))
+        || !cnor_parser_type(self, &param->data.param.type, param))
     {
         return lh_null;
     }
@@ -90,7 +90,7 @@ cnor_parser_fn(cnor_parser_t *self)
         return lh_null;
     }
     if (cnor_parser_accept_punct(self, cnor_punct_arrow)
-        && !cnor_parser_type(self, &node->data.fn.returns, &node->type_name))
+        && !cnor_parser_type(self, &node->data.fn.returns, node))
     {
         return lh_null;
     }
@@ -120,8 +120,8 @@ cnor_parser_named_type(cnor_parser_t *self)
         || !cnor_parser_at(self, cnor_token_ident)
         || !cnor_parser_take_name(self, node) || !cnor_parser_advance(self)
         || !cnor_parser_expect_punct(self, cnor_punct_colon)
-        || !cnor_parser_expect(self, cnor_token_newline)
-        || !cnor_parser_expect(self, cnor_token_indent))
+        || !cnor_parser_expect(self, cnor_token_newline, cnor_error_unexpected_token)
+        || !cnor_parser_expect(self, cnor_token_indent, cnor_error_empty_block))
     {
         return cnor_parser_fail(self, cnor_error_unexpected_token);
     }
@@ -134,7 +134,7 @@ cnor_parser_named_type(cnor_parser_t *self)
             return cnor_parser_fail(self, cnor_error_unexpected_token);
         }
         if (record && (!cnor_parser_expect_punct(self, cnor_punct_colon)
-            || !cnor_parser_type(self, &field->data.param.type, &field->type_name)))
+            || !cnor_parser_type(self, &field->data.param.type, field)))
         {
             return lh_null;
         }
