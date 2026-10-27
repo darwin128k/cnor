@@ -510,6 +510,24 @@ cnor_compile_assign(cnor_compiler_t *self, const cnor_node_t *node)
     const cnor_node_t *target = node->data.assign.target;
     cnor_binding_t binding;
 
+    cnor_node_t rewritten_target;
+    cnor_node_t rewritten_base;
+    cnor_node_t rewritten_assignment;
+    lh_bool_t qualified = cnor_namespace_node(self, target, &rewritten_target);
+    if (!qualified && (target->kind == cnor_node_index || target->kind == cnor_node_member)
+        && cnor_namespace_node(self, target->data.index.target, &rewritten_base))
+    {
+        rewritten_target = *target;
+        rewritten_target.data.index.target = &rewritten_base;
+        qualified = lh_bool_true;
+    }
+    if (qualified)
+    {
+        rewritten_assignment = *node;
+        rewritten_assignment.data.assign.target = &rewritten_target;
+        return cnor_compile_assign(self, &rewritten_assignment);
+    }
+
     if (target->kind == cnor_node_index)
     {
         if (node->data.assign.op != cnor_assign_set)

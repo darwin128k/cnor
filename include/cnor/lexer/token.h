@@ -69,6 +69,7 @@ enum cnor_keyword
     cnor_keyword_raise,    /**< `raise` */
     cnor_keyword_struct,   /**< `struct` */
     cnor_keyword_enum,     /**< `enum` */
+    cnor_keyword_as,       /**< `as` */
     cnor_keyword_count
 };
 /** @copybrief cnor_keyword */

@@ -1,4 +1,5 @@
 #include <cnor/parser/internal.h>
+#include <cnor/name.h>
 #include <lh/null.h>
 
 /* -- operator table -------------------------------------------------------- */
@@ -171,7 +172,7 @@ cnor_parser_primary(cnor_parser_t *self)
 
 /* -- postfix --------------------------------------------------------------- */
 
-/* `name(args)`. Only a name can be called: there are no function values. */
+/* `name(args)` or a qualified `module.name(args)`. */
 static cnor_node_t *
 cnor_parser_call(cnor_parser_t *self, cnor_node_t *callee)
 {
@@ -183,12 +184,17 @@ cnor_parser_call(cnor_parser_t *self, cnor_node_t *callee)
     {
         return lh_null;
     }
-    if (callee->kind != cnor_node_ident)
-    {
+    if (callee->kind != cnor_node_ident && callee->kind != cnor_node_member)
         return cnor_parser_fail(self, cnor_error_unexpected_token);
+    {
+        const cnor_node_t *root = callee;
+        while (root->kind == cnor_node_member) root = root->data.index.target;
+        if (root->kind != cnor_node_ident)
+            return cnor_parser_fail(self, cnor_error_unexpected_token);
     }
+    if (!cnor_node_name(self->arena, callee, &call->name))
+        return cnor_parser_fail(self, cnor_error_no_memory);
     call->line = callee->line;
-    call->name = callee->name;
     cnor_parser_advance(self);
     while (!cnor_parser_at_punct(self, cnor_punct_rparen))
     {

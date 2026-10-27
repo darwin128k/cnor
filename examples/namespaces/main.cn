@@ -1,0 +1,12 @@
+import "math.cn" as math
+import "player.cn" as game
+
+let mut player: game.Player = game.Player(game.default_hp, game.State.idle)
+game.damage(player, 10)
+player.hp = math.clamp(player.hp, 0, 100)
+player.state = game.State.active
+println("hp =", player.hp)
+
+match player.state:
+    game.State.idle => println("idle"),
+    game.State.active => println("active"),

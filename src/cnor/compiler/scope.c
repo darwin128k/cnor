@@ -450,6 +450,8 @@ cnor_scope_take_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_vie
     {
         return cnor_compile_fail(self, node, cnor_error_too_many_locals);
     }
+    if (cnor_namespace_module(self, name) != CNOR_INDEX_NONE)
+        return cnor_compile_fail_text(self, node->line, cnor_error_duplicate_name, name);
     decl.name = name;
     decl.slot = scope->next_slot;
     decl.is_mutable = is_mutable;
@@ -543,34 +545,23 @@ cnor_scope_find_visible(cnor_compiler_t *self, lh_str_view_t name, lh_u32_t name
 {
     const cnor_binding_kind_t own =
         cnor_scope_find_top_hashed(&self->scope, name, name_hash, self->module, index);
-    const struct cnor_module *module;
-    const cnor_module_index_t *imports;
+    const struct cnor_module *module = cnor_module_at(self, self->module);
     cnor_binding_kind_t found = cnor_binding_none;
-    lh_usize_t count;
+    cnor_module_index_t owner = CNOR_INDEX_NONE;
     lh_usize_t i;
-
-    if (own != cnor_binding_none)
+    if (own != cnor_binding_none) return own;
+    for (i = 0U; i < lh_array_get_size(&module->imports); ++i)
     {
-        return own;
-    }
-    module = cnor_module_at(self, self->module);
-    imports = (const cnor_module_index_t *) lh_array_get_begin(&module->imports);
-    count = lh_array_get_size(&module->imports);
-    for (i = 0U; found == cnor_binding_none && i < count; ++i)
-    {
-        lh_usize_t j;
-
-        found = cnor_scope_find_top_hashed(&self->scope, name, name_hash, imports[i], index);
-        for (j = i + 1U; found != cnor_binding_none && j < count; ++j)
-        {
-            lh_u16_t other = CNOR_INDEX_NONE;
-
-            if (cnor_scope_find_top_hashed(&self->scope, name, name_hash, imports[j], &other)
-                != cnor_binding_none)
-            {
-                return cnor_binding_ambiguous;
-            }
-        }
+        const struct cnor_module_import *edge = lh_array_get_ptr(&module->imports, i);
+        lh_u16_t candidate = CNOR_INDEX_NONE;
+        cnor_binding_kind_t kind;
+        if (edge->alias.size != 0U) continue;
+        kind = cnor_scope_find_top_hashed(&self->scope, name, name_hash, edge->module, &candidate);
+        if (kind == cnor_binding_none) continue;
+        if (found != cnor_binding_none && owner != edge->module) return cnor_binding_ambiguous;
+        found = kind;
+        owner = edge->module;
+        *index = candidate;
     }
     return found;
 }
@@ -579,7 +570,10 @@ cnor_binding_t
 cnor_scope_resolve(cnor_compiler_t *self, lh_str_view_t name)
 {
     cnor_scope_t *scope = &self->scope;
-    const struct cnor_local_decl *local = cnor_scope_find_local(&scope->locals, name);
+    cnor_module_index_t qualified_module;
+    lh_str_view_t qualified_name;
+    const lh_bool_t qualified = cnor_namespace_split(self, name, &qualified_module, &qualified_name);
+    const struct cnor_local_decl *local = qualified ? lh_null : cnor_scope_find_local(&scope->locals, name);
     lh_u16_t index = CNOR_INDEX_NONE;
     lh_u32_t name_hash;
     cnor_binding_kind_t kind;
@@ -593,14 +587,18 @@ cnor_scope_resolve(cnor_compiler_t *self, lh_str_view_t name)
         return binding;
     }
     name_hash = cnor_name_index_hash_name(name);
-    kind = cnor_scope_find_visible(self, name, name_hash, &index);
+    kind = qualified
+        ? (qualified_module == CNOR_INDEX_NONE ? cnor_binding_none
+           : cnor_scope_find_top_hashed(scope, qualified_name,
+               cnor_name_index_hash_name(qualified_name), qualified_module, &index))
+        : cnor_scope_find_visible(self, name, name_hash, &index);
     if (kind == cnor_binding_global)
     {
         const struct cnor_global_decl *global = cnor_scope_global_at(scope, index);
 
         return cnor_binding_make(cnor_binding_global, index, global->is_mutable, global->type);
     }
-    if (kind == cnor_binding_none)
+    if (kind == cnor_binding_none && !qualified)
     {
         index = cnor_scope_find_host_native(self, name, name_hash);
         kind = index != CNOR_INDEX_NONE ? cnor_binding_native : cnor_binding_none;

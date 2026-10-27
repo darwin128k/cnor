@@ -5,6 +5,7 @@
  */
 #include <cnor/compiler/internal.h>
 #include <cnor/parser.h>
+#include <cnor/name.h>
 #include <lh/null.h>
 
 static lh_bool_t
@@ -45,15 +46,22 @@ cnor_named_find_in(cnor_compiler_t *self, cnor_module_index_t module, lh_str_vie
 const struct cnor_named_type *
 cnor_named_find(cnor_compiler_t *self, lh_str_view_t name)
 {
-    const struct cnor_named_type *found = cnor_named_find_in(self, self->module, name);
+    cnor_module_index_t qualified_module;
+    lh_str_view_t qualified_name;
+    const struct cnor_named_type *found;
+    if (cnor_namespace_split(self, name, &qualified_module, &qualified_name))
+        return qualified_module == CNOR_INDEX_NONE ? lh_null
+            : cnor_named_find_in(self, qualified_module, qualified_name);
+    found = cnor_named_find_in(self, self->module, name);
     const struct cnor_module *module = cnor_module_at(self, self->module);
     lh_usize_t i;
     if (found != lh_null) return found;
     for (i = 0U; i < lh_array_get_size(&module->imports); ++i)
     {
-        const cnor_module_index_t imported =
-            *(const cnor_module_index_t *) lh_array_get_ptr(&module->imports, i);
-        const struct cnor_named_type *t = cnor_named_find_in(self, imported, name);
+        const struct cnor_module_import *edge = lh_array_get_ptr(&module->imports, i);
+        const struct cnor_named_type *t;
+        if (edge->alias.size != 0U) continue;
+        t = cnor_named_find_in(self, edge->module, name);
         if (t == lh_null) continue;
         if (found != lh_null && found != t)
         {
@@ -227,7 +235,9 @@ cnor_named_pattern(cnor_compiler_t *self, const cnor_node_t *node,
 {
     const struct cnor_named_type *named;
     const cnor_node_t *field;
+    cnor_node_t normalized;
     const cnor_node_t *base = node->data.index.target;
+    if (cnor_namespace_node(self, base, &normalized)) base = &normalized;
     if (base->kind != cnor_node_ident) return cnor_compile_fail(self, node, cnor_error_type_mismatch);
     if (cnor_scope_resolve(self, base->name).kind != cnor_binding_none)
         return cnor_compile_fail(self, node, cnor_error_type_mismatch);
@@ -268,6 +278,10 @@ cnor_compile_member(cnor_compiler_t *self, const cnor_node_t *node)
     const cnor_node_t *base = node->data.index.target;
     const cnor_node_t *field;
     lh_u32_t index;
+    cnor_node_t qualified;
+    cnor_node_t normalized;
+    if (cnor_namespace_node(self, node, &qualified)) return cnor_compile_ident(self, &qualified);
+    if (cnor_namespace_node(self, base, &normalized)) base = &normalized;
     if (base->kind == cnor_node_ident
         && cnor_scope_resolve(self, base->name).kind == cnor_binding_none)
     {

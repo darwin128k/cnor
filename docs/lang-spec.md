@@ -155,7 +155,7 @@ ambiguity Python has.
 
 ```
 program     := { import } { top_level }
-import      := "import" STRING end
+import      := "import" STRING [ "as" IDENT ] end
 top_level   := fn_decl | native_decl | struct_decl | enum_decl | statement
 struct_decl := "struct" IDENT ":" NEWLINE INDENT { IDENT ":" type end } DEDENT
 enum_decl   := "enum" IDENT ":" NEWLINE INDENT { IDENT end } DEDENT
@@ -163,9 +163,9 @@ fn_decl     := "fn" IDENT "(" [ params ] ")" [ "->" type ] ":" block
 native_decl := "native" "fn" IDENT "(" [ params ] ")" [ "->" type ] end
 params      := param { "," param }
 param       := IDENT ":" type
-type        := "i32" | "u32" | "f32" | "bool" | "str" | "array" | "dict" | "function" | IDENT
+type        := "i32" | "u32" | "f32" | "bool" | "str" | "array" | "dict" | "function" | qualified_name
               | "array" "[" element_type "]" | "dict" "[" element_type "]"
-element_type := "i32" | "u32" | "f32" | "bool" | "str" | "function" | IDENT
+element_type := "i32" | "u32" | "f32" | "bool" | "str" | "function" | qualified_name
 block       := NEWLINE INDENT statement { statement } DEDENT
 statement   := simple end | compound
 simple      := let | assign | expr | "return" [ expr ] | "break" | "continue" | "raise"
@@ -177,12 +177,13 @@ if          := "if" expr ":" block [ "else" ( ":" block | if ) ]
 while       := "while" expr ":" block
 for         := "for" IDENT "in" ( expr ".." expr | expr ) ":" block
 match       := "match" expr ":" NEWLINE INDENT arm { arm } DEDENT
-arm         := ( literal | "-" literal | IDENT "." IDENT | "_" ) "=>" simple [ "," ] end
+arm         := ( literal | "-" literal | qualified_name "." IDENT | "_" ) "=>" simple [ "," ] end
 try         := "try" ":" block [ "catch" [ IDENT ] ":" block ] [ "finally" ":" block ]
 end         := [ ";" ] ( NEWLINE | DEDENT | EOF )      (or ";" then more on the line)
 expr        := binary [ "if" binary "else" expr ]
 postfix     := primary { "[" expr "]" | "." IDENT }
-primary     := literal | IDENT | IDENT "(" [ args ] ")" | "(" expr ")" | array
+primary     := literal | IDENT | qualified_name "(" [ args ] ")" | "(" expr ")" | array
+qualified_name := IDENT { "." IDENT }
 array       := "[" ( expr ";" INT | [ expr { "," expr } [ "," ] ] ) "]"
 literal     := INT | REAL | STRING | "true" | "false" | "none"
 ```
@@ -477,7 +478,8 @@ import "../shared/config.cn"
   file's code runs last.
 - **Names.** Each file has its own namespace. A file sees its own top-level
   names (functions, globals, `native fn` declarations) and those of the files
-  it imports **directly**; imports are not transitive. Its own names shadow
+  it imports **directly without an alias**; imports are not transitive. Aliased
+  imports use qualified names (section 6.8). Its own names shadow
   imported ones. A name defined by two files it imports is an error
   (`ambiguous_name`) only where it is used. Mutability and types come along: an
   imported immutable global cannot be assigned. Host natives are seen by every
@@ -632,6 +634,60 @@ mismatches can include both complete type names.
 
 ---
 
+### 6.8 Import namespaces
+
+An import can bind a compile-time namespace instead of opening its names:
+
+```cn
+import "math.cn" as math
+import "player.cn" as game
+
+let mut player: game.Player = game.Player(100, game.State.idle)
+game.damage(player, 10)
+player.hp = math.clamp(player.hp, 0, 100)
+player.state = game.State.active
+
+let states: array[game.State] = [game.State.idle, game.State.active]
+match player.state:
+    game.State.idle => println("idle"),
+    game.State.active => println("active"),
+```
+
+- `import "path" as alias` makes the imported file's own functions, native
+  declarations, globals, structs and enums accessible as `alias.name`.
+  Its names are not also exposed unqualified. A bare `import "path"` keeps
+  the existing unqualified lookup and ambiguity rules.
+- Qualified names work in calls, script-function values, global reads and
+  assignments, struct constructors, type annotations, collection element
+  annotations and enum `match` patterns. Fields of an imported record and
+  elements of an imported collection can be read or written, for example
+  `game.hero.hp += 1` and `game.scores[0] = 10`. Existing type, initialization
+  and mutability rules still apply.
+- Namespaces belong only to the file containing the import. Another file can
+  reuse the same alias independently. An alias cannot collide with another
+  alias, a local/parameter/loop binding, a top-level declaration or a builtin
+  type name in the importing file (`duplicate_name`). Namespaces are not
+  values and cannot be called, assigned or passed to a function.
+- Access is direct: `a.name` refers to a declaration in `a`'s source file,
+  not something that file imports. Aliases are not re-exported and do not
+  create chains of module objects. Unknown qualified symbols are errors;
+  lookup never falls back to an unrelated host native.
+- Different aliases of the same resolved source file share the same globals,
+  nominal types and initialization. A file is loaded and initialized once,
+  even if imported through several aliases, normalized paths, or a mix of
+  aliased and bare imports. Duplicate bare imports of that file do not make
+  its declarations ambiguous. Different files may define identical names;
+  namespace qualification selects the intended file.
+- Paths, loader callbacks, cycle checks and initialization order are the same
+  as for bare imports. In-memory loaders support namespaces too. The compiler
+  resolves aliases to existing function/global indices, so `.cnb` images do
+  not need source files or runtime module loading. Aliases do not change the
+  image format or add names to the host VM's function lookup API.
+
+See `examples/namespaces/main.cn` for a complete three-file example.
+
+---
+
 ## 7. The `.cnb` image format, v14
 
 **[cnor]** v1 replaced the original header (whose layout used `sizeof` and
@@ -695,7 +751,7 @@ version, and an image produced by a newer version is rejected rather than
 
 ```
 fn let mut if else match for in while return break continue
-true false none and or not import native try catch finally raise struct enum
+true false none and or not import native try catch finally raise struct enum as
 ```
 
 **[cnor]** `in` (for `for`) and `none` (the literal) were missing from the
@@ -1109,7 +1165,7 @@ command line built with it runs images only: `exec` is there, `run` and
 | **[cnor]** C++-style exceptions | The machine unwinds a `try` itself (section 6.1): no unwinder tables, no `longjmp`, and the hot path does not look for handlers |
 | Overloading, generics | They grow both compile time and bytecode size |
 | `f32` without `LH_REAL_ENABLED` | The type is not available on an STM32 by default; a real literal is then a compile error (`no_reals`) |
-| Module objects, qualified names (`math.f`), selective imports | A file's names are what it imports directly (section 6.5); one level of names is enough for scripts |
+| Module objects and selective imports | Aliased imports provide compile-time qualified names (section 6.8); modules are not runtime values |
 | A file-system loader in the library | Goal 2: the host supplies sources (`cnor_compiler_config_t.load`); the command line has one |
 
 ## 14. Status

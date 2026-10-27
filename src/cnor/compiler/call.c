@@ -202,6 +202,10 @@ cnor_compile_call_value(cnor_compiler_t *self, const cnor_node_t *node,
 lh_bool_t
 cnor_compile_call(cnor_compiler_t *self, const cnor_node_t *node)
 {
+    cnor_module_index_t qualified_module;
+    lh_str_view_t qualified_name;
+    if (cnor_namespace_module(self, node->name) != CNOR_INDEX_NONE)
+        return cnor_compile_fail_name(self, node, cnor_error_unknown_name);
     if (cnor_named_find(self, node->name) != lh_null)
         return cnor_compile_fail(self, node, cnor_error_not_a_declaration);
     const cnor_binding_t binding = cnor_scope_resolve(self, node->name);
@@ -213,6 +217,8 @@ cnor_compile_call(cnor_compiler_t *self, const cnor_node_t *node)
     case cnor_binding_native:
         return cnor_compile_call_native(self, node, binding.index);
     case cnor_binding_none:
+        if (cnor_namespace_split(self, node->name, &qualified_module, &qualified_name))
+            return cnor_compile_fail_name(self, node, cnor_error_unknown_name);
         return cnor_compile_call_builtin(self, node);
     default:
         if (binding.type == cnor_static_function)

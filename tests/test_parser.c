@@ -578,7 +578,59 @@ CNOR_TEST(refuses_malformed_lists_and_collection_annotations)
     }
 }
 
+
+CNOR_TEST(reads_aliased_imports_and_qualified_names)
+{
+    parsed_t p;
+    parse(&p, "import \"math.cn\" as math\nmath.clamp(1, 0, 10)\n");
+    CHECK(p.tree != lh_null);
+    CHECK_EQ(p.tree->kind, cnor_node_import);
+    CHECK(name_is(p.tree, "math.cn"));
+    CHECK_EQ(lh_str_view_get_size(&p.tree->data.import_.alias), 4U);
+    CHECK(memcmp(lh_str_view_get_data(&p.tree->data.import_.alias), "math", 4U) == 0);
+    CHECK(name_is(init_of(p.tree->next), "math.clamp"));
+    CHECK_EQ(init_of(p.tree->next)->data.call.argc, 3U);
+    done(&p);
+    parse(&p, "import \"game.cn\" as game\nlet p: game.Player = game.Player(10)\n");
+    CHECK(p.tree != lh_null);
+    CHECK_EQ(p.tree->next->data.let.type, cnor_type_named);
+    CHECK_EQ(lh_str_view_get_size(&p.tree->next->type_name), 11U);
+    CHECK(name_is(init_of(p.tree->next), "game.Player"));
+    done(&p);
+    parse(&p, "let states: array[game.State] = []\n");
+    CHECK(p.tree != lh_null);
+    CHECK_EQ(p.tree->element_type, cnor_type_named);
+    CHECK_EQ(lh_str_view_get_size(&p.tree->element_type_name), 10U);
+    done(&p);
+    parse(&p, "match state:\n    game.State.idle => 1\n");
+    CHECK(p.tree != lh_null);
+    CHECK_EQ(p.tree->data.match.arms->data.arm.pattern->kind, cnor_node_member);
+    done(&p);
+}
+
+CNOR_TEST(refuses_malformed_namespace_imports)
+{
+    static const char *const cases[] = {
+        "import \"a.cn\" as\n", "import \"a.cn\" as 1\n",
+        "import \"a.cn\" as a.b\n", "import \"a.cn\" as if\n",
+        "import \"a.cn\" a\n", "import \"a.cn\" as a as b\n",
+        "let x: game. = 1\n", "let x: array[game.] = []\n",
+        "game.(1)\n",
+    };
+    size_t i;
+    for (i = 0U; i < sizeof(cases) / sizeof(cases[0]); ++i)
+    {
+        parsed_t p;
+        parse(&p, cases[i]);
+        CHECK(p.tree == lh_null);
+        CHECK(p.error != cnor_error_none);
+        done(&p);
+    }
+}
+
 static const cnor_test_case_t m_cases[] = {
+    CNOR_TEST_CASE(reads_aliased_imports_and_qualified_names),
+    CNOR_TEST_CASE(refuses_malformed_namespace_imports),
     CNOR_TEST_CASE(reads_collection_annotations_and_lists),
     CNOR_TEST_CASE(refuses_malformed_lists_and_collection_annotations),
     CNOR_TEST_CASE(reads_a_function_with_a_body),

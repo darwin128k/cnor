@@ -132,6 +132,20 @@ cnor_type_detail_type(cnor_compiler_t *self, cnor_type_detail_t *detail, cnor_st
         cnor_type_detail_put(detail, cnor_type_name(type));
         return;
     }
+    if (named->module != self->module)
+    {
+        const struct cnor_module *module = cnor_module_at(self, self->module);
+        for (i = 0U; i < lh_array_get_size(&module->imports); ++i)
+        {
+            const struct cnor_module_import *edge = lh_array_get_ptr(&module->imports, i);
+            lh_usize_t j;
+            if (edge->module != named->module || edge->alias.size == 0U) continue;
+            for (j = 0U; j < edge->alias.size && detail->size < CNOR_DIAG_NAME_CAPACITY; ++j)
+                detail->text[detail->size++] = ((const lh_char_t *) edge->alias.begin)[j];
+            cnor_type_detail_put(detail, ".");
+            break;
+        }
+    }
     for (i = 0U; i < named->node->name.size && detail->size < CNOR_DIAG_NAME_CAPACITY; ++i)
         detail->text[detail->size++] = ((const lh_char_t *) named->node->name.begin)[i];
 }

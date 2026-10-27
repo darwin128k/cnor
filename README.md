@@ -188,6 +188,23 @@ Bare `array` / `dict` remain untyped; `[0; 32]` still fills an array, and
 `[]` makes an empty one. See [the example](examples/collections.cn) and
 [the collection rules](docs/lang-spec.md#67-typed-collections-and-array-lists).
 
+## Import namespaces
+
+```cn
+import "math.cn" as math
+import "player.cn" as game
+
+let mut player: game.Player = game.Player(100, game.State.idle)
+player.hp = math.clamp(player.hp, 0, 100)
+```
+
+An aliased import exposes its declarations through `alias.name`; a bare
+import keeps the existing unqualified behavior. Type annotations, enum
+members, constructors and imported global variables support qualification.
+Run [the three-file example](examples/namespaces/main.cn) with
+`cnor run examples/namespaces/main.cn`, or see
+[the namespace rules](docs/lang-spec.md#68-import-namespaces).
+
 ## License
 
 MIT, see [LICENSE.md](LICENSE.md).

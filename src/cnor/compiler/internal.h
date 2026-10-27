@@ -91,13 +91,20 @@ enum cnor_module_state
 /** @copybrief cnor_module_state */
 typedef enum cnor_module_state cnor_module_state_t;
 
+/** @brief A direct import; a nonempty alias keeps its names qualified. */
+struct cnor_module_import
+{
+    cnor_module_index_t module;
+    lh_str_view_t alias;
+};
+
 /** @brief One source file: the main one or one it imports, directly or not. */
 struct cnor_module
 {
     lh_str_view_t path;               /**< Resolved path, its identity; arena-owned. */
     lh_str_view_t name;               /**< What the image and diagnostics call it. */
     const cnor_node_t *program;       /**< Its top-level items. */
-    lh_array_t imports;               /**< cnor_module_index_t: the files it imports. */
+    lh_array_t imports;               /**< struct cnor_module_import: direct imports. */
     cnor_function_index_t function;   /**< The function holding its top-level code. */
     lh_u32_t first_global;            /**< Index of its first global. */
     cnor_module_state_t state;        /**< Walk state. */
@@ -417,6 +424,12 @@ lh_bool_t cnor_compile_struct_let(cnor_compiler_t *self, const cnor_node_t *node
 lh_bool_t cnor_compile_storable(cnor_compiler_t *self, const cnor_node_t *node);
 lh_bool_t cnor_named_pattern(cnor_compiler_t *self, const cnor_node_t *node,
                               cnor_static_type_t *type, lh_u32_t *value);
+
+/** @brief Direct namespace lookup; aliases are compile-time names, not values. */
+cnor_module_index_t cnor_namespace_module(cnor_compiler_t *self, lh_str_view_t alias);
+lh_bool_t cnor_namespace_split(cnor_compiler_t *self, lh_str_view_t name,
+                                cnor_module_index_t *module, lh_str_view_t *member);
+lh_bool_t cnor_namespace_node(cnor_compiler_t *self, const cnor_node_t *node, cnor_node_t *out);
 
 /* path.c */
 

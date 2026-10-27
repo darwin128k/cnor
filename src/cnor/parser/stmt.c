@@ -1,4 +1,5 @@
 #include <cnor/parser/internal.h>
+#include <cnor/name.h>
 #include <lh/null.h>
 
 /* -- types ----------------------------------------------------------------- */
@@ -26,25 +27,44 @@ cnor_parser_type_of(lh_str_view_t name)
     return cnor_type_none;
 }
 
-lh_bool_t
-cnor_parser_type(cnor_parser_t *self, cnor_type_t *out, cnor_node_t *owner)
+static lh_bool_t
+cnor_parser_type_name(cnor_parser_t *self, cnor_type_t *type, lh_str_view_t *name)
 {
+    lh_str_view_t spelling;
     if (!cnor_parser_at(self, cnor_token_ident))
     {
         cnor_parser_fail(self, cnor_error_unexpected_token);
         return lh_bool_false;
     }
-    *out = cnor_parser_type_of(cnor_parser_text(self));
-    if (*out == cnor_type_none)
+    if (!cnor_arena_copy_text(self->arena, cnor_parser_text(self), &spelling))
     {
-        *out = cnor_type_named;
-        if (!cnor_arena_copy_text(self->arena, cnor_parser_text(self), &owner->type_name))
+        cnor_parser_fail(self, cnor_error_no_memory);
+        return lh_bool_false;
+    }
+    if (!cnor_parser_advance(self)) return lh_bool_false;
+    while (cnor_parser_accept_punct(self, cnor_punct_dot))
+    {
+        if (!cnor_parser_at(self, cnor_token_ident))
+        {
+            cnor_parser_fail(self, cnor_error_unexpected_token);
+            return lh_bool_false;
+        }
+        if (!cnor_name_join(self->arena, spelling, cnor_parser_text(self), &spelling))
         {
             cnor_parser_fail(self, cnor_error_no_memory);
             return lh_bool_false;
         }
+        if (!cnor_parser_advance(self)) return lh_bool_false;
     }
-    if (!cnor_parser_advance(self)) return lh_bool_false;
+    *type = cnor_parser_type_of(spelling);
+    if (*type == cnor_type_none) { *type = cnor_type_named; *name = spelling; }
+    return lh_bool_true;
+}
+
+lh_bool_t
+cnor_parser_type(cnor_parser_t *self, cnor_type_t *out, cnor_node_t *owner)
+{
+    if (!cnor_parser_type_name(self, out, &owner->type_name)) return lh_bool_false;
     if (cnor_parser_accept_punct(self, cnor_punct_lbracket))
     {
         if ((*out != cnor_type_array && *out != cnor_type_dict)
@@ -53,17 +73,7 @@ cnor_parser_type(cnor_parser_t *self, cnor_type_t *out, cnor_node_t *owner)
             cnor_parser_fail(self, cnor_error_unexpected_token);
             return lh_bool_false;
         }
-        owner->element_type = cnor_parser_type_of(cnor_parser_text(self));
-        if (owner->element_type == cnor_type_none)
-        {
-            owner->element_type = cnor_type_named;
-            if (!cnor_arena_copy_text(self->arena, cnor_parser_text(self), &owner->element_type_name))
-            {
-                cnor_parser_fail(self, cnor_error_no_memory);
-                return lh_bool_false;
-            }
-        }
-        if (!cnor_parser_advance(self)
+        if (!cnor_parser_type_name(self, &owner->element_type, &owner->element_type_name)
             || !cnor_parser_expect_punct(self, cnor_punct_rbracket)) return lh_bool_false;
     }
     return lh_bool_true;
@@ -281,6 +291,14 @@ cnor_parser_import(cnor_parser_t *self)
         return lh_null;
     }
     node->name = path->name;
+    if (cnor_parser_at_keyword(self, cnor_keyword_as))
+    {
+        cnor_node_t alias = {0};
+        if (!cnor_parser_advance(self) || !cnor_parser_at(self, cnor_token_ident)
+            || !cnor_parser_take_name(self, &alias) || !cnor_parser_advance(self))
+            return cnor_parser_fail(self, cnor_error_unexpected_token);
+        node->data.import_.alias = alias.name;
+    }
     return cnor_parser_end_simple(self, lh_bool_false) ? node : lh_null;
 }
 

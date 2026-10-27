@@ -16,6 +16,7 @@ static const lh_str_view_t m_keywords[cnor_keyword_count] = {
     lh_str_view_initializer_lit("catch"),   lh_str_view_initializer_lit("finally"),
     lh_str_view_initializer_lit("raise"),
     lh_str_view_initializer_lit("struct"), lh_str_view_initializer_lit("enum"),
+    lh_str_view_initializer_lit("as"),
 };
 
 /* Keywords are 2 to 8 bytes long: anything else is a name without a single

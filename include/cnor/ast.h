@@ -28,7 +28,7 @@ enum cnor_node_kind
     /* declarations */
     cnor_node_fn = 0,     /**< `fn name(params) -> type:` + body. */
     cnor_node_native_fn,  /**< `native fn name(params) -> type`. */
-    cnor_node_import,     /**< `import "path"`; the unescaped path is in `name`. */
+    cnor_node_import,     /**< `import "path" [as alias]`; the path is in `name`. */
     cnor_node_struct,     /**< Named record declaration; fields in data.fn.params. */
     cnor_node_enum,       /**< Named enumeration; members in data.fn.params. */
     cnor_node_param,      /**< One parameter: `name: type`. */
@@ -54,7 +54,7 @@ enum cnor_node_kind
     cnor_node_true,       /**< `true`. */
     cnor_node_false,      /**< `false`. */
     cnor_node_none,       /**< `none`. */
-    cnor_node_call,       /**< `name(args)`; callee name is in `name`. */
+    cnor_node_call,       /**< `name(args)`; possibly qualified callee is in `name`. */
     cnor_node_binary,     /**< `left op right`. */
     cnor_node_unary,      /**< `op operand`. */
     cnor_node_index,      /**< `target[index]`. */
@@ -167,6 +167,10 @@ typedef struct cnor_node cnor_node_t;
  */
 union cnor_node_data
 {
+    struct
+    {
+        lh_str_view_t alias; /**< Optional import namespace; empty for a bare import. */
+    } import_;
     struct
     {
         cnor_node_t *params;     /**< ::cnor_node_param list. */

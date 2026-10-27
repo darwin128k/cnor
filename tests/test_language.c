@@ -2095,7 +2095,189 @@ CNOR_TEST(handles_collection_boundaries_and_preserves_untyped_behavior)
     CHECK_EQ(failure_of("struct P:\n    d: dict[str]\n"), cnor_error_type_mismatch);
 }
 
+
+CNOR_TEST(uses_namespaces_for_functions_values_and_global_writes)
+{
+    static const memory_file_t files[] = {
+        {"main.cn", "import \"a.cn\" as a\nimport \"b.cn\" as b\n"
+            "let f = a.add\na.count = 4\na.count += 2\na.values[0] = 7\n"
+            "a.values[1] += 3\na.settings[\"x\"] = 9\na.settings[\"x\"] += 1\n"
+            "f(1) + b.add(1) + a.count + a.values[0] + a.values[1] + a.settings[\"x\"]\n"},
+        {"a.cn", "let mut count = 0\nlet mut values: array[i32] = [1, 2]\n"
+            "let mut settings: dict[i32] = dict(1)\nfn add(n: i32) -> i32:\n    return n + 10\n"},
+        {"b.cn", "fn add(n: i32) -> i32:\n    return n + 100\n"},
+    };
+    memory_loader_t loader;
+    outcome_t out;
+    run_program(files, 3U, lh_null, 0U, &loader, 2, &out);
+    CHECK(out.compiled);
+    CHECK_EQ(out.code, cnor_error_none);
+    CHECK_EQ(out.value, 140);
+    CHECK_EQ(loader.loads[1], 1);
+    CHECK_EQ(loader.loads[2], 1);
+}
+
+CNOR_TEST(qualifies_record_enum_and_collection_types)
+{
+    static const memory_file_t files[] = {
+        {"main.cn", "import \"game.cn\" as game\n"
+            "fn heal(p: game.Player):\n    p.hp += 5\n"
+            "let mut player: game.Player = game.Player(80, game.State.idle)\n"
+            "heal(player)\nplayer.state = game.State.active\ngame.hero.hp += 2\n"
+            "let states: array[game.State] = [game.State.idle, game.State.active]\n"
+            "let mut settings: dict[game.State] = dict(1)\nsettings[\"state\"] = states[1]\n"
+            "let mut result = 0\nmatch game.choose(settings):\n"
+            "    game.State.idle => result = 1\n    game.State.active => result = player.hp + game.hero.hp\nresult\n"},
+        {"game.cn", "enum State:\n    idle\n    active\n"
+            "struct Player:\n    hp: i32\n    state: State\n"
+            "let mut hero = Player(10, State.idle)\n"
+            "fn choose(settings: dict[State]) -> State:\n    return settings[\"state\"]\n"},
+    };
+    memory_loader_t loader;
+    outcome_t out;
+    run_program(files, 2U, lh_null, 0U, &loader, 1, &out);
+    CHECK(out.compiled);
+    CHECK_EQ(out.code, cnor_error_none);
+    CHECK_EQ(out.value, 97);
+}
+
+CNOR_TEST(initializes_a_module_once_across_namespace_aliases)
+{
+    static const memory_file_t files[] = {
+        {"main.cn", "import \"lib.cn\" as a\nimport \"lib.cn\" as b\nimport \"lib.cn\"\n"
+            "let p: a.Point = b.Point(4)\na.value += 1\nb.value + value + p.x\n"},
+        {"lib.cn", "note(9)\nlet mut value = 10\nstruct Point:\n    x: i32\n"},
+    };
+    memory_loader_t loader;
+    outcome_t out;
+    m_note_count = 0U;
+    run_program(files, 2U, lh_null, 0U, &loader, 1, &out);
+    CHECK(out.compiled);
+    CHECK_EQ(out.code, cnor_error_none);
+    CHECK_EQ(out.value, 26);
+    CHECK_EQ(m_note_count, 1U);
+    CHECK_EQ(m_notes[0], 9);
+    CHECK_EQ(loader.loads[1], 1);
+}
+
+CNOR_TEST(keeps_namespaces_local_to_the_importing_module)
+{
+    static const memory_file_t files[] = {
+        {"main.cn", "import \"a.cn\" as a\nimport \"b.cn\" as b\na.value() + b.value()\n"},
+        {"a.cn", "import \"low.cn\" as lib\nfn value() -> i32:\n    return lib.value\n"},
+        {"b.cn", "import \"high.cn\" as lib\nfn value() -> i32:\n    return lib.value\n"},
+        {"low.cn", "let value = 3\n"},
+        {"high.cn", "let value = 7\n"},
+    };
+    memory_loader_t loader;
+    outcome_t out;
+    run_program(files, 5U, lh_null, 0U, &loader, 1, &out);
+    CHECK(out.compiled);
+    CHECK_EQ(out.code, cnor_error_none);
+    CHECK_EQ(out.value, 10);
+}
+
+CNOR_TEST(rejects_invalid_namespace_accesses)
+{
+    static const char *const invalid[] = {
+        "import \"lib.cn\" as lib\nvalue\n",
+        "import \"lib.cn\" as lib\nadd(1)\n",
+        "import \"lib.cn\" as lib\nlib.missing\n",
+        "import \"lib.cn\" as lib\nlib.missing()\n",
+        "import \"lib.cn\" as lib\nother.add(1)\n",
+        "import \"lib.cn\" as lib\nlet p: Missing.Point = lib.Point(1)\n",
+        "import \"lib.cn\" as lib\nlet p = Point(1)\n",
+        "import \"lib.cn\" as lib\nlet p: lib.Point = lib.Point(\"bad\")\n",
+        "import \"lib.cn\" as lib\nlet lib = 1\n",
+        "import \"lib.cn\" as lib\nfn lib():\n    return\n",
+        "import \"lib.cn\" as lib\nstruct lib:\n    x: i32\n",
+        "import \"lib.cn\" as lib\nfn f(lib: i32):\n    return\n",
+        "import \"lib.cn\" as lib\nfn f():\n    let lib = 1\nf()\n",
+        "import \"lib.cn\" as lib\nfor lib in 0..1:\n    1\n",
+        "import \"lib.cn\" as lib\nimport \"lib.cn\" as lib\n1\n",
+        "import \"lib.cn\" as i32\n1\n",
+        "import \"lib.cn\" as lib\nlib.constant = 2\n",
+        "import \"lib.cn\" as lib\nlib.value = \"bad\"\n",
+        "import \"lib.cn\" as lib\nlib.echo(1)\n",
+        "import \"lib.cn\" as lib\nlib\n",
+        "import \"lib.cn\" as lib\nlib()\n",
+        "import \"lib.cn\" as lib\nlib.leaf.value\n",
+        "import \"lib.cn\" as lib\nlib.private(1)\n",
+    };
+    const memory_file_t supporting[] = {
+        {"lib.cn", "import \"leaf.cn\" as leaf\nlet mut value = 1\nlet constant = 4\n"
+            "struct Point:\n    x: i32\nfn add(n: i32) -> i32:\n    return n + 1\n"},
+        {"leaf.cn", "let value = 100\nfn private(n: i32) -> i32:\n    return n\n"},
+    };
+    size_t i;
+    for (i = 0U; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+    {
+        const memory_file_t files[] = {{"main.cn", invalid[i]}, supporting[0], supporting[1]};
+        memory_loader_t loader;
+        outcome_t out;
+        run_program(files, 3U, lh_null, 0U, &loader, 1, &out);
+        if (out.compiled) printf("    unexpectedly compiled namespace case %u: %s\n", (unsigned) i, invalid[i]);
+        CHECK(!out.compiled);
+        CHECK(out.code != cnor_error_none);
+    }
+}
+
+
+CNOR_TEST(calls_namespaced_natives_and_function_values)
+{
+    static const memory_file_t files[] = {
+        {"main.cn", "import \"lib.cn\" as lib\nlib.callback(3) + lib.echo(4)\n"},
+        {"lib.cn", "native fn echo(n: i32) -> i32\n"
+            "fn double(n: i32) -> i32:\n    return n * 2\nlet callback = double\n"},
+    };
+    memory_loader_t loader;
+    outcome_t out;
+    run_program(files, 2U, lh_null, 0U, &loader, 1, &out);
+    CHECK(out.compiled);
+    CHECK_EQ(out.code, cnor_error_none);
+    CHECK_EQ(out.value, 10);
+}
+
+CNOR_TEST(distinguishes_nominal_types_from_different_namespaces)
+{
+    static const memory_file_t files[] = {
+        {"main.cn", "import \"a.cn\" as a\nimport \"b.cn\" as b\nlet s: a.State = b.State.idle\n"},
+        {"a.cn", "enum State:\n    idle\n"},
+        {"b.cn", "enum State:\n    idle\n"},
+    };
+    memory_loader_t loader;
+    outcome_t out;
+    run_program(files, 3U, lh_null, 0U, &loader, 1, &out);
+    CHECK(!out.compiled);
+    CHECK_EQ(out.code, cnor_error_type_mismatch);
+    CHECK(strcmp(out.name, "expected a.State, found b.State") == 0);
+}
+
+
+CNOR_TEST(keeps_namespaced_runtime_errors_at_the_original_source)
+{
+    static const memory_file_t files[] = {
+        {"main.cn", "import \"lib.cn\" as lib\nlib.fail(0)\n"},
+        {"lib.cn", "fn fail(n: i32) -> i32:\n    return 1 / n\n"},
+    };
+    memory_loader_t loader;
+    outcome_t out;
+    run_program(files, 2U, lh_null, 0U, &loader, 1, &out);
+    CHECK(out.compiled);
+    CHECK_EQ(out.code, cnor_error_div_by_zero);
+    CHECK_EQ(out.line, 2U);
+    CHECK(strcmp(out.file, "lib.cn") == 0);
+}
+
 static const cnor_test_case_t m_cases[] = {
+    CNOR_TEST_CASE(keeps_namespaced_runtime_errors_at_the_original_source),
+    CNOR_TEST_CASE(calls_namespaced_natives_and_function_values),
+    CNOR_TEST_CASE(distinguishes_nominal_types_from_different_namespaces),
+    CNOR_TEST_CASE(uses_namespaces_for_functions_values_and_global_writes),
+    CNOR_TEST_CASE(qualifies_record_enum_and_collection_types),
+    CNOR_TEST_CASE(initializes_a_module_once_across_namespace_aliases),
+    CNOR_TEST_CASE(keeps_namespaces_local_to_the_importing_module),
+    CNOR_TEST_CASE(rejects_invalid_namespace_accesses),
     CNOR_TEST_CASE(imports_collection_element_types),
     CNOR_TEST_CASE(handles_collection_boundaries_and_preserves_untyped_behavior),
     CNOR_TEST_CASE(declares_array_lists_and_typed_collections),
