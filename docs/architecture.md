@@ -334,7 +334,7 @@ place, the handlers under `src/cnor/vm/op/`:
   and `finally_end`), and the machine runs it when the `try` is left, however
   it is left. The error's dictionary is written into the slots the compiler
   reserved for it, so catching an error allocates nothing.
-  Measured 2026-10-26 on a Windows host (MinGW GCC): the `try` workload (a
+  Measured 2026-10-27 on a Windows host (MinGW GCC): the `try` workload (a
   million rounds of a `try` that does not fail) takes 10.8 ns a round on
   64-bit and 14.1 ns on 32-bit, at 554 and 425 million instructions a second
   (the median of three runs of the whole suite). The handler grew from 16 to
