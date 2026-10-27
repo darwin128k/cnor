@@ -93,27 +93,27 @@ cnor_cli_test(step_limit_enough CODE 0 ARGS run ${cnor_cli_data}/count.cn --max-
 
 # -- compile, then exec --------------------------------------------------------
 
-cnor_cli_test(compile CODE 0 ARGS compile ${cnor_cli_data}/hello.cn -o hello.tbc
+cnor_cli_test(compile CODE 0 ARGS compile ${cnor_cli_data}/hello.cn -o hello.cnb
         STDERR_EMPTY SETUP cnor_cli_images)
 cnor_cli_test(compile_runtime_error CODE 0
-        ARGS compile ${cnor_cli_data}/runtime_error.cn -o runtime_error.tbc
+        ARGS compile ${cnor_cli_data}/runtime_error.cn -o runtime_error.cnb
         STDERR_EMPTY SETUP cnor_cli_images)
 cnor_cli_test(compile_without_lines CODE 0
-        ARGS compile ${cnor_cli_data}/runtime_error.cn -o no_lines.tbc --no-lines
+        ARGS compile ${cnor_cli_data}/runtime_error.cn -o no_lines.cnb --no-lines
         STDERR_EMPTY SETUP cnor_cli_images)
-cnor_cli_test(exec CODE 0 ARGS exec hello.tbc
+cnor_cli_test(exec CODE 0 ARGS exec hello.cnb
         STDOUT_FILE ${cnor_cli_data}/hello.out STDERR_EMPTY REQUIRES cnor_cli_images)
-cnor_cli_test(exec_stdin CODE 0 ARGS exec - STDIN ${cnor_cli_work}/hello.tbc
+cnor_cli_test(exec_stdin CODE 0 ARGS exec - STDIN ${cnor_cli_work}/hello.cnb
         STDOUT_FILE ${cnor_cli_data}/hello.out STDERR_EMPTY REQUIRES cnor_cli_images)
-cnor_cli_test(exec_runtime_error CODE 1 ARGS exec runtime_error.tbc
+cnor_cli_test(exec_runtime_error CODE 1 ARGS exec runtime_error.cnb
         STDOUT_FILE ${cnor_cli_data}/runtime_error.out
         STDERR_REGEX "runtime_error\\.cn:5: division by zero\n$" REQUIRES cnor_cli_images)
-cnor_cli_test(exec_without_lines CODE 1 ARGS exec no_lines.tbc
+cnor_cli_test(exec_without_lines CODE 1 ARGS exec no_lines.cnb
         STDERR_REGEX "runtime_error\\.cn: division by zero\n$" REQUIRES cnor_cli_images)
 cnor_cli_test(exec_not_an_image CODE 3 ARGS exec ${cnor_cli_data}/hello.cn
         STDERR_REGEX "hello\\.cn: [a-z]")
 cnor_cli_test(compile_reports_errors CODE 3
-        ARGS compile ${cnor_cli_data}/compile_error.cn -o compile_error.tbc
+        ARGS compile ${cnor_cli_data}/compile_error.cn -o compile_error.cnb
         STDERR_REGEX "compile_error\\.cn:3: unknown name: missing\n$")
 
 # -- imports -------------------------------------------------------------------
@@ -142,19 +142,19 @@ cnor_cli_test(import_runtime_error CODE 1 ARGS run ${cnor_cli_imports}/runtime_e
 cnor_cli_test(init_order CODE 3 ARGS run ${cnor_cli_imports}/init_order.cn
         STDERR_REGEX "init_order\\.cn:3: global used before its `let`: base\n$")
 cnor_cli_test(compile_imports CODE 0
-        ARGS compile ${cnor_cli_imports}/main.cn -o imports.tbc
+        ARGS compile ${cnor_cli_imports}/main.cn -o imports.cnb
         STDERR_EMPTY SETUP cnor_cli_import_images)
 cnor_cli_test(compile_import_runtime_error CODE 0
         ARGS compile -I ${cnor_cli_imports}/extra ${cnor_cli_imports}/runtime_error.cn
-        -o import_error.tbc
+        -o import_error.cnb
         STDERR_EMPTY SETUP cnor_cli_import_images)
-cnor_cli_test(exec_imports CODE 0 ARGS exec imports.tbc
+cnor_cli_test(exec_imports CODE 0 ARGS exec imports.cnb
         STDOUT_FILE ${cnor_cli_imports}/main.out STDERR_EMPTY REQUIRES cnor_cli_import_images)
-cnor_cli_test(exec_import_runtime_error CODE 1 ARGS exec import_error.tbc
+cnor_cli_test(exec_import_runtime_error CODE 1 ARGS exec import_error.cnb
         STDOUT_FILE ${cnor_cli_imports}/runtime_error.out
         STDERR_REGEX "lib/divide\\.cn:4: division by zero\n$"
         REQUIRES cnor_cli_import_images)
-cnor_cli_test(import_path_on_exec CODE 2 ARGS exec imports.tbc -I ${cnor_cli_imports}
+cnor_cli_test(import_path_on_exec CODE 2 ARGS exec imports.cnb -I ${cnor_cli_imports}
         STDERR_REGEX "unknown option: -I")
 cnor_cli_test(import_path_missing_value CODE 2 ARGS run ${cnor_cli_imports}/main.cn -I
         STDERR_REGEX "missing value for: -I")

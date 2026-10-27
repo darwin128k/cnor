@@ -37,9 +37,9 @@ cmake --build build-fuzz
 ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
   ctest --test-dir build-fuzz --output-on-failure
 mkdir -p corpus artifacts
-build-fuzz/fuzz/cnor_image_mutate --seed corpus/minimal.tbc
+build-fuzz/fuzz/cnor_image_mutate --seed corpus/minimal.cnb
 for source in fuzz/seeds/*.cn; do
-  build-fuzz/cli/cnor compile "$source" -o "corpus/$(basename "$source" .cn).tbc"
+  build-fuzz/cli/cnor compile "$source" -o "corpus/$(basename "$source" .cn).cnb"
 done
 build-fuzz/fuzz/cnor_image_fuzz corpus -max_total_time=60 \
   -timeout=5 -rss_limit_mb=512 -max_len=65536 -artifact_prefix=artifacts/
@@ -55,7 +55,7 @@ Replay and minimize a saved libFuzzer reproducer:
 ```sh
 build-fuzz/fuzz/cnor_image_fuzz artifacts/crash-EXAMPLE
 build-fuzz/fuzz/cnor_image_fuzz -minimize_crash=1 \
-  -exact_artifact_path=artifacts/minimized.tbc artifacts/crash-EXAMPLE
+  -exact_artifact_path=artifacts/minimized.cnb artifacts/crash-EXAMPLE
 ```
 
 Translate confirmed failures into focused hand-built cases in

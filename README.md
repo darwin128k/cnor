@@ -3,7 +3,7 @@
 A small script language for embedded hosts, built on [lh](https://github.com/darwin128k/lh).
 
 cnor is a compiler and an interpreter: source text is compiled into a portable
-`.tbc` image, and the VM loads, verifies and runs the image with memory sized
+`.cnb` image, and the VM loads, verifies and runs the image with memory sized
 up front. See [docs/lang-spec.md](docs/lang-spec.md) for the language and the
 image format, and [docs/architecture.md](docs/architecture.md) for how the code
 is organised and how to extend it.
@@ -62,10 +62,10 @@ cnor run script.cn                 # compile and run; prints the result unless i
 cnor script.cn                     # the same
 cnor run - < script.cn             # the source from the standard input
 cnor run script.cn --max-steps 100000 --stack 1024 --depth 64 --pool 65536
-cnor compile script.cn -o script.tbc   # write the image (default: script.tbc)
+cnor compile script.cn -o script.cnb   # write the image (default: script.cnb)
 cnor compile script.cn --no-lines      # without the line table
 cnor run app.cn -I lib -I vendor   # look for imported files in lib/ and vendor/ too
-cnor exec script.tbc               # load and run an image
+cnor exec script.cnb               # load and run an image
 cnor repl                          # read lines and run them, keeping what came before
 cnor --version
 cnor --help
@@ -84,7 +84,7 @@ cnor --help
 
 `import "path"` lines at the top of a script name other files: they are read
 from the file system relative to the importing file, then in each `-I`
-directory, and compiled into the same image (`compile` writes one `.tbc` that
+directory, and compiled into the same image (`compile` writes one `.cnb` that
 needs none of the sources).
 
 `cnor repl` (and `cnor` with no arguments) starts a session: each line is

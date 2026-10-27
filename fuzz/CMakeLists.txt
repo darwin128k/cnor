@@ -9,7 +9,7 @@ if (CNOR_BUILD_FUZZ)
         set_tests_properties(cnor_image_mutations PROPERTIES TIMEOUT 60)
         if (CNOR_BUILD_COMPILER AND TARGET cnor_cli)
             foreach (seed IN ITEMS control collections errors)
-                set(image "${CMAKE_CURRENT_BINARY_DIR}/${seed}.tbc")
+                set(image "${CMAKE_CURRENT_BINARY_DIR}/${seed}.cnb")
                 add_custom_command(OUTPUT "${image}"
                     COMMAND $<TARGET_FILE:cnor_cli> compile
                             "${CMAKE_CURRENT_SOURCE_DIR}/seeds/${seed}.cn" -o "${image}"

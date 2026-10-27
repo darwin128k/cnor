@@ -97,7 +97,7 @@ int main(int argc, char **argv)
         return result;
     }
     if (argc != 1 && !(argc == 3 && strcmp(argv[1], "--seed") == 0))
-    { fprintf(stderr, "usage: cnor_image_mutate [image.tbc | --seed output.tbc]\n"); return 2; }
+    { fprintf(stderr, "usage: cnor_image_mutate [image.cnb | --seed output.cnb]\n"); return 2; }
     cnor_byte_writer_init(&code);
     cnor_byte_writer_init(&consts);
     cnor_image_init(&image);

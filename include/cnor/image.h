@@ -1,6 +1,6 @@
 /**
  * @file image.h
- * @brief The `.tbc` image, format v4: header, sections and the owning buffer
+ * @brief The `.cnb` image, format v4: header, sections and the owning buffer
  *        (::cnor_image_t).
  *
  * Every field is a fixed-width little-endian integer written and read byte by

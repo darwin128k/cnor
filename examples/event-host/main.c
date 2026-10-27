@@ -96,7 +96,7 @@ int main(int argc, char **argv)
     size_t resident, calls_before;
     uint64_t started, elapsed, steps = 0;
     int status = 1;
-    if (argc != 2) { fprintf(stderr, "usage: cnor_event_host thermostat.tbc\n"); return 2; }
+    if (argc != 2) { fprintf(stderr, "usage: cnor_event_host thermostat.cnb\n"); return 2; }
     file = fopen(argv[1], "rb");
     if (!file) { perror(argv[1]); return 2; }
     if (fseek(file, 0, SEEK_END) || (length = ftell(file)) <= 0

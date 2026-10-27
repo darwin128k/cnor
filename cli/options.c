@@ -11,9 +11,9 @@ void
 cnor_cli_options_print_help(void)
 {
     fputs("usage: cnor run <file.cn> [options]     compile and run a script\n"
-          "       cnor compile <file.cn> [-o <out.tbc>] [--no-lines]\n"
+          "       cnor compile <file.cn> [-o <out.cnb>] [--no-lines]\n"
           "                                        write the image of a script\n"
-          "       cnor exec <file.tbc> [options]   load and run an image\n"
+          "       cnor exec <file.cnb> [options]   load and run an image\n"
           "       cnor repl [options]              read lines and run them\n"
           "       cnor <file.cn> [options]         same as `cnor run <file.cn>`\n"
           "       cnor --version | --help\n"

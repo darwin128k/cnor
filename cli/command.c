@@ -193,7 +193,7 @@ cnor_cli_run(const cnor_cli_options_t *options)
     return code;
 }
 
-/* `x.cn` -> `x.tbc`, anything else gets `.tbc` appended. */
+/* `x.cn` -> `x.cnb`, anything else gets `.cnb` appended. */
 static lh_bool_t
 cnor_cli_default_output(const lh_char_t *input, lh_char_t *out, lh_usize_t capacity)
 {
@@ -203,12 +203,12 @@ cnor_cli_default_output(const lh_char_t *input, lh_char_t *out, lh_usize_t capac
     {
         size -= 3U;
     }
-    if (size + sizeof(".tbc") > capacity)
+    if (size + sizeof(".cnb") > capacity)
     {
         return lh_bool_false;
     }
     memcpy(out, input, size);
-    memcpy(out + size, ".tbc", sizeof(".tbc"));
+    memcpy(out + size, ".cnb", sizeof(".cnb"));
     return lh_bool_true;
 }
 

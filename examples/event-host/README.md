@@ -11,7 +11,7 @@ From the repository root:
 cmake -S . -B build-event -DCMAKE_BUILD_TYPE=Release -DCNOR_BUILD_EXAMPLES=ON -DCNOR_BUILD_TESTS=ON
 cmake --build build-event
 ctest --test-dir build-event --output-on-failure
-./build-event/examples/event-host/cnor_event_host build-event/examples/event-host/thermostat.tbc
+./build-event/examples/event-host/cnor_event_host build-event/examples/event-host/thermostat.cnb
 ```
 
 On Windows add `.exe`; multi-configuration generators may put executables in
@@ -22,7 +22,7 @@ To build the target without the compiler, reuse the desktop-generated image:
 ```sh
 cmake -S . -B build-event-vm -DCMAKE_BUILD_TYPE=Release -DCNOR_BUILD_COMPILER=OFF -DCNOR_BUILD_CLI=OFF -DCNOR_BUILD_EXAMPLES=ON
 cmake --build build-event-vm
-./build-event-vm/examples/event-host/cnor_event_host build-event/examples/event-host/thermostat.tbc
+./build-event-vm/examples/event-host/cnor_event_host build-event/examples/event-host/thermostat.cnb
 ```
 
 The file reader and clock are desktop adapters. On firmware, pass the image

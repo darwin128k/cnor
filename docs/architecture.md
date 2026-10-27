@@ -14,7 +14,7 @@ tokens (pulled one at a time)
 AST in an arena  include/cnor/ast.h, arena.h
    |  compiler   include/cnor/compiler.h     src/cnor/compiler/
    v
-image (.tbc v4)  include/cnor/image.h        src/cnor/image/
+image (.cnb v4)  include/cnor/image.h        src/cnor/image/
    |  loader + verifier                      src/cnor/image/view.c, verify.c
    v
 VM               include/cnor/vm.h           src/cnor/vm/

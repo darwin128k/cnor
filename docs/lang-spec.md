@@ -16,7 +16,7 @@ text are marked **[cnor]**; the reasons are collected in
 ## 1. Goals
 
 1. A script is written as text and needs no separate build step on the target:
-   the same `.tbc` image runs on an STM32, on a game server and in a browser.
+   the same `.cnb` image runs on an STM32, on a game server and in a browser.
 2. The runtime **does not depend on an OS**: no `malloc`, no `printf`, no file
    system, no module loader. Everything goes through `lh`: allocator, strings,
    values, errors.
@@ -489,7 +489,7 @@ closures, a preprocessor, metatables.
 
 ---
 
-## 7. The `.tbc` image format, v13
+## 7. The `.cnb` image format, v13
 
 **[cnor]** v1 replaced the original header (whose layout used `sizeof` and
 was not portable) and its names section. Every field is a fixed-width
