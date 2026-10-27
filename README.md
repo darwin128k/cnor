@@ -15,6 +15,7 @@ is organised and how to extend it.
 - `cli/` - the `cnor` command line (`CNOR_BUILD_CLI`)
 - `tests/` - tests (`CNOR_BUILD_TESTS`)
 - `bench/` - benchmarks (`CNOR_BUILD_BENCH`), see [bench/README.md](bench/README.md)
+- `examples/event-host/` - a measured thermostat event host (`CNOR_BUILD_EXAMPLES`), see [its README](examples/event-host/README.md)
 - `docs/` - language specification and architecture notes
 - `lib/lh/` - lh, as a git submodule
 - `licenses/` - third-party license texts

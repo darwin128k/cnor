@@ -1,0 +1,12 @@
+# Temperatures are tenths of a degree Celsius; durable state belongs to C.
+native fn temperature() -> i32
+native fn relay() -> i32
+native fn set_relay(value: i32) -> i32
+
+let t = temperature()
+let mut enabled = relay()
+if t < 190:
+    enabled = 1
+if t > 220:
+    enabled = 0
+set_relay(enabled)

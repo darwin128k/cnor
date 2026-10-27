@@ -9,6 +9,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 option(CNOR_BUILD_TESTS "Build tests" OFF)
 option(CNOR_BUILD_BENCH "Build the benchmark runner (bench/)" OFF)
+option(CNOR_BUILD_EXAMPLES "Build embedding examples (examples/)" OFF)
 # The compiler turns a source into an image; the machine runs the image. A
 # host that ships the machine alone needs no compiler: the image is the
 # boundary between them, and the script is compiled on the desktop.
@@ -202,6 +203,10 @@ endif ()
 if (CNOR_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif ()
+
+if (CNOR_BUILD_EXAMPLES)
+    add_subdirectory(examples/event-host)
 endif ()
 
 if (CNOR_BUILD_BENCH AND CNOR_BUILD_COMPILER)
