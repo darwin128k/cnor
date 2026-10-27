@@ -108,6 +108,18 @@ enum cnor_punct
     cnor_punct_tilde,     /**< `~` */
     cnor_punct_shift_left,  /**< `<<` */
     cnor_punct_shift_right, /**< `>>` */
+    /**
+     * The compound assignments: the value on the right is combined with the
+     * one on the left, and the result is stored back.
+     */
+    cnor_punct_plus_assign,     /**< `+=` */
+    cnor_punct_minus_assign,    /**< `-=` */
+    cnor_punct_star_assign,     /**< `*=` */
+    cnor_punct_slash_assign,    /**< `/=` */
+    cnor_punct_percent_assign,  /**< `%=` */
+    cnor_punct_amp_assign,      /**< `&=` */
+    cnor_punct_pipe_assign,     /**< `|=` */
+    cnor_punct_caret_assign,    /**< `^=` */
     cnor_punct_count
 };
 /** @copybrief cnor_punct */

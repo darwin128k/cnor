@@ -141,6 +141,137 @@ cnor_parser_unescape(const lh_char_t *raw, lh_usize_t size, lh_char_t *out, lh_u
     return lh_bool_true;
 }
 
+/* -- strings --------------------------------------------------------------- */
+
+/* Is @p c the start of a name? */
+static lh_bool_t
+cnor_parser_is_name_start(lh_char_t c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+}
+
+/* Is @p c a part of a name? */
+static lh_bool_t
+cnor_parser_is_name_char(lh_char_t c)
+{
+    return cnor_parser_is_name_start(c) || (c >= '0' && c <= '9');
+}
+
+/* A piece of a string: the text as it is. */
+static cnor_node_t *
+cnor_parser_string_piece(cnor_parser_t *self, const lh_char_t *text, lh_usize_t size)
+{
+    cnor_node_t *node = cnor_parser_node(self, cnor_node_string);
+
+    if (node != lh_null)
+    {
+        node->name.begin = text;
+        node->name.size = size;
+    }
+    return node;
+}
+
+/* The value of a name, as a string: `str(name)`. */
+static cnor_node_t *
+cnor_parser_str_call(cnor_parser_t *self, const lh_char_t *name, lh_usize_t size)
+{
+    cnor_node_t *ident = cnor_parser_node(self, cnor_node_ident);
+    cnor_node_t *call;
+    cnor_node_list_t args = {lh_null, lh_null};
+
+    if (ident == lh_null)
+    {
+        return lh_null;
+    }
+    ident->name.begin = name;
+    ident->name.size = size;
+    call = cnor_parser_node(self, cnor_node_call);
+    if (call == lh_null)
+    {
+        return lh_null;
+    }
+    call->name.begin = "str";
+    call->name.size = 3U;
+    cnor_node_list_append(&args, ident);
+    call->data.call.args = args.head;
+    call->data.call.argc = 1U;
+    return call;
+}
+
+/* Put @p part after @p left: `left + part`. */
+static cnor_node_t *
+cnor_parser_join(cnor_parser_t *self, cnor_node_t *left, cnor_node_t *part)
+{
+    cnor_node_t *node;
+
+    if (left == lh_null)
+    {
+        return part;
+    }
+    if (part == lh_null)
+    {
+        return left;
+    }
+    node = cnor_parser_node(self, cnor_node_binary);
+    if (node != lh_null)
+    {
+        node->data.binary.op = cnor_binary_add;
+        node->data.binary.left = left;
+        node->data.binary.right = part;
+    }
+    return node;
+}
+
+/*
+ * A string with `$name` in it: the names are values, and the pieces are put
+ * together into one string. The result is the same as writing the `+` by
+ * hand, with `str()` around every value.
+ */
+static cnor_node_t *
+cnor_parser_interpolation(cnor_parser_t *self, const lh_char_t *text, lh_usize_t size)
+{
+    cnor_node_t *result = lh_null;
+    lh_usize_t piece = 0U;
+    lh_usize_t at = 0U;
+
+    while (at < size)
+    {
+        lh_usize_t name_end;
+
+        if (text[at] != '$' || at + 1U >= size || !cnor_parser_is_name_start(text[at + 1U]))
+        {
+            ++at;
+            continue;
+        }
+        name_end = at + 2U;
+        while (name_end < size && cnor_parser_is_name_char(text[name_end]))
+        {
+            ++name_end;
+        }
+        /* The piece before the name, then the value of the name. */
+        if (at > piece)
+        {
+            result = cnor_parser_join(self, result,
+                                      cnor_parser_string_piece(self, text + piece, at - piece));
+        }
+        result = cnor_parser_join(self, result,
+                                  cnor_parser_str_call(self, text + at + 1U, name_end - at - 1U));
+        at = name_end;
+        piece = at;
+    }
+    if (result == lh_null)
+    {
+        /* No names in it: an ordinary string. */
+        return lh_null;
+    }
+    if (size > piece)
+    {
+        result = cnor_parser_join(self, result,
+                                  cnor_parser_string_piece(self, text + piece, size - piece));
+    }
+    return result;
+}
+
 static cnor_node_t *
 cnor_parser_string(cnor_parser_t *self)
 {
@@ -157,6 +288,16 @@ cnor_parser_string(cnor_parser_t *self)
     if (!cnor_parser_unescape((const lh_char_t *) text.begin + 1, raw_size, buffer, &written))
     {
         return cnor_parser_fail(self, cnor_error_bad_escape);
+    }
+    node = cnor_parser_interpolation(self, buffer, written);
+    if (node != lh_null)
+    {
+        cnor_parser_advance(self);
+        return node;
+    }
+    if (!cnor_diag_is_ok(&self->diag))
+    {
+        return lh_null;
     }
     node = cnor_parser_node(self, cnor_node_string);
     if (node != lh_null)

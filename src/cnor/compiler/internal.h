@@ -713,6 +713,12 @@ cnor_compile_store(cnor_compiler_t *self, const cnor_binding_t *binding);
 /* control_if.c */
 lh_bool_t
 cnor_compile_if(cnor_compiler_t *self, const cnor_node_t *node);
+/** @brief The type two branches of a ternary agree on. */
+cnor_static_type_t
+cnor_type_choice(cnor_static_type_t left, cnor_static_type_t right);
+/** @brief `value if condition else other`. */
+lh_bool_t
+cnor_compile_ternary(cnor_compiler_t *self, const cnor_node_t *node);
 
 /* control_loop.c */
 lh_bool_t

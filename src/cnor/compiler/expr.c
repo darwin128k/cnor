@@ -229,6 +229,51 @@ cnor_compile_binary(cnor_compiler_t *self, const cnor_node_t *node)
            && cnor_type_binary(self, node, left, right, &self->type);
 }
 
+/*
+ * `value if condition else other`: the condition decides which of the two
+ * values the machine keeps. The code is laid out like this:
+ *
+ *     <the condition>
+ *     jmp_if_false otherwise
+ *     <the value when it holds>
+ *     jmp end
+ *   otherwise:
+ *     <the other value>
+ *   end:
+ */
+lh_bool_t
+cnor_compile_ternary(cnor_compiler_t *self, const cnor_node_t *node)
+{
+    cnor_label_t otherwise;
+    cnor_label_t end;
+    cnor_static_type_t then_type;
+    cnor_static_type_t else_type;
+
+    cnor_label_init(&otherwise);
+    cnor_label_init(&end);
+    self->emit.line = node->line;
+    if (!cnor_compile_branch(self, node->data.ternary.cond, lh_bool_false, &otherwise)
+        || !cnor_compile_expr(self, node->data.ternary.then_value))
+    {
+        return lh_bool_false;
+    }
+    then_type = self->type;
+    if (!cnor_emit_jump(self, cnor_op_jmp, &end) || !cnor_emit_bind(self, &otherwise)
+        || !cnor_compile_expr(self, node->data.ternary.else_value))
+    {
+        return lh_bool_false;
+    }
+    else_type = self->type;
+    if (!cnor_emit_bind(self, &end))
+    {
+        return lh_bool_false;
+    }
+    /* The value is whichever branch ran; its type is what both branches agree
+     * on. */
+    self->type = cnor_type_choice(then_type, else_type);
+    return lh_bool_true;
+}
+
 /* An array literal is only a declaration: its elements are slots of a frame,
  * and a frame belongs to a function. */
 lh_bool_t

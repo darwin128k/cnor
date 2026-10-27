@@ -126,7 +126,9 @@ whole and lives exactly as long as one run needs.
   - integers: `0`, `42`, `0xFF`, `0b1010`;
   - reals: `1.5` (digits on both sides of the dot, so `0..10` stays a range);
     **[cnor]** the spec's `f32` needed them, the original lexer had none;
-  - strings in double quotes with the escapes `\n`, `\t`, `\\`, `\"`, `\0`.
+  - strings in double quotes with the escapes `\n`, `\t`, `\\`, `\"`, `\0`;
+    **[cnor]** a `$` followed by a name puts the value of that name into the
+    string (section 6.2).
 - Identifiers: a letter or `_`, then letters, digits and `_`.
 - Keywords: a fixed, closed list (section 7.2).
 
@@ -164,7 +166,8 @@ block       := NEWLINE INDENT statement { statement } DEDENT
 statement   := simple end | compound
 simple      := let | assign | expr | "return" [ expr ] | "break" | "continue" | "raise"
 let         := "let" [ "mut" ] IDENT [ ":" type ] [ "=" expr ]
-assign      := IDENT "=" expr | IDENT "[" expr "]" "=" expr
+assign      := target ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" ) expr
+target      := IDENT | IDENT "[" expr "]"
 compound    := if | while | for | match | try
 if          := "if" expr ":" block [ "else" ( ":" block | if ) ]
 while       := "while" expr ":" block
@@ -173,7 +176,7 @@ match       := "match" expr ":" NEWLINE INDENT arm { arm } DEDENT
 arm         := ( literal | "-" literal | "_" ) "=>" simple [ "," ] end
 try         := "try" ":" block [ "catch" [ IDENT ] ":" block ] [ "finally" ":" block ]
 end         := [ ";" ] ( NEWLINE | DEDENT | EOF )      (or ";" then more on the line)
-expr        := binary expression, precedence below
+expr        := binary [ "if" binary "else" expr ]
 postfix     := primary { "[" expr "]" }
 primary     := literal | IDENT | IDENT "(" [ args ] ")" | "(" expr ")" | array
 array       := "[" expr ";" INT "]"
@@ -304,6 +307,19 @@ answer and fails the run. `>>` keeps the sign of a signed number.
   declaration, or to the host's native table given to the compiler.
 - `for i in a..b` runs `i` from `a` up to `b`, excluding `b`; `b` is evaluated
   once.
+- An assignment may combine the value with the one that is there: `x += 1`,
+  `-=`, `*=`, `/=`, `%=`, and the bitwise `&=`, `|=`, `^=`. The value is read
+  once, the operation is the one the sign names, and the result is stored back.
+  An element of an array and a pair of a dictionary may be combined the same
+  way; the index of a global array or dictionary is computed twice, as the
+  machine has no way to keep it.
+- `value if condition else other` picks one of two values: the condition is
+  checked, and only the branch that is picked runs. The other branch may have
+  a ternary of its own.
+- A string may hold the value of a name: `"hp = $hp"` is the text `hp = ` and
+  the value of `hp` as a string. The value is put in with `str()`, so a number
+  reads the way it is written. A `$` that is not followed by a name is just a
+  sign.
 - `match` compares its subject with each arm's literal using `==`, top to
   bottom; the first equal arm runs, `_` always matches, no match does nothing.
 - The value of the last top-level expression statement is the program's

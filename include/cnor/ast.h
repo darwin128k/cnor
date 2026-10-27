@@ -56,6 +56,7 @@ enum cnor_node_kind
     cnor_node_binary,     /**< `left op right`. */
     cnor_node_unary,      /**< `op operand`. */
     cnor_node_index,      /**< `target[index]`. */
+    cnor_node_ternary,    /**< `value if condition else other`. */
     cnor_node_array,      /**< `[value; count]`: an array of `count` elements. */
     cnor_node_kind_count  /**< Number of kinds; not a kind itself. */
 };
@@ -112,6 +113,26 @@ enum cnor_binary_op
 typedef enum cnor_binary_op cnor_binary_op_t;
 
 /**
+ * @enum cnor_assign_op
+ * @brief What an assignment does with the value on its right.
+ */
+enum cnor_assign_op
+{
+    cnor_assign_set = 0, /**< `=`: the value as it is. */
+    cnor_assign_add,     /**< `+=` */
+    cnor_assign_sub,     /**< `-=` */
+    cnor_assign_mul,     /**< `*=` */
+    cnor_assign_div,     /**< `/=` */
+    cnor_assign_mod,     /**< `%=` */
+    cnor_assign_band,    /**< `&=` */
+    cnor_assign_bor,     /**< `|=` */
+    cnor_assign_bxor,    /**< `^=` */
+    cnor_assign_count
+};
+/** @copybrief cnor_assign_op */
+typedef enum cnor_assign_op cnor_assign_op_t;
+
+/**
  * @enum cnor_unary_op
  * @brief Operator of a ::cnor_node_unary node.
  */
@@ -160,8 +181,9 @@ union cnor_node_data
     } let;
     struct
     {
-        cnor_node_t *target; /**< What is written; an identifier. */
-        cnor_node_t *value;  /**< What is written into it. */
+        cnor_node_t *target;      /**< What is written; an identifier. */
+        cnor_node_t *value;       /**< What is written into it. */
+        cnor_assign_op_t op;      /**< What is done with the value: `=` or an operation. */
     } assign;
     struct
     {
@@ -229,6 +251,12 @@ union cnor_node_data
         cnor_node_t *target; /**< Indexed value. */
         cnor_node_t *index;  /**< Index. */
     } index;
+    struct
+    {
+        cnor_node_t *cond;       /**< The condition. */
+        cnor_node_t *then_value; /**< The value when it holds. */
+        cnor_node_t *else_value; /**< The value when it does not. */
+    } ternary;
     struct
     {
         cnor_node_t *value; /**< The value every element holds. */

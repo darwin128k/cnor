@@ -326,5 +326,39 @@ cnor_parser_binary(cnor_parser_t *self, lh_u32_t min_precedence)
 cnor_node_t *
 cnor_parser_expr(cnor_parser_t *self)
 {
-    return cnor_parser_binary(self, 1U);
+    cnor_node_t *value = cnor_parser_binary(self, 1U);
+
+    if (value == lh_null || !cnor_parser_at_keyword(self, cnor_keyword_if))
+    {
+        return value;
+    }
+    /*
+     * `value if condition else other`: the condition is an expression without
+     * a ternary of its own, and the other value may have one.
+     */
+    {
+        cnor_node_t *node = cnor_parser_node(self, cnor_node_ternary);
+        cnor_node_t *cond;
+
+        if (node == lh_null)
+        {
+            return lh_null;
+        }
+        cnor_parser_advance(self);
+        node->line = value->line;
+        node->data.ternary.then_value = value;
+        cond = cnor_parser_binary(self, 1U);
+        if (cond == lh_null)
+        {
+            return lh_null;
+        }
+        if (!cnor_parser_at_keyword(self, cnor_keyword_else))
+        {
+            return cnor_parser_fail(self, cnor_error_unexpected_token);
+        }
+        cnor_parser_advance(self);
+        node->data.ternary.cond = cond;
+        node->data.ternary.else_value = cnor_parser_expr(self);
+        return node->data.ternary.else_value == lh_null ? lh_null : node;
+    }
 }

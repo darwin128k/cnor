@@ -332,6 +332,154 @@ cnor_compile_assign_index(cnor_compiler_t *self, const cnor_node_t *node,
 
 /* -- assignment ------------------------------------------------------------ */
 
+/* The opcode each compound assignment uses: what is done with the value on
+ * the right before it is stored back. */
+static const cnor_op_t m_assign_ops[cnor_assign_count] = {
+    [cnor_assign_set] = cnor_op_add, /* Not used: `=` stores the value as it is. */
+    [cnor_assign_add] = cnor_op_add,
+    [cnor_assign_sub] = cnor_op_sub,
+    [cnor_assign_mul] = cnor_op_mul,
+    [cnor_assign_div] = cnor_op_div,
+    [cnor_assign_mod] = cnor_op_mod,
+    [cnor_assign_band] = cnor_op_band,
+    [cnor_assign_bor] = cnor_op_bor,
+    [cnor_assign_bxor] = cnor_op_bxor,
+};
+
+/*
+ * `x += value`: the value of `x`, the operation, and the value stored back.
+ * The value of `x` is read once, and the operation is the one the sign names.
+ */
+static lh_bool_t
+cnor_compile_assign_name_op(cnor_compiler_t *self, const cnor_node_t *node,
+                             const cnor_binding_t *binding)
+{
+    if (!cnor_compile_expr(self, node->data.assign.target)
+        || !cnor_compile_expr(self, node->data.assign.value)
+        || !cnor_emit_op(self, m_assign_ops[node->data.assign.op]))
+    {
+        return lh_bool_false;
+    }
+    /* The result is what is stored, so it must have the type of the target. */
+    return cnor_type_require(self, node, binding->type, self->type)
+           && cnor_compile_store(self, binding);
+}
+
+/*
+ * `a[i] += value`: the index, the value that is there, the operation, and the
+ * value stored back. The index of a local array or dictionary is computed once;
+ * a global one is computed twice, as the machine has no way to keep it.
+ */
+static lh_bool_t
+cnor_compile_assign_index_op(cnor_compiler_t *self, const cnor_node_t *node,
+                              const cnor_node_t *target)
+{
+    const cnor_node_t *const base = target->data.index.target;
+    const cnor_op_t op = m_assign_ops[node->data.assign.op];
+    cnor_binding_t binding;
+
+    if (base->kind != cnor_node_ident)
+    {
+        return cnor_compile_fail(self, target, cnor_error_not_assignable);
+    }
+    binding = cnor_scope_resolve(self, base->name);
+    if (binding.type != cnor_static_array && binding.type != cnor_static_dict)
+    {
+        return cnor_compile_fail(self, target, cnor_error_not_assignable);
+    }
+    if (binding.kind == cnor_binding_local)
+    {
+        if (!binding.is_mutable)
+        {
+            return cnor_compile_fail_name(self, base, cnor_error_immutable);
+        }
+        /* The index, then the index again: the machine reads the element and
+         * keeps the index for the write. */
+        if (!cnor_compile_expr(self, target->data.index.index)
+            || !cnor_type_require(self, target,
+                                  binding.type == cnor_static_dict ? cnor_static_str
+                                                                    : cnor_static_i32,
+                                  self->type)
+            || !cnor_emit_op(self, cnor_op_dup))
+        {
+            return lh_bool_false;
+        }
+        if (binding.type == cnor_static_dict)
+        {
+            if (!cnor_emit_insn(self, cnor_op_dict_get_l, binding.index, 0U)
+                || !cnor_compile_expr(self, node->data.assign.value)
+                || !cnor_emit_op(self, op))
+            {
+                return lh_bool_false;
+            }
+            return cnor_emit_insn(self, cnor_op_dict_set_l, binding.index, 0U);
+        }
+        if (!cnor_emit_insn(self, cnor_op_array_get_l, binding.index, 0U)
+            || !cnor_compile_expr(self, node->data.assign.value)
+            || !cnor_emit_op(self, op))
+        {
+            return lh_bool_false;
+        }
+        return cnor_emit_insn(self, cnor_op_array_set_l, binding.index, 0U);
+    }
+    /* A global array or dictionary: its value goes on the stack, and the index
+     * is computed once for the read and once for the write. The machine wants
+     * the array or the dictionary and the index under the value, and the stack
+     * has no room to move it, so the value waits in a slot. */
+    {
+        const cnor_static_type_t index_type =
+            binding.type == cnor_static_dict ? cnor_static_str : cnor_static_i32;
+        cnor_slot_t slot;
+
+        if (!cnor_scope_add_local(self, node, lh_str_view_empty(), lh_bool_false,
+                                  cnor_static_any, 0U, &slot))
+        {
+            return lh_bool_false;
+        }
+        /* The value that is there. */
+        if (!cnor_compile_expr(self, base)
+            || !cnor_type_require(self, target, binding.type, self->type)
+            || !cnor_compile_expr(self, target->data.index.index)
+            || !cnor_type_require(self, target, index_type, self->type))
+        {
+            return lh_bool_false;
+        }
+        if (binding.type == cnor_static_dict)
+        {
+            if (!cnor_emit_op(self, cnor_op_dict_get))
+            {
+                return lh_bool_false;
+            }
+        }
+        else if (!cnor_emit_op(self, cnor_op_array_get))
+        {
+            return lh_bool_false;
+        }
+        /* The value on the right, and the operation: the result waits in the
+         * slot. */
+        if (!cnor_compile_expr(self, node->data.assign.value)
+            || !cnor_emit_op(self, op)
+            || !cnor_emit_insn(self, cnor_op_store_local, slot, 0U))
+        {
+            return lh_bool_false;
+        }
+        /* The array or dictionary, the index, and the result. */
+        if (!cnor_compile_expr(self, base)
+            || !cnor_type_require(self, target, binding.type, self->type)
+            || !cnor_compile_expr(self, target->data.index.index)
+            || !cnor_type_require(self, target, index_type, self->type)
+            || !cnor_emit_insn(self, cnor_op_load_local, slot, 0U))
+        {
+            return lh_bool_false;
+        }
+        if (binding.type == cnor_static_dict)
+        {
+            return cnor_emit_op(self, cnor_op_dict_set);
+        }
+        return cnor_emit_op(self, cnor_op_array_set);
+    }
+}
+
 lh_bool_t
 cnor_compile_assign(cnor_compiler_t *self, const cnor_node_t *node)
 {
@@ -340,6 +488,10 @@ cnor_compile_assign(cnor_compiler_t *self, const cnor_node_t *node)
 
     if (target->kind == cnor_node_index)
     {
+        if (node->data.assign.op != cnor_assign_set)
+        {
+            return cnor_compile_assign_index_op(self, node, target);
+        }
         return cnor_compile_assign_index(self, node, target);
     }
     if (target->kind != cnor_node_ident)
@@ -362,6 +514,10 @@ cnor_compile_assign(cnor_compiler_t *self, const cnor_node_t *node)
     if (binding.kind == cnor_binding_global && !cnor_order_use_global(self, target, binding.index))
     {
         return lh_bool_false;
+    }
+    if (node->data.assign.op != cnor_assign_set)
+    {
+        return cnor_compile_assign_name_op(self, node, &binding);
     }
     return cnor_compile_expr(self, node->data.assign.value)
            && cnor_type_require(self, node, binding.type, self->type)

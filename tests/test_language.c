@@ -531,6 +531,156 @@ CNOR_TEST(refuses_a_try_where_it_does_not_fit)
              cnor_error_div_by_zero);
 }
 
+CNOR_TEST(assigns_with_an_operator)
+{
+    cnor_line_t line = 0U;
+
+    /* `+=` and the rest: the value on the right is combined with the one on
+     * the left, and the result is stored back. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut x = 10\n"
+                      "    x += 5\n"
+                      "    x -= 3\n"
+                      "    x *= 2\n"
+                      "    x /= 4\n"
+                      "    x %= 5\n"
+                      "    return x\n"
+                      "f()\n"),
+             1);
+    /* The bitwise ones. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut x = 12\n"
+                      "    x &= 10\n"
+                      "    x |= 1\n"
+                      "    x ^= 3\n"
+                      "    return x\n"
+                      "f()\n"),
+             10);
+    /* An element of an array. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut a = [0; 4]\n"
+                      "    a[0] = 5\n"
+                      "    a[0] += 7\n"
+                      "    return a[0]\n"
+                      "f()\n"),
+             12);
+    /* A pair of a dictionary. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut d = dict(4)\n"
+                      "    d[\"hp\"] = 10\n"
+                      "    d[\"hp\"] += 5\n"
+                      "    return d[\"hp\"]\n"
+                      "f()\n"),
+             15);
+    /* A global. */
+    CHECK_EQ(value_of("let mut g = 10\n"
+                      "fn f() -> i32:\n"
+                      "    g += 5\n"
+                      "    return g\n"
+                      "f()\n"),
+             15);
+    /* A pair of a global dictionary. */
+    CHECK_EQ(value_of("let mut d = dict(4)\n"
+                      "d[\"hp\"] = 10\n"
+                      "d[\"hp\"] += 5\n"
+                      "d[\"hp\"]\n"),
+             15);
+    /* An element of a global array. */
+    CHECK_EQ(value_of("let mut a = [0; 3]\n"
+                      "a[0] = 5\n"
+                      "a[0] += 7\n"
+                      "a[0]\n"),
+             12);
+    /* An immutable variable is refused, as a plain assignment is. */
+    CHECK_EQ(error_of("fn f() -> i32:\n"
+                      "    let x = 10\n"
+                      "    x += 5\n"
+                      "    return x\n"
+                      "f()\n",
+                      &line),
+             cnor_error_immutable);
+    /* The result must have the type of the target. */
+    CHECK_EQ(error_of("fn f() -> i32:\n"
+                      "    let mut x = 10\n"
+                      "    x += 1.5\n"
+                      "    return x\n"
+                      "f()\n",
+                      &line),
+             cnor_error_type_mismatch);
+}
+
+CNOR_TEST(picks_a_value_with_a_ternary)
+{
+    /* `value if condition else other`. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let x = 5\n"
+                      "    let y = 10\n"
+                      "    return x if x > y else y\n"
+                      "f()\n"),
+             10);
+    /* The branch that is not picked does not run. */
+    CHECK_EQ(value_of("let mut n = 0\n"
+                      "fn bump() -> i32:\n"
+                      "    n = n + 1\n"
+                      "    return n\n"
+                      "fn f() -> i32:\n"
+                      "    let x = bump()\n"
+                      "    let y = x if x > 0 else bump()\n"
+                      "    return n * 1000 + y\n"
+                      "f()\n"),
+             1001);
+    /* The branches may be of different kinds, as long as they agree on what
+     * the value is. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let x = 5\n"
+                      "    let s = \"big\" if x > 3 else \"small\"\n"
+                      "    return len(s)\n"
+                      "f()\n"),
+             3);
+    /* A ternary of its own in the other branch. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let x = 1\n"
+                      "    return 10 if x > 0 else 20 if x < 0 else 30\n"
+                      "f()\n"),
+             10);
+}
+
+CNOR_TEST(puts_values_into_a_string)
+{
+    /* `$name` in a string is the value of the name. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let hp = 42\n"
+                      "    let name = \"player\"\n"
+                      "    let s = \"hp = $hp, name = $name\"\n"
+                      "    if s == \"hp = 42, name = player\":\n"
+                      "        return 1\n"
+                      "    return 0\n"
+                      "f()\n"),
+             1);
+    /* A string with no names in it stays as it is. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let s = \"nothing here\"\n"
+                      "    if s == \"nothing here\":\n"
+                      "        return 1\n"
+                      "    return 0\n"
+                      "f()\n"),
+             1);
+    /* A `$` that is not a name is just a sign. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let s = \"it costs $5\"\n"
+                      "    if s == \"it costs $5\":\n"
+                      "        return 1\n"
+                      "    return 0\n"
+                      "f()\n"),
+             1);
+    /* A name that is not there is refused. */
+    CHECK_EQ(failure_of("fn f() -> i32:\n"
+                        "    let s = \"hp = $hp\"\n"
+                        "    return 0\n"
+                        "f()\n"),
+             cnor_error_unknown_name);
+}
+
 /* -- finally and raise ------------------------------------------------------- */
 
 CNOR_TEST(runs_a_finally_block)
@@ -1653,6 +1803,9 @@ CNOR_TEST_CASE(refuses_a_try_where_it_does_not_fit),
     CNOR_TEST_CASE(runs_a_finally_block),
     CNOR_TEST_CASE(raises_the_error_again),
     CNOR_TEST_CASE(leaves_a_try_with_a_finally),
+    CNOR_TEST_CASE(assigns_with_an_operator),
+    CNOR_TEST_CASE(picks_a_value_with_a_ternary),
+    CNOR_TEST_CASE(puts_values_into_a_string),
     CNOR_TEST_CASE(passes_an_array_to_a_function_and_walks_it),
     CNOR_TEST_CASE(keeps_a_global_array_whole),
     CNOR_TEST_CASE(refuses_an_array_where_it_does_not_fit),

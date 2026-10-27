@@ -242,8 +242,8 @@ cnor_type_of_arithmetic(cnor_static_type_t left, cnor_static_type_t right)
 }
 
 /* `and` / `or` give whichever operand decided. */
-static cnor_static_type_t
-cnor_type_of_choice(cnor_static_type_t left, cnor_static_type_t right)
+cnor_static_type_t
+cnor_type_choice(cnor_static_type_t left, cnor_static_type_t right)
 {
     if (left == right)
     {
@@ -309,7 +309,7 @@ cnor_type_of_binary(cnor_binary_op_t op, cnor_static_type_t left, cnor_static_ty
         return (cnor_type_may_be_number(left) && cnor_type_may_be_number(right)) ? lh_bool_true
                                                                                   : lh_bool_false;
     default:
-        *out = cnor_type_of_choice(left, right);
+        *out = cnor_type_choice(left, right);
         return lh_bool_true;
     }
 }

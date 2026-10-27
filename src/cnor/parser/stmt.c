@@ -143,18 +143,72 @@ cnor_parser_raise(cnor_parser_t *self)
     return node;
 }
 
+/* The operation a compound assignment does, or nothing when there is no
+ * assignment sign at all. */
+static lh_bool_t
+cnor_parser_assign_op(const cnor_parser_t *self, cnor_assign_op_t *op)
+{
+    if (cnor_parser_at_punct(self, cnor_punct_assign))
+    {
+        *op = cnor_assign_set;
+        return lh_bool_true;
+    }
+    if (cnor_parser_at_punct(self, cnor_punct_plus_assign))
+    {
+        *op = cnor_assign_add;
+        return lh_bool_true;
+    }
+    if (cnor_parser_at_punct(self, cnor_punct_minus_assign))
+    {
+        *op = cnor_assign_sub;
+        return lh_bool_true;
+    }
+    if (cnor_parser_at_punct(self, cnor_punct_star_assign))
+    {
+        *op = cnor_assign_mul;
+        return lh_bool_true;
+    }
+    if (cnor_parser_at_punct(self, cnor_punct_slash_assign))
+    {
+        *op = cnor_assign_div;
+        return lh_bool_true;
+    }
+    if (cnor_parser_at_punct(self, cnor_punct_percent_assign))
+    {
+        *op = cnor_assign_mod;
+        return lh_bool_true;
+    }
+    if (cnor_parser_at_punct(self, cnor_punct_amp_assign))
+    {
+        *op = cnor_assign_band;
+        return lh_bool_true;
+    }
+    if (cnor_parser_at_punct(self, cnor_punct_pipe_assign))
+    {
+        *op = cnor_assign_bor;
+        return lh_bool_true;
+    }
+    if (cnor_parser_at_punct(self, cnor_punct_caret_assign))
+    {
+        *op = cnor_assign_bxor;
+        return lh_bool_true;
+    }
+    return lh_bool_false;
+}
+
 /* An expression, or an assignment when `=` follows it. */
 static cnor_node_t *
 cnor_parser_expr_or_assign(cnor_parser_t *self)
 {
     cnor_node_t *value = cnor_parser_expr(self);
     cnor_node_t *node;
+    cnor_assign_op_t op;
 
     if (value == lh_null)
     {
         return lh_null;
     }
-    if (cnor_parser_at_punct(self, cnor_punct_assign))
+    if (cnor_parser_assign_op(self, &op))
     {
         node = cnor_parser_node(self, cnor_node_assign);
         if (node == lh_null)
@@ -164,6 +218,7 @@ cnor_parser_expr_or_assign(cnor_parser_t *self)
         cnor_parser_advance(self);
         node->line = value->line;
         node->data.assign.target = value;
+        node->data.assign.op = op;
         node->data.assign.value = cnor_parser_expr(self);
         return node->data.assign.value == lh_null ? lh_null : node;
     }

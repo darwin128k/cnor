@@ -47,6 +47,7 @@ static const cnor_compile_rule_t m_rules[cnor_node_kind_count] = {
     [cnor_node_binary] = {cnor_compile_binary, lh_null},
     [cnor_node_unary] = {cnor_compile_unary, lh_null},
     [cnor_node_index] = {cnor_compile_index, lh_null},
+    [cnor_node_ternary] = {cnor_compile_ternary, lh_null},
     [cnor_node_array] = {cnor_compile_array, lh_null},
 };
 
