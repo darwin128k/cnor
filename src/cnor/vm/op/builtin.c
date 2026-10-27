@@ -571,6 +571,86 @@ builtin_do_parse_int(cnor_vm_t *vm, cnor_argc_t argc)
     return cnor_error_none;
 }
 
+/*
+ * split_into(text, separator, out): the pieces of the text, written into the
+ * array, and how many there are.
+ *
+ * A collection cannot be made while the program runs, so the array is made by
+ * the program and given here. The array has to have a place for every piece;
+ * if it does not, the run fails.
+ */
+static cnor_error_t
+builtin_do_split_into(cnor_vm_t *vm, cnor_argc_t argc)
+{
+    builtin_text_t text;
+    builtin_text_t separator;
+    const lh_value_t *const out = builtin_arg(vm, argc, 2U);
+    lh_value_t *elements;
+    lh_u32_t room;
+    lh_u32_t written = 0U;
+    lh_usize_t start = 0U;
+    lh_usize_t at = 0U;
+
+    if (!builtin_view(builtin_arg(vm, argc, 0U), &text)
+        || !builtin_view(builtin_arg(vm, argc, 1U), &separator))
+    {
+        return cnor_error_type;
+    }
+    if (cnor_vm_fast_kind(out) != CNOR_VALUE_KIND_ARRAY)
+    {
+        return cnor_error_type;
+    }
+    if (separator.size == 0U)
+    {
+        return cnor_error_empty_separator;
+    }
+    elements = cnor_vm_fast_array_data(out);
+    room = cnor_vm_fast_array_count(out);
+    while (at + separator.size <= text.size)
+    {
+        lh_value_t piece;
+        cnor_error_t error;
+
+        if (memcmp(text.bytes + at, separator.bytes, separator.size) != 0)
+        {
+            ++at;
+            continue;
+        }
+        /* The piece before the separator. */
+        if (written >= room)
+        {
+            return cnor_error_array_too_small;
+        }
+        error = builtin_text(vm, text.bytes + start, at - start, &piece);
+        if (error != cnor_error_none)
+        {
+            return error;
+        }
+        cnor_vm_fast_move(&elements[written], &piece);
+        ++written;
+        at += separator.size;
+        start = at;
+    }
+    /* The piece after the last separator, even when it is empty. */
+    if (written >= room)
+    {
+        return cnor_error_array_too_small;
+    }
+    {
+        lh_value_t piece;
+        const cnor_error_t error = builtin_text(vm, text.bytes + start, text.size - start, &piece);
+
+        if (error != cnor_error_none)
+        {
+            return error;
+        }
+        cnor_vm_fast_move(&elements[written], &piece);
+        ++written;
+    }
+    builtin_result(vm, argc, lh_value_make_sint((lh_sllong_t) written));
+    return cnor_error_none;
+}
+
 /* -- the handler ------------------------------------------------------------ */
 
 lh_bool_t
@@ -624,6 +704,9 @@ cnor_vm_op_call_builtin(cnor_vm_t *vm, const cnor_insn_t *insn)
         break;
     case cnor_builtin_parse_int:
         error = builtin_do_parse_int(vm, argc);
+        break;
+    case cnor_builtin_split_into:
+        error = builtin_do_split_into(vm, argc);
         break;
     default:
         error = cnor_error_bad_operand;

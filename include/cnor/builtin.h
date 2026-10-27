@@ -40,6 +40,12 @@ typedef enum cnor_builtin
     cnor_builtin_char,        /**< `char(code)`: the one-byte string of that code. */
     cnor_builtin_str,         /**< `str(value)`: the value as text. */
     cnor_builtin_parse_int,   /**< `parse_int(text)`: the number in the text, or 0. */
+    /**
+     * `split_into(text, separator, out)`: the pieces of the text, written into
+     * the array, and how many there are. A collection cannot be made while the
+     * program runs, so the array is made by the program and given here.
+     */
+    cnor_builtin_split_into,
     cnor_builtin_count
 } cnor_builtin_t;
 

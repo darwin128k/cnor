@@ -30,6 +30,8 @@ static const struct cnor_builtin_rule m_rules[cnor_builtin_count] = {
     [cnor_builtin_char] = {{cnor_static_i32}, cnor_static_str},
     [cnor_builtin_str] = {{cnor_static_any}, cnor_static_str},
     [cnor_builtin_parse_int] = {{cnor_static_str}, cnor_static_i32},
+    [cnor_builtin_split_into] = {{cnor_static_str, cnor_static_str, cnor_static_array},
+                                 cnor_static_i32},
 };
 
 lh_bool_t

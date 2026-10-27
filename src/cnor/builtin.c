@@ -20,6 +20,7 @@ static const lh_char_t *const m_names[cnor_builtin_count] = {
     [cnor_builtin_char] = "char",
     [cnor_builtin_str] = "str",
     [cnor_builtin_parse_int] = "parse_int",
+    [cnor_builtin_split_into] = "split_into",
 };
 
 static const lh_u8_t m_argc[cnor_builtin_count] = {
@@ -36,6 +37,7 @@ static const lh_u8_t m_argc[cnor_builtin_count] = {
     [cnor_builtin_char] = 1U,
     [cnor_builtin_str] = 1U,
     [cnor_builtin_parse_int] = 1U,
+    [cnor_builtin_split_into] = 3U,
 };
 
 const lh_char_t *

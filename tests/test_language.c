@@ -681,6 +681,43 @@ CNOR_TEST(puts_values_into_a_string)
              cnor_error_unknown_name);
 }
 
+CNOR_TEST(splits_a_text_into_an_array)
+{
+    /* The pieces go into the array the program made, and the count comes
+     * back. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut parts = [\"\"; 3]\n"
+                      "    let n = split_into(\"a,b,c\", \",\", parts)\n"
+                      "    if parts[0] == \"a\" and parts[1] == \"b\" and parts[2] == \"c\":\n"
+                      "        return n\n"
+                      "    return 0\n"
+                      "f()\n"),
+             3);
+    /* A separator that is not in the text: one piece, the text itself. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut parts = [\"\"; 2]\n"
+                      "    let n = split_into(\"abc\", \",\", parts)\n"
+                      "    if parts[0] == \"abc\":\n"
+                      "        return n\n"
+                      "    return 0\n"
+                      "f()\n"),
+             1);
+    /* A separator that is empty has no answer. */
+    CHECK_EQ(failure_of("fn f() -> i32:\n"
+                        "    let mut parts = [\"\"; 2]\n"
+                        "    let n = split_into(\"abc\", \"\", parts)\n"
+                        "    return n\n"
+                        "f()\n"),
+             cnor_error_empty_separator);
+    /* An array with too few places for the pieces fails the run. */
+    CHECK_EQ(failure_of("fn f() -> i32:\n"
+                        "    let mut parts = [\"\"; 2]\n"
+                        "    let n = split_into(\"a,b,c\", \",\", parts)\n"
+                        "    return n\n"
+                        "f()\n"),
+             cnor_error_array_too_small);
+}
+
 /* -- finally and raise ------------------------------------------------------- */
 
 CNOR_TEST(runs_a_finally_block)
@@ -1806,6 +1843,7 @@ CNOR_TEST_CASE(refuses_a_try_where_it_does_not_fit),
     CNOR_TEST_CASE(assigns_with_an_operator),
     CNOR_TEST_CASE(picks_a_value_with_a_ternary),
     CNOR_TEST_CASE(puts_values_into_a_string),
+    CNOR_TEST_CASE(splits_a_text_into_an_array),
     CNOR_TEST_CASE(passes_an_array_to_a_function_and_walks_it),
     CNOR_TEST_CASE(keeps_a_global_array_whole),
     CNOR_TEST_CASE(refuses_an_array_where_it_does_not_fit),

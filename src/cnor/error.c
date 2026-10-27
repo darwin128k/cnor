@@ -69,6 +69,8 @@ static const lh_char_t *const m_messages[cnor_error_count] = {
     "string pool is full",
     "instruction budget exhausted",
     "nothing to raise",
+    "the separator is empty",
+    "the array is too small",
 };
 
 const lh_str_ptr
@@ -151,6 +153,8 @@ static const lh_char_t *const m_names[cnor_error_count] = {
     "str_pool_full",
     "step_limit",
     "nothing_to_raise",
+    "empty_separator",
+    "array_too_small",
 };
 
 const lh_str_ptr

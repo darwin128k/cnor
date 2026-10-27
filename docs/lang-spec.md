@@ -489,7 +489,7 @@ closures, a preprocessor, metatables.
 
 ---
 
-## 7. The `.tbc` image format, v12
+## 7. The `.tbc` image format, v13
 
 **[cnor]** v1 replaced the original header (whose layout used `sizeof` and
 was not portable) and its names section. Every field is a fixed-width
@@ -509,15 +509,16 @@ globals (`array_new_global`); v9 adds the bitwise operators (`band`, `bor`,
 `dict_new_global`) a u16 index, for the globals may be more than a frame's
 slots hold; v11 adds the error handling (`try_push`, `try_pop`); v12 adds the
 finally block and the error that is raised again (`try_finally`,
-`finally_end`, `raise`, `try_exit`). An image of another version is refused:
-v11 images must be compiled again.
+`finally_end`, `raise`, `try_exit`); v13 adds the function that splits a text
+(`split_into`). An image of another version is refused: v12 images must be
+compiled again.
 
 ### 7.1 Header (68 bytes)
 
 | Offset | Field | Type | Meaning |
 |---|---|---|---|
 | 0 | `magic` | 4 bytes | `"cnor"` |
-| 4 | `version` | u16 | format version, currently 12 |
+| 4 | `version` | u16 | format version, currently 13 |
 | 6 | `flags` | u16 | bit 0: the image carries a line table |
 | 8 | `image_size` | u32 | size of the whole image |
 | 12 | `stack_slots` | u32 | largest frame (slots + operands), **computed by the compiler** |
@@ -852,14 +853,19 @@ both.
 | `char(code)` | `i32` | the one-byte string of that code (0 to 255) | `str` |
 | `str(value)` | `any` | the value as text | `str` |
 | `parse_int(text)` | `str` | the number in the text, or 0 when there is none | `i32` |
+| `split_into(text, separator, array)` | `str`, `str`, `array` | the pieces of the text, written into the array | `i32` (how many) |
 
 The compiler knows the argument types and the result type, so a call with the
 wrong type or the wrong number of arguments is refused before it runs. A
 `str` argument that is not a string fails the run at the call.
 
-**[cnor]** `split` is not here yet: it would return an array, and an array is
-a local (section 8), so it cannot be returned. It comes with the arrays that
-can be.
+**[cnor]** `split_into` is the way to split a text: a collection cannot be
+made while the program runs (section 8), so the array is made by the program
+and given to the function, which fills it and says how many pieces there are.
+The array has to have a place for every piece — the run fails with
+`array_too_small` when it does not — and the separator may not be empty
+(`empty_separator`). The piece after the last separator is there too, even
+when it is empty: `"a,b,"` has three pieces.
 
 ## 10. Runtime
 
@@ -981,7 +987,7 @@ line in `tests/cli/`):
   numbers, with the shift checked (section 6.1);
 - [x] the language's own functions: `len`, `find`, `contains`, `replace`,
   `trim`, `upper`, `lower`, `starts_with`, `ends_with`, `substr`, `ord`,
-  `char`, `str`, `parse_int` (section 9.2);
+  `char`, `str`, `parse_int`, `split_into` (section 9.2);
 - [x] static type checking (section 6.3);
 - [x] global initializers in source order, with use-before-`let` errors
   (section 6.4);
