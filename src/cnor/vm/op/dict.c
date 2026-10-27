@@ -41,15 +41,18 @@ static lh_bool_t
 cnor_vm_dict_store(cnor_vm_t *vm, const cnor_insn_t *insn, lh_value_t *dictionary,
                    lh_value_t *key, const lh_value_t *value)
 {
-    lh_value_t *const pairs = cnor_vm_fast_dict_data(dictionary);
-    const lh_u32_t count = cnor_vm_fast_dict_count(dictionary);
+    lh_value_t *pairs;
+    lh_u32_t count;
     lh_value_t *found;
 
-    if (cnor_vm_fast_kind(key) != lh_value_kind_str)
+    if (cnor_vm_fast_kind(dictionary) != CNOR_VALUE_KIND_DICT
+        || cnor_vm_fast_kind(key) != lh_value_kind_str)
     {
         /* A key is a text; anything else cannot be looked up. */
         return cnor_vm_fail(vm, insn, cnor_error_type);
     }
+    pairs = cnor_vm_fast_dict_data(dictionary);
+    count = cnor_vm_fast_dict_count(dictionary);
     found = cnor_vm_dict_find(dictionary, key);
     if (found == lh_null)
     {
@@ -107,7 +110,8 @@ cnor_vm_op_dict_get_l(cnor_vm_t *vm, const cnor_insn_t *insn)
     lh_value_t *const key = cnor_vm_stack_at(&vm->stack, vm->stack.sp - 1U);
     const lh_value_t *value;
 
-    if (cnor_vm_fast_kind(key) != lh_value_kind_str)
+    if (cnor_vm_fast_kind(dictionary) != CNOR_VALUE_KIND_DICT
+        || cnor_vm_fast_kind(key) != lh_value_kind_str)
     {
         return cnor_vm_fail(vm, insn, cnor_error_type);
     }
@@ -148,7 +152,8 @@ cnor_vm_op_dict_get(cnor_vm_t *vm, const cnor_insn_t *insn)
     lh_value_t *const key = cnor_vm_stack_at(&vm->stack, vm->stack.sp - 1U);
     const lh_value_t *value;
 
-    if (cnor_vm_fast_kind(key) != lh_value_kind_str)
+    if (cnor_vm_fast_kind(dictionary) != CNOR_VALUE_KIND_DICT
+        || cnor_vm_fast_kind(key) != lh_value_kind_str)
     {
         vm->stack.sp -= 2U;
         return cnor_vm_fail(vm, insn, cnor_error_type);
@@ -192,13 +197,14 @@ cnor_vm_op_dict_key_l(cnor_vm_t *vm, const cnor_insn_t *insn)
     lh_value_t *const index = cnor_vm_stack_at(&vm->stack, vm->stack.sp - 1U);
     lh_sllong_t at;
 
-    if (cnor_vm_fast_kind(index) != lh_value_kind_sint
-        && cnor_vm_fast_kind(index) != lh_value_kind_uint)
+    if (cnor_vm_fast_kind(dictionary) != CNOR_VALUE_KIND_DICT
+        || (cnor_vm_fast_kind(index) != lh_value_kind_sint
+            && cnor_vm_fast_kind(index) != lh_value_kind_uint))
     {
         return cnor_vm_fail(vm, insn, cnor_error_type);
     }
     at = cnor_vm_value_to_sint(index);
-    if (at < 0 || (lh_u32_t) at >= cnor_vm_fast_dict_count(dictionary))
+    if (at < 0 || (lh_ullong_t) at >= cnor_vm_fast_dict_count(dictionary))
     {
         return cnor_vm_fail(vm, insn, cnor_error_index);
     }

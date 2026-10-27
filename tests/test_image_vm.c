@@ -271,6 +271,84 @@ CNOR_TEST(refuses_a_stack_beyond_what_the_host_offers)
     p_deinit(&p);
 }
 
+CNOR_TEST(refuses_an_empty_section_beyond_the_image)
+{
+    program_t p;
+    cnor_image_header_t header;
+    lh_byte_t *range;
+    lh_uint_t section;
+
+    p_init(&p);
+    op(&p, cnor_op_halt);
+    build(&p, 0U);
+    REQUIRE(p.image.data != lh_null);
+    for (section = 0U; section < cnor_image_section_count; ++section)
+    {
+        lh_byte_t saved[8];
+        range = p.image.data + 20U + section * 8U;
+        memcpy(saved, range, sizeof(saved));
+        memset(range, 0, 8U);
+        CHECK_EQ(cnor_image_header_read(p.image.data, p.image.size, &header), cnor_error_none);
+        /* One-past-end is valid for an empty view; any larger offset is not. */
+        range[0] = (lh_byte_t) p.image.size;
+        range[1] = (lh_byte_t) (p.image.size >> 8);
+        range[2] = (lh_byte_t) (p.image.size >> 16);
+        range[3] = (lh_byte_t) (p.image.size >> 24);
+        CHECK_EQ(cnor_image_header_read(p.image.data, p.image.size, &header), cnor_error_none);
+        memset(range, 0xff, 4U);
+        CHECK_EQ(cnor_image_header_read(p.image.data, p.image.size, &header), cnor_error_bad_header);
+        memcpy(range, saved, sizeof(saved));
+    }
+    p_deinit(&p);
+}
+
+CNOR_TEST(refuses_a_catch_dictionary_outside_the_frame)
+{
+    program_t p;
+    p_init(&p);
+    op_u32(&p, cnor_op_try_push, 1U);
+    cnor_byte_writer_put_u8(&p.code, 255U);
+    op(&p, cnor_op_halt);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 13U, 0U);
+    build(&p, 0U);
+    CHECK_EQ(load_and_run(&p, lh_null), cnor_error_bad_operand);
+    p.code.data[5] = 1U; /* The whole 13-cell dictionary must fit. */
+    cnor_image_deinit(&p.image);
+    build(&p, 0U);
+    CHECK_EQ(load_and_run(&p, lh_null), cnor_error_bad_operand);
+    p.code.data[5] = 0U;
+    cnor_image_deinit(&p.image);
+    build(&p, 0U);
+    CHECK_EQ(load_and_run(&p, lh_null), cnor_error_none);
+    p_deinit(&p);
+}
+
+CNOR_TEST(rejects_dictionary_operations_on_other_values)
+{
+    const cnor_op_t ops[] = {cnor_op_dict_get, cnor_op_dict_set,
+                            cnor_op_dict_get_l, cnor_op_dict_set_l, cnor_op_dict_key_l};
+    lh_uint_t i;
+    for (i = 0U; i < sizeof(ops) / sizeof(ops[0]); ++i)
+    {
+        program_t p;
+        p_init(&p);
+        add_const(&p, "key");
+        if (i < 2U) op(&p, cnor_op_push_none); /* Stack dictionary. */
+        if (ops[i] == cnor_op_dict_key_l) op_u32(&p, cnor_op_push_i32, 0U);
+        else { op(&p, cnor_op_push_const); cnor_byte_writer_put_u16(&p.code, 0U); }
+        if (ops[i] == cnor_op_dict_set || ops[i] == cnor_op_dict_set_l)
+            op_u32(&p, cnor_op_push_i32, 1U);
+        op(&p, ops[i]);
+        if (i >= 2U) cnor_byte_writer_put_u8(&p.code, 0U);
+        op(&p, cnor_op_halt);
+        end_function(&p, 0U, 0U, 1U, 3U); /* Local 0 starts as none. */
+        build(&p, 3U);
+        CHECK_EQ(load_and_run(&p, lh_null), cnor_error_type);
+        p_deinit(&p);
+    }
+}
+
 CNOR_TEST(reads_the_sections_of_a_well_formed_image)
 {
     program_t p;
@@ -1551,6 +1629,9 @@ static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(refuses_a_buffer_without_the_signature),
     CNOR_TEST_CASE(refuses_a_version_it_does_not_speak),
     CNOR_TEST_CASE(refuses_a_stack_beyond_what_the_host_offers),
+    CNOR_TEST_CASE(refuses_an_empty_section_beyond_the_image),
+    CNOR_TEST_CASE(refuses_a_catch_dictionary_outside_the_frame),
+    CNOR_TEST_CASE(rejects_dictionary_operations_on_other_values),
     CNOR_TEST_CASE(reads_the_sections_of_a_well_formed_image),
     CNOR_TEST_CASE(runs_a_program_that_only_stops),
     CNOR_TEST_CASE(adds_two_numbers),

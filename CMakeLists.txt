@@ -7,6 +7,25 @@ project(cnor
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+option(CNOR_SANITIZERS "Instrument cnor, lh and executables with ASan and UBSan" OFF)
+option(CNOR_BUILD_FUZZ "Build the deterministic image mutation runner" OFF)
+option(CNOR_LIBFUZZER "Build the Clang libFuzzer image target" OFF)
+if (CNOR_SANITIZERS OR CNOR_LIBFUZZER)
+    if (NOT CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" OR WIN32)
+        message(FATAL_ERROR "Sanitizer builds require GCC or Clang on a Unix host")
+    endif ()
+    add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all
+                        -fno-omit-frame-pointer -g)
+    # CMake 3.12 has no add_link_options.
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address,undefined")
+endif ()
+if (CNOR_LIBFUZZER)
+    if (NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "CNOR_LIBFUZZER requires Clang")
+    endif ()
+    add_compile_options(-fsanitize=fuzzer-no-link)
+endif ()
+
 option(CNOR_BUILD_TESTS "Build tests" OFF)
 option(CNOR_BUILD_BENCH "Build the benchmark runner (bench/)" OFF)
 option(CNOR_BUILD_EXAMPLES "Build embedding examples (examples/)" OFF)
@@ -207,6 +226,10 @@ endif ()
 
 if (CNOR_BUILD_EXAMPLES)
     add_subdirectory(examples/event-host)
+endif ()
+
+if (CNOR_BUILD_FUZZ OR CNOR_LIBFUZZER)
+    add_subdirectory(fuzz)
 endif ()
 
 if (CNOR_BUILD_BENCH AND CNOR_BUILD_COMPILER)

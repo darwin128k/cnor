@@ -14,6 +14,7 @@ is organised and how to extend it.
 - `src/cnor/` - implementation (headers here are library-private)
 - `cli/` - the `cnor` command line (`CNOR_BUILD_CLI`)
 - `tests/` - tests (`CNOR_BUILD_TESTS`)
+- `fuzz/` - image mutation checks, sanitizer and libFuzzer instructions ([README](fuzz/README.md))
 - `bench/` - benchmarks (`CNOR_BUILD_BENCH`), see [bench/README.md](bench/README.md)
 - `examples/event-host/` - a measured thermostat event host (`CNOR_BUILD_EXAMPLES`), see [its README](examples/event-host/README.md)
 - `docs/` - language specification and architecture notes

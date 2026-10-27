@@ -151,6 +151,10 @@ cnor_verify_operands(struct cnor_verify *self, const cnor_insn_t *insn)
     case cnor_op_array_new_global:
     case cnor_op_dict_new_global:
         return cnor_verify_global(self, insn);
+    case cnor_op_try_push:
+        /* A catch writes a dictionary: value, two header cells, five pairs. */
+        return insn->operands[0] == 0U
+               || insn->operands[1] + 13U <= self->function.slot_count;
     default:
         return lh_bool_true;
     }

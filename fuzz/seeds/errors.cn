@@ -1,0 +1,6 @@
+fn divide(n: i32) -> i32:
+    return 12 / n
+try:
+    divide(0)
+catch error:
+    0

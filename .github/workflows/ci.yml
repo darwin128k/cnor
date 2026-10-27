@@ -1,0 +1,85 @@
+name: C checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        configuration: [Debug, Release]
+        compiler: ['ON', 'OFF']
+        dispatch: ['ON', 'OFF']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.configuration }}
+          -DCNOR_BUILD_TESTS=ON -DCNOR_BUILD_EXAMPLES=ON -DCNOR_BUILD_FUZZ=ON
+          -DCNOR_BUILD_COMPILER=${{ matrix.compiler }}
+          -DCNOR_VM_COMPUTED_GOTO=${{ matrix.dispatch }}
+      - name: Build
+        run: cmake --build build --config ${{ matrix.configuration }} --parallel 2
+      - name: Test
+        run: ctest --test-dir build -C ${{ matrix.configuration }} --output-on-failure
+
+  sanitize-and-fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['ON', 'OFF']
+        dispatch: ['ON', 'OFF']
+    env:
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure instrumented libraries and runners
+        run: >-
+          cmake -S . -B build -DCMAKE_C_COMPILER=clang
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLH_LIBRARY_OPTION_LTO=OFF
+          -DCNOR_BUILD_TESTS=ON -DCNOR_BUILD_EXAMPLES=ON
+          -DCNOR_BUILD_FUZZ=ON -DCNOR_SANITIZERS=ON -DCNOR_LIBFUZZER=ON
+          -DCNOR_BUILD_COMPILER=${{ matrix.compiler }}
+          -DCNOR_VM_COMPUTED_GOTO=${{ matrix.dispatch }}
+      - run: cmake --build build --parallel 2
+      - run: ctest --test-dir build --output-on-failure
+      - name: Seed corpus
+        shell: bash
+        run: |
+          mkdir -p corpus artifacts
+          build/fuzz/cnor_image_mutate --seed corpus/minimal.tbc
+          if [ '${{ matrix.compiler }}' = ON ]; then
+            for source in fuzz/seeds/*.cn; do
+              build/cli/cnor compile "$source" -o "corpus/$(basename "$source" .cn).tbc"
+            done
+          fi
+      - name: Bounded coverage-guided campaign
+        run: >-
+          build/fuzz/cnor_image_fuzz corpus -max_total_time=60
+          -timeout=5 -rss_limit_mb=512 -max_len=65536
+          -artifact_prefix=artifacts/
+      - name: Preserve corpus and reproducers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-fuzz-${{ matrix.compiler }}-${{ matrix.dispatch }}
+          path: |
+            artifacts/
+            corpus/
+          retention-days: 7

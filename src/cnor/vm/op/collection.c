@@ -27,7 +27,7 @@ cnor_vm_op_collection_get_l(cnor_vm_t *vm, const cnor_insn_t *insn)
     at = cnor_vm_value_to_sint(index);
     if (cnor_vm_fast_kind(collection) == CNOR_VALUE_KIND_ARRAY)
     {
-        if (at < 0 || (lh_u32_t) at >= cnor_vm_fast_array_count(collection))
+        if (at < 0 || (lh_ullong_t) at >= cnor_vm_fast_array_count(collection))
         {
             return cnor_vm_fail(vm, insn, cnor_error_index);
         }
@@ -36,7 +36,7 @@ cnor_vm_op_collection_get_l(cnor_vm_t *vm, const cnor_insn_t *insn)
     }
     if (cnor_vm_fast_kind(collection) == CNOR_VALUE_KIND_DICT)
     {
-        if (at < 0 || (lh_u32_t) at >= cnor_vm_fast_dict_count(collection))
+        if (at < 0 || (lh_ullong_t) at >= cnor_vm_fast_dict_count(collection))
         {
             return cnor_vm_fail(vm, insn, cnor_error_index);
         }

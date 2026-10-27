@@ -1312,7 +1312,7 @@ cnor_vm_switch:
         {
             const lh_sllong_t at = cnor_vm_fast_sint(&sp[-1]);
 
-            if (at >= 0 && (lh_u32_t) at < cnor_vm_fast_array_count(array))
+            if (at >= 0 && (lh_ullong_t) at < cnor_vm_fast_array_count(array))
             {
                 cnor_vm_fast_move(&sp[-1], &cnor_vm_fast_array_data(array)[at]);
                 pc += 2;
@@ -1330,7 +1330,7 @@ cnor_vm_switch:
         {
             const lh_sllong_t at = cnor_vm_fast_sint(&sp[-2]);
 
-            if (at >= 0 && (lh_u32_t) at < cnor_vm_fast_array_count(array))
+            if (at >= 0 && (lh_ullong_t) at < cnor_vm_fast_array_count(array))
             {
                 cnor_vm_fast_move(&cnor_vm_fast_array_data(array)[at], &sp[-1]);
                 sp -= 2;
@@ -1422,7 +1422,7 @@ cnor_vm_switch:
         {
             const lh_sllong_t at = cnor_vm_fast_sint(&sp[-1]);
 
-            if (at >= 0 && (lh_u32_t) at < cnor_vm_fast_dict_count(dictionary))
+            if (at >= 0 && (lh_ullong_t) at < cnor_vm_fast_dict_count(dictionary))
             {
                 cnor_vm_fast_move(&sp[-1], &cnor_vm_fast_dict_data(dictionary)[at * 2]);
                 pc += 2;

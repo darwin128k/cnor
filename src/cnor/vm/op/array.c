@@ -70,7 +70,7 @@ cnor_vm_op_array_get_l(cnor_vm_t *vm, const cnor_insn_t *insn)
         return cnor_vm_fail(vm, insn, cnor_error_type);
     }
     at = cnor_vm_value_to_sint(index);
-    if (at < 0 || (lh_u32_t) at >= cnor_vm_fast_array_count(array))
+    if (at < 0 || (lh_ullong_t) at >= cnor_vm_fast_array_count(array))
     {
         return cnor_vm_fail(vm, insn, cnor_error_index);
     }
@@ -95,7 +95,7 @@ cnor_vm_op_array_set_l(cnor_vm_t *vm, const cnor_insn_t *insn)
         return cnor_vm_fail(vm, insn, cnor_error_type);
     }
     at = cnor_vm_value_to_sint(index);
-    if (at < 0 || (lh_u32_t) at >= cnor_vm_fast_array_count(array))
+    if (at < 0 || (lh_ullong_t) at >= cnor_vm_fast_array_count(array))
     {
         return cnor_vm_fail(vm, insn, cnor_error_index);
     }
@@ -120,7 +120,7 @@ cnor_vm_op_array_get(cnor_vm_t *vm, const cnor_insn_t *insn)
         return cnor_vm_fail(vm, insn, cnor_error_type);
     }
     at = cnor_vm_value_to_sint(index);
-    if (at < 0 || (lh_u32_t) at >= cnor_vm_fast_array_count(array))
+    if (at < 0 || (lh_ullong_t) at >= cnor_vm_fast_array_count(array))
     {
         return cnor_vm_fail(vm, insn, cnor_error_index);
     }
@@ -146,7 +146,7 @@ cnor_vm_op_array_set(cnor_vm_t *vm, const cnor_insn_t *insn)
         return cnor_vm_fail(vm, insn, cnor_error_type);
     }
     at = cnor_vm_value_to_sint(index);
-    if (at < 0 || (lh_u32_t) at >= cnor_vm_fast_array_count(array))
+    if (at < 0 || (lh_ullong_t) at >= cnor_vm_fast_array_count(array))
     {
         return cnor_vm_fail(vm, insn, cnor_error_index);
     }

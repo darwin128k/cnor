@@ -1,0 +1,6 @@
+fn sum(n: i32) -> i32:
+    let mut total = 0
+    for i in 0..n:
+        total = total + i
+    return total
+sum(12)

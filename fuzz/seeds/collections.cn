@@ -1,0 +1,6 @@
+let mut a = [1; 3]
+let mut d = dict(2)
+d["first"] = 4
+d["second"] = 8
+let s = "ab" + "cd"
+a[1] + d["first"] + len(s)

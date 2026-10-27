@@ -49,7 +49,8 @@ cnor_image_range_is_valid(const cnor_image_range_t *range, lh_u32_t image_size)
 {
     if (range->size == 0U)
     {
-        return lh_bool_true;
+        /* Even an empty section forms data + offset in the view/reader. */
+        return range->offset <= image_size ? lh_bool_true : lh_bool_false;
     }
     return (range->offset >= CNOR_IMAGE_HEADER_SIZE && range->offset % CNOR_IMAGE_ALIGN == 0U
             && range->offset <= image_size && image_size - range->offset >= range->size)
