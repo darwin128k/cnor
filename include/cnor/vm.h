@@ -168,6 +168,7 @@ struct cnor_vm
     lh_value_t result;                 /**< What the last run produced. */
     cnor_diag_t diag;                  /**< Why the last load or run failed. */
     cnor_count_t file_count;           /**< File table entries; last, it is never hot. */
+    cnor_count_t function_name_count;  /**< Function name entries; a host looks them up by name. */
 };
 /** @copybrief cnor_vm */
 typedef struct cnor_vm cnor_vm_t;
@@ -210,6 +211,30 @@ cnor_vm_reset(cnor_vm_t *self);
  */
 lh_bool_t
 cnor_vm_run(cnor_vm_t *self);
+
+/**
+ * @brief Call the script's function @p name with @p args.
+ *
+ * The function runs to its end, as the entry function does in
+ * ::cnor_vm_run; the globals keep what it wrote. The arguments are the
+ * function's parameters, in order; a string among them is a view of the
+ * caller's text, so it stays valid as long as the machine's string pool does.
+ *
+ * The image has to carry the names of its functions, which the compiler
+ * writes.
+ *
+ * @param name  Name of the function; the image has none of that name, the call
+ *              fails with ::cnor_error_unknown_function.
+ * @param args  The arguments; @p argc of them.
+ * @param argc  How many; it has to be the count of the function's parameters.
+ * @param out   Where the result goes; may be ::lh_null.
+ *
+ * @return ::lh_bool_false with ::cnor_vm_get_diag set: its offset is the code
+ *         address at fault, its line comes from the line table (0 without one).
+ */
+lh_bool_t
+cnor_vm_call(cnor_vm_t *self, lh_str_view_t name, const lh_value_t *args, cnor_argc_t argc,
+             lh_value_t *out);
 
 /** @brief Why the last load or run failed. */
 const cnor_diag_t *

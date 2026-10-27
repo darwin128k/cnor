@@ -130,6 +130,8 @@ static const cnor_op_info_t m_ops[cnor_op_count] = {
     CNOR_OP_ROW("raise", none, none, 1U, 0U, 0U, 0U),
     CNOR_OP_ROW("try_exit", s32, none, 5U, 0U, 0U, CNOR_OP_FLAG_JUMP),
     CNOR_OP_ROW("call_builtin", u8, u8, 3U, 0U, 1U, CNOR_OP_FLAG_POPS_ARGC),
+    CNOR_OP_ROW("push_function", u16, none, 3U, 0U, 1U, 0U),
+    CNOR_OP_ROW("call_value", u8, none, 2U, 1U, 1U, CNOR_OP_FLAG_POPS_ARGC0),
 };
 
 /* The binary operators that have operand forms, in the order of each family. */
@@ -197,6 +199,10 @@ cnor_insn_get_pops(const cnor_insn_t *insn)
     if ((info->flags & CNOR_OP_FLAG_POPS_ARGC) != 0U)
     {
         pops += insn->operands[1];
+    }
+    if ((info->flags & CNOR_OP_FLAG_POPS_ARGC0) != 0U)
+    {
+        pops += insn->operands[0];
     }
     return pops;
 }

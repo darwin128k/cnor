@@ -116,7 +116,10 @@ cnor_parser_block(cnor_parser_t *self);
 
 /** @brief Parse `name: type` (the type part) into @p out. */
 lh_bool_t
-cnor_parser_type(cnor_parser_t *self, cnor_type_t *out);
+cnor_parser_type(cnor_parser_t *self, cnor_type_t *out, lh_str_view_t *name);
+
+/** @brief Parse a struct or enum declaration. */
+cnor_node_t *cnor_parser_named_type(cnor_parser_t *self);
 
 /* -- control flow (control.c) ---------------------------------------------- */
 

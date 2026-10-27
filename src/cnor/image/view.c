@@ -34,6 +34,37 @@ cnor_image_file_read(cnor_byte_reader_t *reader, lh_str_view_t *name)
     return cnor_byte_reader_is_ok(reader);
 }
 
+lh_bool_t
+cnor_image_function_name_read(cnor_byte_reader_t *reader, lh_str_view_t *name)
+{
+    const lh_u16_t length = cnor_byte_reader_u16(reader);
+
+    *name = cnor_byte_reader_view(reader, length);
+    return cnor_byte_reader_is_ok(reader);
+}
+
+lh_str_view_t
+cnor_image_view_function_name(const cnor_image_view_t *self, cnor_function_index_t index)
+{
+    cnor_byte_reader_t reader;
+    lh_str_view_t name = lh_str_view_empty();
+    cnor_count_t i;
+
+    if (index >= self->function_name_count)
+    {
+        return name;
+    }
+    cnor_image_view_records(self, cnor_image_section_names, &reader);
+    for (i = 0U; i <= (cnor_count_t) index; ++i)
+    {
+        if (!cnor_image_function_name_read(&reader, &name))
+        {
+            return lh_str_view_empty();
+        }
+    }
+    return name;
+}
+
 static const lh_byte_t *
 cnor_image_view_section(const cnor_image_view_t *self, cnor_image_section_t section)
 {
@@ -151,6 +182,7 @@ cnor_image_view_check_counts(cnor_image_view_t *self)
             && cnor_image_view_count(self, cnor_image_section_natives, &self->native_count)
             && cnor_image_view_count(self, cnor_image_section_lines, &self->line_count)
             && cnor_image_view_count(self, cnor_image_section_files, &self->file_count)
+            && cnor_image_view_count(self, cnor_image_section_names, &self->function_name_count)
             && self->const_count <= CNOR_INDEX_MAX + 1U
             && self->function_count >= 1U && self->function_count <= CNOR_INDEX_MAX + 1U
             && self->native_count <= CNOR_INDEX_MAX + 1U
@@ -182,7 +214,9 @@ cnor_image_view_open(cnor_image_view_t *self, const lh_byte_t *data, lh_u32_t si
         || !cnor_image_view_check_names(self, cnor_image_section_natives, self->native_count,
                                         cnor_image_native_read)
         || !cnor_image_view_check_names(self, cnor_image_section_files, self->file_count,
-                                        cnor_image_file_read))
+                                        cnor_image_file_read)
+        || !cnor_image_view_check_names(self, cnor_image_section_names, self->function_name_count,
+                                        cnor_image_function_name_read))
     {
         return cnor_error_bad_section;
     }

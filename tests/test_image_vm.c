@@ -34,6 +34,8 @@ typedef struct program
     lh_str_view_t file;
     const lh_str_view_t *files; /**< When set, the file table instead of `file`. */
     cnor_count_t file_count;
+    lh_str_view_t function_names[MAX_FUNCTIONS]; /**< Names of the functions; empty for none. */
+    cnor_count_t function_name_count;
     cnor_image_t image;
 } program_t;
 
@@ -148,6 +150,8 @@ build(program_t *p, lh_u16_t max_stack)
     parts.file_count = p->files != lh_null                      ? p->file_count
                        : lh_str_view_get_size(&p->file) > 0U ? 1U
                                                               : 0U;
+    parts.function_names = p->function_name_count > 0U ? p->function_names : lh_null;
+    parts.function_name_count = p->function_name_count;
     parts.globals_count = p->globals;
     parts.stack_slots = p->stack_slots;
     (void) cnor_image_write(&parts, &p->image);
@@ -775,6 +779,43 @@ CNOR_TEST(runs_unlimited_with_a_zero_budget)
     result = cnor_vm_get_result(&vm);
     CHECK_EQ(sint_of(&result), 1);
     CHECK_EQ(cnor_vm_get_steps(&vm), 2U);
+    cnor_vm_deinit(&vm);
+    p_deinit(&p);
+}
+
+CNOR_TEST(calls_a_function_of_the_script_by_name)
+{
+    program_t p;
+    cnor_vm_t vm;
+    lh_value_t args[1];
+    lh_value_t result;
+
+    p_init(&p);
+    /* The entry: it does nothing. */
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 0U, 1U);
+    /* The function the host calls: it takes a number and gives it back
+     * negated. */
+    op_u32(&p, cnor_op_push_i32, 21U);
+    op(&p, cnor_op_neg);
+    op(&p, cnor_op_ret);
+    end_function(&p, 0U, 1U, 1U, 1U);
+    p.function_names[0] = view_of("");
+    p.function_names[1] = view_of("answer");
+    p.function_name_count = 2U;
+    build(&p, 1U);
+
+    vm_open(&vm);
+    REQUIRE(cnor_vm_load(&vm, p.image.data, p.image.size));
+    args[0] = lh_value_make_sint(21);
+    CHECK(cnor_vm_call(&vm, view_of("answer"), args, 1U, &result));
+    CHECK_EQ(sint_of(&result), -21);
+    /* A name the image does not have. */
+    CHECK(!cnor_vm_call(&vm, view_of("nope"), args, 1U, lh_null));
+    CHECK_EQ(vm_code(&vm), cnor_error_unknown_function);
+    /* The wrong number of arguments. */
+    CHECK(!cnor_vm_call(&vm, view_of("answer"), args, 0U, lh_null));
+    CHECK_EQ(vm_code(&vm), cnor_error_wrong_arg_count);
     cnor_vm_deinit(&vm);
     p_deinit(&p);
 }

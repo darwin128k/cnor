@@ -8,6 +8,7 @@ static const lh_str_view_t m_type_names[cnor_type_count] = {
     lh_str_view_initializer_lit("u32"), lh_str_view_initializer_lit("f32"),
     lh_str_view_initializer_lit("bool"), lh_str_view_initializer_lit("str"),
     lh_str_view_initializer_lit("array"), lh_str_view_initializer_lit("dict"),
+    lh_str_view_initializer_lit("function"),
 };
 
 cnor_type_t
@@ -26,7 +27,7 @@ cnor_parser_type_of(lh_str_view_t name)
 }
 
 lh_bool_t
-cnor_parser_type(cnor_parser_t *self, cnor_type_t *out)
+cnor_parser_type(cnor_parser_t *self, cnor_type_t *out, lh_str_view_t *name)
 {
     if (!cnor_parser_at(self, cnor_token_ident))
     {
@@ -36,8 +37,12 @@ cnor_parser_type(cnor_parser_t *self, cnor_type_t *out)
     *out = cnor_parser_type_of(cnor_parser_text(self));
     if (*out == cnor_type_none)
     {
-        cnor_parser_fail(self, cnor_error_unknown_type);
-        return lh_bool_false;
+        *out = cnor_type_named;
+        if (!cnor_arena_copy_text(self->arena, cnor_parser_text(self), name))
+        {
+            cnor_parser_fail(self, cnor_error_no_memory);
+            return lh_bool_false;
+        }
     }
     return cnor_parser_advance(self);
 }
@@ -68,7 +73,7 @@ cnor_parser_let(cnor_parser_t *self)
         return lh_null;
     }
     if (cnor_parser_accept_punct(self, cnor_punct_colon)
-        && !cnor_parser_type(self, &node->data.let.type))
+        && !cnor_parser_type(self, &node->data.let.type, &node->type_name))
     {
         return lh_null;
     }

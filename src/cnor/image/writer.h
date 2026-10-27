@@ -28,6 +28,8 @@ struct cnor_image_parts
     cnor_count_t line_count;                /**< How many. */
     const lh_str_view_t *files;             /**< Source file names; 0 is the main one. */
     cnor_count_t file_count;                /**< How many; 0 writes no file table. */
+    const lh_str_view_t *function_names;    /**< Function names, in function table order. */
+    cnor_count_t function_name_count;       /**< How many; 0 writes no name table. */
     lh_u32_t globals_count;                 /**< Global variables. */
     cnor_stack_slots_t stack_slots;         /**< Largest frame. */
 };

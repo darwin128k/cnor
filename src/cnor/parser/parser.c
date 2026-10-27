@@ -37,6 +37,11 @@ cnor_parser_top_level(cnor_parser_t *self, lh_bool_t first)
     {
         return cnor_parser_fn(self);
     }
+    if (cnor_parser_at_keyword(self, cnor_keyword_struct)
+        || cnor_parser_at_keyword(self, cnor_keyword_enum))
+    {
+        return cnor_parser_named_type(self);
+    }
     return cnor_parser_statement(self);
 }
 

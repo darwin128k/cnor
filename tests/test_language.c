@@ -718,6 +718,37 @@ CNOR_TEST(splits_a_text_into_an_array)
              cnor_error_array_too_small);
 }
 
+CNOR_TEST(keeps_a_function_as_a_value)
+{
+    /* A function is a value: it can be put in a variable and called from
+     * there. */
+    CHECK_EQ(value_of("fn double(n: i32) -> i32:\n"
+                      "    return n * 2\n"
+                      "fn main() -> i32:\n"
+                      "    let g = double\n"
+                      "    return g(21)\n"
+                      "main()\n"),
+             42);
+    /* And it can be given to a function. */
+    CHECK_EQ(value_of("fn double(n: i32) -> i32:\n"
+                      "    return n * 2\n"
+                      "fn apply(f: function, n: i32) -> i32:\n"
+                      "    return f(n)\n"
+                      "fn main() -> i32:\n"
+                      "    return apply(double, 21)\n"
+                      "main()\n"),
+             42);
+    /* The machine checks the count of the arguments of a function called
+     * through a value. */
+    CHECK_EQ(failure_of("fn double(n: i32) -> i32:\n"
+                        "    return n * 2\n"
+                        "fn main() -> i32:\n"
+                        "    let g = double\n"
+                        "    return g(1, 2)\n"
+                        "main()\n"),
+             cnor_error_wrong_arg_count);
+}
+
 /* -- finally and raise ------------------------------------------------------- */
 
 CNOR_TEST(runs_a_finally_block)
@@ -1844,6 +1875,7 @@ CNOR_TEST_CASE(refuses_a_try_where_it_does_not_fit),
     CNOR_TEST_CASE(picks_a_value_with_a_ternary),
     CNOR_TEST_CASE(puts_values_into_a_string),
     CNOR_TEST_CASE(splits_a_text_into_an_array),
+    CNOR_TEST_CASE(keeps_a_function_as_a_value),
     CNOR_TEST_CASE(passes_an_array_to_a_function_and_walks_it),
     CNOR_TEST_CASE(keeps_a_global_array_whole),
     CNOR_TEST_CASE(refuses_an_array_where_it_does_not_fit),

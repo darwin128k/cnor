@@ -22,7 +22,7 @@ static const lh_char_t *const m_type_names[cnor_static_type_count] = {
     [cnor_static_any] = "any",   [cnor_static_none] = "none", [cnor_static_bool] = "bool",
     [cnor_static_i32] = "i32",   [cnor_static_u32] = "u32",   [cnor_static_f32] = "f32",
     [cnor_static_str] = "str",   [cnor_static_array] = "array",
-    [cnor_static_dict] = "dict",
+    [cnor_static_dict] = "dict", [cnor_static_function] = "function",
 };
 
 static const lh_char_t *const m_binary_spellings[cnor_binary_count] = {
@@ -59,6 +59,8 @@ cnor_type_of_annotation(cnor_type_t annotation)
         return cnor_static_array;
     case cnor_type_dict:
         return cnor_static_dict;
+    case cnor_type_function:
+        return cnor_static_function;
     default:
         return cnor_static_any;
     }

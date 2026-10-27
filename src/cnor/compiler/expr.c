@@ -66,8 +66,13 @@ cnor_compile_ident(cnor_compiler_t *self, const cnor_node_t *node)
     case cnor_binding_global:
         return cnor_order_use_global(self, node, binding.index)
                && cnor_emit_insn(self, cnor_op_load_global, binding.index, 0U);
+    case cnor_binding_function:
+        /* A function is a value: it can be put in a variable, given to a
+         * function and called from there. */
+        self->type = cnor_static_function;
+        return cnor_emit_insn(self, cnor_op_push_function, binding.index, 0U);
     default:
-        /* Functions and natives are not values: there is nothing to push. */
+        /* Natives are not values: there is nothing to push. */
         return cnor_compile_fail_binding(self, node, &binding);
     }
 }

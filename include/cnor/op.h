@@ -230,6 +230,19 @@ enum cnor_op
      * the stack, as for `native`, and the result takes their place.
      */
     cnor_op_call_builtin, /**< Call the builtin with that ordinal. Operand: u8. */
+    /**
+     * A function as a value (format v14): the operand is the index of the
+     * function in the image's function table, and the function goes on the
+     * stack as a value. A function takes no closure over the place it was
+     * made in.
+     */
+    cnor_op_push_function, /**< Push the function with that index. Operand: u16. */
+    /**
+     * Call the function on the stack (format v14): the arguments follow it,
+     * and the result takes their place. The function takes no closure over the
+     * place it was made in.
+     */
+    cnor_op_call_value, /**< Call the function on the stack. Operand: u8. */
     cnor_op_count /**< Number of opcodes; any byte at or above is invalid. */
 };
 /** @copybrief cnor_op */
@@ -260,6 +273,7 @@ typedef lh_u8_t cnor_op_flags_t;
 #define CNOR_OP_FLAG_JUMP 0x01U       /**< First operand is a relative jump. */
 #define CNOR_OP_FLAG_TERMINATOR 0x02U /**< Control never falls through. */
 #define CNOR_OP_FLAG_POPS_ARGC 0x04U  /**< Also pops as many values as operand 1. */
+#define CNOR_OP_FLAG_POPS_ARGC0 0x10U /**< Also pops as many values as operand 0. */
 
 /** @def CNOR_OP_MAX_OPERANDS @brief Operands an instruction can have. */
 #define CNOR_OP_MAX_OPERANDS 3U

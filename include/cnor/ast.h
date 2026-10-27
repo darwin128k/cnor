@@ -58,6 +58,9 @@ enum cnor_node_kind
     cnor_node_index,      /**< `target[index]`. */
     cnor_node_ternary,    /**< `value if condition else other`. */
     cnor_node_array,      /**< `[value; count]`: an array of `count` elements. */
+    cnor_node_struct,     /**< Named record declaration; fields in data.fn.params. */
+    cnor_node_enum,       /**< Named enumeration; members in data.fn.params. */
+    cnor_node_member,     /**< `target.name`; target in data.index.target. */
     cnor_node_kind_count  /**< Number of kinds; not a kind itself. */
 };
 /** @copybrief cnor_node_kind */
@@ -78,6 +81,8 @@ enum cnor_type
     cnor_type_str,      /**< `str` */
     cnor_type_array,    /**< `array` */
     cnor_type_dict,     /**< `dict` */
+    cnor_type_function, /**< `function` */
+    cnor_type_named,    /**< User-defined type; name in node.type_name. */
     cnor_type_count
 };
 /** @copybrief cnor_type */
@@ -273,6 +278,7 @@ struct cnor_node
     cnor_node_kind_t kind;     /**< Which construct. */
     cnor_line_t line;          /**< Line it starts on. */
     lh_str_view_t name;        /**< Name or literal text; arena-owned. */
+    lh_str_view_t type_name;  /**< User-defined annotation, empty for built-ins. */
     cnor_node_t *next;         /**< Next sibling in a list. */
     union cnor_node_data data; /**< Per-kind members. */
 };

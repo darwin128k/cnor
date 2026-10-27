@@ -10,3 +10,11 @@ if t < 190:
 if t > 220:
     enabled = 0
 set_relay(enabled)
+
+# The host calls this by name, with the temperature it read.
+fn decide(t: i32) -> i32:
+    if t < 190:
+        return 1
+    if t > 220:
+        return 0
+    return 2

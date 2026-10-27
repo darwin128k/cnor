@@ -124,6 +124,9 @@ cnor_image_size_bound(const cnor_image_parts_t *parts)
     size += cnor_image_names_size(parts->natives, parts->native_count);
     size += parts->lines != lh_null ? cnor_byte_writer_get_size(parts->lines) : 0U;
     size += cnor_image_names_size(parts->files, parts->file_count);
+    size += parts->function_names != lh_null
+                ? cnor_image_names_size(parts->function_names, parts->function_name_count)
+                : 0U;
     return size;
 }
 
@@ -165,6 +168,11 @@ cnor_image_write(const cnor_image_parts_t *parts, cnor_image_t *out)
         cnor_image_put_table(&writer, cnor_image_section_lines, parts->line_count, parts->lines);
     }
     cnor_image_put_names(&writer, cnor_image_section_files, parts->files, parts->file_count);
+    if (parts->function_names != lh_null)
+    {
+        cnor_image_put_names(&writer, cnor_image_section_names, parts->function_names,
+                             parts->function_name_count);
+    }
     cnor_byte_writer_patch_u32(&writer, CNOR_IMAGE_AT_SIZE, cnor_byte_writer_get_size(&writer));
     out->data = cnor_byte_writer_release(&writer, &out->size);
     cnor_byte_writer_deinit(&writer);

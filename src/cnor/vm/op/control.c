@@ -1,3 +1,4 @@
+#include <cnor/vm/fast.h>
 #include <cnor/vm/internal.h>
 
 /* -- jumps ----------------------------------------------------------------- */
@@ -112,6 +113,65 @@ cnor_vm_op_call(cnor_vm_t *vm, const cnor_insn_t *insn)
     frame->return_addr = vm->ip;
     frame->fp = vm->fp;
     frame->function = vm->function;
+    vm->fp = vm->stack.sp - callee->param_count;
+    vm->function = index;
+    vm->ip = callee->entry;
+    cnor_vm_stack_push_none(&vm->stack, reserve);
+    return lh_bool_true;
+}
+
+/* A function as a value: the index of the function in the image's table. */
+lh_bool_t
+cnor_vm_op_push_function(cnor_vm_t *vm, const cnor_insn_t *insn)
+{
+    lh_value_t value;
+
+    value.kind = (lh_value_kind_t) CNOR_VALUE_KIND_FUNCTION;
+    value.data.u = insn->operands[0];
+    cnor_vm_stack_push(&vm->stack, value);
+    return lh_bool_true;
+}
+
+/*
+ * Call the function on the stack: the arguments are under it, and the result
+ * takes their place. The signature of the function is not known when the call
+ * is compiled, so the machine checks the count of the arguments here.
+ */
+lh_bool_t
+cnor_vm_op_call_value(cnor_vm_t *vm, const cnor_insn_t *insn)
+{
+    const cnor_argc_t argc = (cnor_argc_t) insn->operands[0];
+    const lh_value_t *const function = cnor_vm_stack_at(&vm->stack, vm->stack.sp - 1U);
+    cnor_function_index_t index;
+    const cnor_image_function_t *callee;
+    cnor_stack_slots_t reserve;
+    cnor_vm_frame_t *frame;
+
+    if (cnor_vm_fast_kind(function) != CNOR_VALUE_KIND_FUNCTION)
+    {
+        return cnor_vm_fail(vm, insn, cnor_error_type);
+    }
+    index = (cnor_function_index_t) function->data.u;
+    callee = &vm->functions[index];
+    if (argc != callee->param_count)
+    {
+        return cnor_vm_fail(vm, insn, cnor_error_wrong_arg_count);
+    }
+    reserve = (cnor_stack_slots_t) (callee->slot_count - callee->param_count);
+    if (vm->depth >= vm->config.max_depth)
+    {
+        return cnor_vm_fail(vm, insn, cnor_error_call_depth);
+    }
+    if (!cnor_vm_stack_fits(&vm->stack, reserve + callee->max_stack))
+    {
+        return cnor_vm_fail(vm, insn, cnor_error_stack_overflow);
+    }
+    frame = &vm->frames[vm->depth++];
+    frame->return_addr = vm->ip;
+    frame->fp = vm->fp;
+    frame->function = vm->function;
+    /* The function value goes; the arguments stay as the parameters. */
+    vm->stack.sp -= 1U;
     vm->fp = vm->stack.sp - callee->param_count;
     vm->function = index;
     vm->ip = callee->entry;

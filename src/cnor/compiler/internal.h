@@ -54,6 +54,7 @@ enum cnor_static_type
     cnor_static_str,     /**< `str` */
     cnor_static_array,   /**< An array of values; its elements hold `any`. */
     cnor_static_dict,    /**< A dictionary of pairs; its values hold `any`. */
+    cnor_static_function, /**< A function; it takes no closure over its place. */
     cnor_static_type_count
 };
 /** @copybrief cnor_static_type */

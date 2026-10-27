@@ -163,6 +163,102 @@ cnor_vm_run(cnor_vm_t *self)
 
 /* -- queries --------------------------------------------------------------- */
 
+/* The loaded image was fully checked, so a view can be rebuilt from its parts. */
+static cnor_image_view_t cnor_vm_view(const cnor_vm_t *self);
+
+/* The function of that name, or ::CNOR_INDEX_NONE when the image has none. */
+static cnor_function_index_t
+cnor_vm_function_of_name(const cnor_vm_t *self, lh_str_view_t name)
+{
+    cnor_image_view_t view;
+    cnor_count_t i;
+
+    if (self->image == lh_null)
+    {
+        return CNOR_INDEX_NONE;
+    }
+    view = cnor_vm_view(self);
+    for (i = 0U; i < view.function_name_count; ++i)
+    {
+        const lh_str_view_t candidate =
+            cnor_image_view_function_name(&view, (cnor_function_index_t) i);
+
+        if (lh_str_view_equals(&candidate, &name, lh_bool_false))
+        {
+            return (cnor_function_index_t) i;
+        }
+    }
+    return CNOR_INDEX_NONE;
+}
+
+/* The frame of the function: its arguments are its parameters, and the rest
+ * of its slots are reserved as none. */
+static lh_bool_t
+cnor_vm_enter_function(cnor_vm_t *self, cnor_function_index_t index, const lh_value_t *args,
+                       cnor_argc_t argc)
+{
+    const cnor_image_function_t *const callee = &self->functions[index];
+    const cnor_stack_slots_t reserve =
+        (cnor_stack_slots_t) (callee->slot_count - callee->param_count);
+    cnor_argc_t i;
+
+    if (argc != callee->param_count)
+    {
+        return cnor_diag_set(&self->diag, cnor_error_wrong_arg_count, 0U, callee->entry);
+    }
+    if (!cnor_vm_stack_fits(&self->stack,
+                            (cnor_stack_slots_t) callee->slot_count + callee->max_stack))
+    {
+        return cnor_diag_set(&self->diag, cnor_error_stack_overflow, 0U, callee->entry);
+    }
+    self->stack.sp = self->header.globals_count;
+    for (i = 0U; i < argc; ++i)
+    {
+        cnor_vm_stack_push(&self->stack, args[i]);
+    }
+    self->fp = self->stack.sp - callee->param_count;
+    self->depth = 0U;
+    self->function = index;
+    self->ip = callee->entry;
+    cnor_vm_stack_push_none(&self->stack, reserve);
+    return lh_bool_true;
+}
+
+lh_bool_t
+cnor_vm_call(cnor_vm_t *self, lh_str_view_t name, const lh_value_t *args, cnor_argc_t argc,
+             lh_value_t *out)
+{
+    const cnor_function_index_t index = cnor_vm_function_of_name(self, name);
+    lh_bool_t ok;
+
+    cnor_diag_init(&self->diag);
+    self->result = lh_value_make_none();
+    self->steps = 0U;
+    if (self->image == lh_null)
+    {
+        return cnor_diag_set(&self->diag, cnor_error_not_loaded, 0U, 0U);
+    }
+    if (index == CNOR_INDEX_NONE)
+    {
+        return cnor_diag_set(&self->diag, cnor_error_unknown_function, 0U, 0U);
+    }
+    if (!cnor_vm_enter_function(self, index, args, argc))
+    {
+        return lh_bool_false;
+    }
+    self->running = lh_bool_true;
+    ok = cnor_vm_dispatch(self);
+    /* Unwind whatever a failure left so globals are all that remains. */
+    self->stack.sp = self->header.globals_count;
+    self->depth = 0U;
+    self->try_count = 0U;
+    if (out != lh_null)
+    {
+        *out = self->result;
+    }
+    return ok;
+}
+
 const cnor_diag_t *
 cnor_vm_get_diag(const cnor_vm_t *self)
 {
@@ -206,6 +302,7 @@ cnor_vm_view(const cnor_vm_t *self)
     view.native_count = self->native_count;
     view.line_count = self->line_count;
     view.file_count = self->file_count;
+    view.function_name_count = self->function_name_count;
     return view;
 }
 

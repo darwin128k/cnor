@@ -45,7 +45,7 @@
 #include <lh/numeric/fixed/types.h>
 
 /** @def CNOR_IMAGE_VERSION @brief Format version this build reads and writes. */
-#define CNOR_IMAGE_VERSION 13U
+#define CNOR_IMAGE_VERSION 14U
 
 /** @def CNOR_IMAGE_HEADER_SIZE @brief Bytes of the fixed header. */
 #define CNOR_IMAGE_HEADER_SIZE 68U
@@ -71,6 +71,7 @@ enum cnor_image_section
     cnor_image_section_natives,   /**< Native imports. */
     cnor_image_section_lines,     /**< Line table (optional). */
     cnor_image_section_files,     /**< Source file names (optional). */
+    cnor_image_section_names,     /**< Function names (optional). */
     cnor_image_section_count
 };
 /** @copybrief cnor_image_section */

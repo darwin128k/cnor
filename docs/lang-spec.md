@@ -161,7 +161,7 @@ fn_decl     := "fn" IDENT "(" [ params ] ")" [ "->" type ] ":" block
 native_decl := "native" "fn" IDENT "(" [ params ] ")" [ "->" type ] end
 params      := param { "," param }
 param       := IDENT ":" type
-type        := "i32" | "u32" | "f32" | "bool" | "str"
+type        := "i32" | "u32" | "f32" | "bool" | "str" | "array" | "dict" | "function"
 block       := NEWLINE INDENT statement { statement } DEDENT
 statement   := simple end | compound
 simple      := let | assign | expr | "return" [ expr ] | "break" | "continue" | "raise"
@@ -320,6 +320,13 @@ answer and fails the run. `>>` keeps the sign of a signed number.
   the value of `hp` as a string. The value is put in with `str()`, so a number
   reads the way it is written. A `$` that is not followed by a name is just a
   sign.
+- **A function is a value.** `let f = double` puts the function in a variable,
+  and `f(21)` calls it. A function can be given to a function as well
+  (`apply(double, 21)`), and the type of it is `function`. A function takes no
+  closure over the place it was made in: it sees the globals, not the locals
+  of the place it was taken in. The machine checks the number of the arguments
+  when it calls a function through a value, since the compiler does not know
+  the signature there.
 - `match` compares its subject with each arm's literal using `==`, top to
   bottom; the first equal arm runs, `_` always matches, no match does nothing.
 - The value of the last top-level expression statement is the program's
@@ -489,7 +496,7 @@ closures, a preprocessor, metatables.
 
 ---
 
-## 7. The `.cnb` image format, v13
+## 7. The `.cnb` image format, v14
 
 **[cnor]** v1 replaced the original header (whose layout used `sizeof` and
 was not portable) and its names section. Every field is a fixed-width
@@ -510,15 +517,16 @@ globals (`array_new_global`); v9 adds the bitwise operators (`band`, `bor`,
 slots hold; v11 adds the error handling (`try_push`, `try_pop`); v12 adds the
 finally block and the error that is raised again (`try_finally`,
 `finally_end`, `raise`, `try_exit`); v13 adds the function that splits a text
-(`split_into`). An image of another version is refused: v12 images must be
-compiled again.
+(`split_into`); v14 adds the function names (a host calls a function of the
+script by name) and the function as a value (`push_function`, `call_value`).
+An image of another version is refused: v13 images must be compiled again.
 
 ### 7.1 Header (68 bytes)
 
 | Offset | Field | Type | Meaning |
 |---|---|---|---|
 | 0 | `magic` | 4 bytes | `"cnor"` |
-| 4 | `version` | u16 | format version, currently 13 |
+| 4 | `version` | u16 | format version, currently 14 |
 | 6 | `flags` | u16 | bit 0: the image carries a line table |
 | 8 | `image_size` | u32 | size of the whole image |
 | 12 | `stack_slots` | u32 | largest frame (slots + operands), **computed by the compiler** |
@@ -897,6 +905,15 @@ left them. **[cnor]** `cnor_vm_reset` sets every global to `none`, rewinds the
 string pool and clears the result; a host that handles each event from a clean
 state resets before each run.
 
+**[cnor]** `cnor_vm_call` calls a function of the script **by name**, with
+arguments and a place for the result. The function runs to its end as the entry
+function does, and the globals keep what it wrote. The image has to carry the
+names of its functions, which the compiler writes; a name the image does not
+have fails with `unknown_function`, and the wrong number of arguments with
+`wrong_arg_count`. This is how a host runs a handler of the script: the script
+gives the host a function (`let f = on_spawn`), the host keeps it and calls it
+when the event comes.
+
 Everything is allocated through `lh_runtime_allocator_alloc`. Limits (stack
 slots, call depth, pool size) are chosen by the host in advance.
 
@@ -988,6 +1005,9 @@ line in `tests/cli/`):
 - [x] the language's own functions: `len`, `find`, `contains`, `replace`,
   `trim`, `upper`, `lower`, `starts_with`, `ends_with`, `substr`, `ord`,
   `char`, `str`, `parse_int`, `split_into` (section 9.2);
+- [x] a function as a value: put in a variable, given to a function, called
+  through the value; and `cnor_vm_call`, so a host calls a function of the
+  script by name (sections 6.1 and 10);
 - [x] static type checking (section 6.3);
 - [x] global initializers in source order, with use-before-`let` errors
   (section 6.4);

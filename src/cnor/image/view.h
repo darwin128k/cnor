@@ -29,6 +29,7 @@ struct cnor_image_view
     cnor_count_t native_count;   /**< Native imports. */
     cnor_count_t line_count;     /**< Line table entries. */
     cnor_count_t file_count;     /**< File table entries. */
+    cnor_count_t function_name_count; /**< Function name entries. */
 };
 /** @copybrief cnor_image_view */
 typedef struct cnor_image_view cnor_image_view_t;
@@ -60,6 +61,16 @@ cnor_image_native_read(cnor_byte_reader_t *reader, lh_str_view_t *name);
 /** @brief Read one file table record (the name may be empty). */
 lh_bool_t
 cnor_image_file_read(cnor_byte_reader_t *reader, lh_str_view_t *name);
+
+/** @brief Read one function name record. */
+lh_bool_t
+cnor_image_function_name_read(cnor_byte_reader_t *reader, lh_str_view_t *name);
+
+/**
+ * @brief Name of function @p index, or an empty view without a name table.
+ */
+lh_str_view_t
+cnor_image_view_function_name(const cnor_image_view_t *self, cnor_function_index_t index);
 
 /** @brief Source line of the instruction at @p addr, or 0 without a line table. */
 cnor_line_t

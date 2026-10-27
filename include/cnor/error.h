@@ -102,6 +102,7 @@ enum cnor_error
     cnor_error_nothing_to_raise, /**< `raise` with no error in flight. */
     cnor_error_empty_separator,  /**< A separator that is empty. */
     cnor_error_array_too_small,  /**< An array with too few places for what goes into it. */
+    cnor_error_unknown_function, /**< The image has no function of that name. */
 
     cnor_error_count /**< Number of codes; not a code itself. */
 };

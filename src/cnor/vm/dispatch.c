@@ -39,7 +39,7 @@
 #    endif
 #endif
 
-_Static_assert(cnor_op_count == 115, "a new opcode needs a handler and a dispatch label below");
+_Static_assert(cnor_op_count == 117, "a new opcode needs a handler and a dispatch label below");
 
 /* The three operand forms of binary operator @p name share one handler. */
 #define CNOR_VM_FORM_HANDLERS(name)                                                                \
@@ -113,6 +113,8 @@ static const cnor_vm_handler_t m_handlers[cnor_op_count] = {
     [cnor_op_finally_end] = cnor_vm_op_finally_end,
     [cnor_op_raise] = cnor_vm_op_raise,
     [cnor_op_try_exit] = cnor_vm_op_try_exit,
+    [cnor_op_push_function] = cnor_vm_op_push_function,
+    [cnor_op_call_value] = cnor_vm_op_call_value,
     [cnor_op_call_builtin] = cnor_vm_op_call_builtin,
     CNOR_VM_FORM_HANDLERS(add),
     CNOR_VM_FORM_HANDLERS(sub),
@@ -611,6 +613,8 @@ cnor_vm_dispatch(cnor_vm_t *vm)
         [cnor_op_finally_end] = &&cnor_vm_label_finally_end,
         [cnor_op_raise] = &&cnor_vm_label_raise,
         [cnor_op_try_exit] = &&cnor_vm_label_try_exit,
+        [cnor_op_push_function] = &&cnor_vm_label_push_function,
+        [cnor_op_call_value] = &&cnor_vm_label_call_value,
         [cnor_op_call_builtin] = &&cnor_vm_label_call_builtin,
     };
 #endif
@@ -1504,6 +1508,14 @@ cnor_vm_switch:
         CNOR_VM_SLOW();
     }
     CNOR_VM_OP(try_exit)
+    {
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(push_function)
+    {
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(call_value)
     {
         CNOR_VM_SLOW();
     }

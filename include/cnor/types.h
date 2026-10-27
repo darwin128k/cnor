@@ -148,6 +148,17 @@ typedef lh_u32_t cnor_count_t;
 #define CNOR_VALUE_KIND_DICT 8U
 
 /**
+ * @def CNOR_VALUE_KIND_FUNCTION
+ * @brief The value kind of a function: the index of the function in the
+ *        image's function table.
+ *
+ * A function is a value like any other: it can be put in a variable, given to
+ * a function and called from there. A function takes no closure over the
+ * place it was made in, so it cannot see the locals of that place.
+ */
+#define CNOR_VALUE_KIND_FUNCTION 9U
+
+/**
  * @def CNOR_DICT_ROOM_MAX
  * @brief Largest room a dictionary may have: a dictionary takes three slots
  *        and two per pair, and the slots of the globals are counted by a

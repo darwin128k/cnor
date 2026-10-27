@@ -150,6 +150,49 @@ cnor_compile_call_builtin(cnor_compiler_t *self, const cnor_node_t *node)
     return cnor_emit_op(self, cnor_op_len);
 }
 
+/*
+ * `f(args)`, where `f` holds a function: the function goes on the stack, and
+ * the arguments follow it. The signature of the function is not known here,
+ * so the arguments are not checked.
+ */
+static lh_bool_t
+cnor_compile_call_value(cnor_compiler_t *self, const cnor_node_t *node,
+                         const cnor_binding_t *binding)
+{
+    const cnor_node_t *arg;
+
+    /* The arguments first, and the function over them: the machine takes the
+     * function off the stack and the arguments stay as its parameters. */
+    for (arg = node->data.call.args; arg != lh_null; arg = arg->next)
+    {
+        if (!cnor_compile_expr(self, arg))
+        {
+            return lh_bool_false;
+        }
+    }
+    if (binding->kind == cnor_binding_local)
+    {
+        if (!cnor_emit_insn(self, cnor_op_load_local, binding->index, 0U))
+        {
+            return lh_bool_false;
+        }
+    }
+    else if (binding->kind == cnor_binding_global)
+    {
+        if (!cnor_order_use_global(self, node, binding->index)
+            || !cnor_emit_insn(self, cnor_op_load_global, binding->index, 0U))
+        {
+            return lh_bool_false;
+        }
+    }
+    else
+    {
+        return cnor_compile_fail_binding(self, node, binding);
+    }
+    self->type = cnor_static_any;
+    return cnor_emit_insn(self, cnor_op_call_value, node->data.call.argc, 0U);
+}
+
 lh_bool_t
 cnor_compile_call(cnor_compiler_t *self, const cnor_node_t *node)
 {
@@ -164,7 +207,11 @@ cnor_compile_call(cnor_compiler_t *self, const cnor_node_t *node)
     case cnor_binding_none:
         return cnor_compile_call_builtin(self, node);
     default:
-        /* A variable: there are no function values to call. */
+        if (binding.type == cnor_static_function)
+        {
+            /* A value that holds a function: called through the value. */
+            return cnor_compile_call_value(self, node, &binding);
+        }
         return cnor_compile_fail_binding(self, node, &binding);
     }
 }

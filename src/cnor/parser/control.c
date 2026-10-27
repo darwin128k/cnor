@@ -221,6 +221,8 @@ cnor_parser_is_pattern(const cnor_node_t *node)
     }
     switch (node->kind)
     {
+    case cnor_node_member:
+        return node->data.index.target->kind == cnor_node_ident ? lh_bool_true : lh_bool_false;
     case cnor_node_int:
     case cnor_node_real:
     case cnor_node_string:

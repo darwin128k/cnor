@@ -181,19 +181,24 @@ cnor_compiler_write_image(cnor_compiler_t *self, cnor_image_t *out)
         file_count > 0U
             ? (lh_str_view_t *) lh_runtime_allocator_alloc(file_count * sizeof(lh_str_view_t))
             : lh_null;
+    lh_str_view_t *function_names = (lh_str_view_t *) lh_runtime_allocator_alloc(
+        function_count * sizeof(lh_str_view_t));
     cnor_image_parts_t parts;
     cnor_count_t i;
     lh_bool_t ok;
 
-    if (functions == lh_null || (file_count > 0U && files == lh_null))
+    if (functions == lh_null || function_names == lh_null || (file_count > 0U && files == lh_null))
     {
         lh_runtime_allocator_free(functions);
+        lh_runtime_allocator_free(function_names);
         lh_runtime_allocator_free(files);
         return cnor_diag_set(self->diag, cnor_error_no_memory, 0U, 0U);
     }
     for (i = 0U; i < function_count; ++i)
     {
         functions[i] = cnor_scope_function_at(&self->scope, (cnor_function_index_t) i)->image;
+        function_names[i] =
+            cnor_scope_function_at(&self->scope, (cnor_function_index_t) i)->key.name;
     }
     for (i = 0U; i < file_count; ++i)
     {
@@ -210,10 +215,13 @@ cnor_compiler_write_image(cnor_compiler_t *self, cnor_image_t *out)
     parts.line_count = self->emit.line_count;
     parts.files = files;
     parts.file_count = file_count;
+    parts.function_names = function_names;
+    parts.function_name_count = function_count;
     parts.globals_count = (lh_u32_t) lh_array_get_size(&self->scope.globals);
     parts.stack_slots = cnor_compiler_stack_slots(self);
     ok = cnor_image_write(&parts, out);
     lh_runtime_allocator_free(functions);
+    lh_runtime_allocator_free(function_names);
     if (files != lh_null)
     {
         lh_runtime_allocator_free(files);

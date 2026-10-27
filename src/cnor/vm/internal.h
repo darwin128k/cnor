@@ -134,6 +134,10 @@ lh_bool_t cnor_vm_op_try_finally(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_finally_end(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_raise(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_try_exit(cnor_vm_t *vm, const cnor_insn_t *insn);
+/** @brief Push a function as a value: the index of the function. */
+lh_bool_t cnor_vm_op_push_function(cnor_vm_t *vm, const cnor_insn_t *insn);
+/** @brief Call the function on the stack; the arguments are under it. */
+lh_bool_t cnor_vm_op_call_value(cnor_vm_t *vm, const cnor_insn_t *insn);
 /** @brief The `try` blocks of the frame that is leaving are gone with it. */
 void
 cnor_vm_tries_leave(cnor_vm_t *vm);

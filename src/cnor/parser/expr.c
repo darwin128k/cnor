@@ -242,6 +242,17 @@ cnor_parser_postfix(cnor_parser_t *self)
         {
             node = cnor_parser_call(self, node);
         }
+        else if (cnor_parser_accept_punct(self, cnor_punct_dot))
+        {
+            cnor_node_t *member = cnor_parser_node(self, cnor_node_member);
+            if (member == lh_null || !cnor_parser_at(self, cnor_token_ident)
+                || !cnor_parser_take_name(self, member) || !cnor_parser_advance(self))
+            {
+                return cnor_parser_fail(self, cnor_error_unexpected_token);
+            }
+            member->data.index.target = node;
+            node = member;
+        }
         else if (cnor_parser_at_punct(self, cnor_punct_lbracket))
         {
             node = cnor_parser_subscript(self, node);

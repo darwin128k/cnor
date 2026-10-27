@@ -71,6 +71,7 @@ static const lh_char_t *const m_messages[cnor_error_count] = {
     "nothing to raise",
     "the separator is empty",
     "the array is too small",
+    "no function of that name",
 };
 
 const lh_str_ptr
@@ -155,6 +156,7 @@ static const lh_char_t *const m_names[cnor_error_count] = {
     "nothing_to_raise",
     "empty_separator",
     "array_too_small",
+    "unknown_function",
 };
 
 const lh_str_ptr

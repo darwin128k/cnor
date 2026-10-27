@@ -124,12 +124,21 @@ int main(int argc, char **argv)
     started = cnor_bench_clock_ns();
     for (i = 0; i < events; ++i)
     {
+        lh_value_t args[1];
+        lh_value_t answer;
+
         host.temperature = temperatures[i % 4U];
         cnor_vm_reset(&vm); /* Reclaim temporary strings; C retains relay state. */
         if (!cnor_vm_run(&vm)) goto done;
         steps += cnor_vm_get_steps(&vm);
         if (host.relay != expected[i % 4U] || host.writes != i + 1U)
         { fprintf(stderr, "event %u: unexpected relay state or write count\n", i); goto done; }
+        /* The host calls a function of the script by name. */
+        args[0] = lh_value_make_sint(host.temperature);
+        if (!cnor_vm_call(&vm, lh_str_view_lit("decide"), args, 1U, &answer)) goto done;
+        if (lh_value_get_kind(&answer) != lh_value_kind_sint) goto done;
+        if (i == 0U)
+        { printf("decide(%d)=%lld\n", host.temperature, (long long) lh_value_get_data(&answer)->i); }
     }
     elapsed = cnor_bench_clock_ns() - started;
     if (allocation_calls != calls_before || live_bytes != resident)
