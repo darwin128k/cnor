@@ -769,6 +769,156 @@ CNOR_TEST(keeps_a_function_as_a_value)
              cnor_error_wrong_arg_count);
 }
 
+/* -- functions declared inside another one ---------------------------------- */
+
+CNOR_TEST(calls_a_function_declared_inside_another_one)
+{
+    /* It sees the variables of the function it is in, and their values are
+     * the ones they have when it is called. */
+    CHECK_EQ(value_of("fn outer(a: i32) -> i32:\n"
+                      "    let mut k = 10\n"
+                      "    fn inner(b: i32) -> i32:\n"
+                      "        return b * 2 + k\n"
+                      "    k = 20\n"
+                      "    return inner(a) + 1\n"
+                      "outer(21)\n"),
+             63);
+    /* It may change them. */
+    CHECK_EQ(value_of("fn outer() -> i32:\n"
+                      "    let mut n = 0\n"
+                      "    fn inner() -> i32:\n"
+                      "        n += 5\n"
+                      "        return n\n"
+                      "    inner()\n"
+                      "    inner()\n"
+                      "    return n\n"
+                      "outer()\n"),
+             10);
+    /* A call in the middle of an expression: what the caller had on the
+     * stack is put away and brought back. */
+    CHECK_EQ(value_of("fn f(x: i32) -> i32:\n"
+                      "    fn helper() -> i32:\n"
+                      "        return 7\n"
+                      "    return 1 + helper() * x\n"
+                      "f(3)\n"),
+             22);
+    /* One inside another. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    fn middle() -> i32:\n"
+                      "        fn deep() -> i32:\n"
+                      "            return 5\n"
+                      "        return deep() + 1\n"
+                      "    return middle() * 2\n"
+                      "f()\n"),
+             12);
+    /* One declared in a block, and one that gives nothing back. */
+    CHECK_EQ(value_of("fn f(x: i32) -> i32:\n"
+                      "    let mut r = 0\n"
+                      "    if x > 0:\n"
+                      "        fn helper(y: i32) -> i32:\n"
+                      "            return y + 1\n"
+                      "        r = helper(x)\n"
+                      "    return r\n"
+                      "f(4)\n"),
+             5);
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    fn inner():\n"
+                      "        let x = 1\n"
+                      "    inner()\n"
+                      "    return 3\n"
+                      "f()\n"),
+             3);
+    /* A `try` inside it, with a `catch` and a `finally`. */
+    CHECK_EQ(value_of("fn f(x: i32) -> i32:\n"
+                      "    fn risky(y: i32) -> i32:\n"
+                      "        try:\n"
+                      "            if y > 0:\n"
+                      "                return y * 2\n"
+                      "            raise\n"
+                      "        catch e:\n"
+                      "            return -1\n"
+                      "        finally:\n"
+                      "            let z = 0\n"
+                      "        return 0\n"
+                      "    return risky(x)\n"
+                      "f(5)\n"),
+             10);
+    /* An array parameter: it is a reference to the elements of the caller. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    fn total(a: array[i32]) -> i32:\n"
+                      "        let mut n = 0\n"
+                      "        for v in a:\n"
+                      "            n += v\n"
+                      "        return n\n"
+                      "    let xs: array[i32] = [1, 2, 3]\n"
+                      "    return total(xs)\n"
+                      "f()\n"),
+             6);
+    /* The variables of the function it is in keep their slots: the ones
+     * declared after it are not taken by its own code. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let a: array[i32] = [1, 2, 3]\n"
+                      "    fn total() -> i32:\n"
+                      "        let mut n = 0\n"
+                      "        for v in a:\n"
+                      "            n += v\n"
+                      "        return n\n"
+                      "    let b: array[i32] = [4, 5, 6]\n"
+                      "    let mut c = 0\n"
+                      "    return total() + b[0] + c\n"
+                      "f()\n"),
+             10);
+    /* One that calls another one. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    fn b() -> i32:\n"
+                      "        return 7\n"
+                      "    fn a() -> i32:\n"
+                      "        return b()\n"
+                      "    return a()\n"
+                      "f()\n"),
+             7);
+}
+
+CNOR_TEST(refuses_a_local_function_that_cannot_work)
+{
+    cnor_line_t line;
+
+    /* It cannot call itself: its parameters live in one set of slots. */
+    CHECK_EQ(error_of("fn f() -> i32:\n"
+                      "    fn inner() -> i32:\n"
+                      "        return inner()\n"
+                      "    return inner()\n"
+                      "f()\n",
+                      &line),
+             cnor_error_recursive);
+    /* It cannot be a value: it lives in the frame of the function it is in. */
+    CHECK_EQ(error_of("fn f() -> i32:\n"
+                      "    fn inner() -> i32:\n"
+                      "        return 1\n"
+                      "    let g = inner\n"
+                      "    return g()\n"
+                      "f()\n",
+                      &line),
+             cnor_error_not_a_value);
+    /* Its arguments are checked like any other. */
+    CHECK_EQ(error_of("fn f() -> i32:\n"
+                      "    fn inner(a: i32) -> i32:\n"
+                      "        return a\n"
+                      "    return inner()\n"
+                      "f()\n",
+                      &line),
+             cnor_error_wrong_arg_count);
+    /* A `break` in it has no loop of its own to leave. */
+    CHECK_EQ(error_of("fn f() -> i32:\n"
+                      "    fn inner() -> i32:\n"
+                      "        break\n"
+                      "        return 1\n"
+                      "    return inner()\n"
+                      "f()\n",
+                      &line),
+             cnor_error_outside_loop);
+}
+
 /* -- finally and raise ------------------------------------------------------- */
 
 CNOR_TEST(runs_a_finally_block)
@@ -2448,6 +2598,8 @@ CNOR_TEST_CASE(refuses_a_try_where_it_does_not_fit),
     CNOR_TEST_CASE(puts_values_into_a_string),
     CNOR_TEST_CASE(splits_a_text_into_an_array),
     CNOR_TEST_CASE(keeps_a_function_as_a_value),
+    CNOR_TEST_CASE(calls_a_function_declared_inside_another_one),
+    CNOR_TEST_CASE(refuses_a_local_function_that_cannot_work),
     CNOR_TEST_CASE(passes_an_array_to_a_function_and_walks_it),
     CNOR_TEST_CASE(keeps_a_global_array_whole),
     CNOR_TEST_CASE(refuses_an_array_where_it_does_not_fit),

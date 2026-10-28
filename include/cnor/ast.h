@@ -46,6 +46,7 @@ enum cnor_node_kind
     cnor_node_break,      /**< `break`. */
     cnor_node_continue,   /**< `continue`. */
     cnor_node_raise,      /**< `raise`: the error being handled goes on outward. */
+    cnor_node_local_fn,   /**< `fn name(params) -> type:` inside a block: it closes over the frame it is in. */
     /* expressions */
     cnor_node_ident,      /**< A name in use. */
     cnor_node_int,        /**< Whole number literal. */

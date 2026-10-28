@@ -45,7 +45,7 @@
 #include <lh/numeric/fixed/types.h>
 
 /** @def CNOR_IMAGE_VERSION @brief Format version this build reads and writes. */
-#define CNOR_IMAGE_VERSION 15U
+#define CNOR_IMAGE_VERSION 16U
 
 /** @def CNOR_IMAGE_HEADER_SIZE @brief Bytes of the fixed header. */
 #define CNOR_IMAGE_HEADER_SIZE 68U

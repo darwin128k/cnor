@@ -127,6 +127,10 @@ lh_bool_t cnor_vm_op_jmp(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_jmp_if(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_call(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_ret(cnor_vm_t *vm, const cnor_insn_t *insn);
+/** @brief Jump into the code of a local function, keeping where to come back. */
+lh_bool_t cnor_vm_op_call_local(cnor_vm_t *vm, const cnor_insn_t *insn);
+/** @brief Back from a local function to where it was called. */
+lh_bool_t cnor_vm_op_ret_local(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_native(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_len(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_index(cnor_vm_t *vm, const cnor_insn_t *insn);

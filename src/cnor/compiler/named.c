@@ -133,6 +133,7 @@ cnor_named_resolve_list(cnor_compiler_t *self, const cnor_node_t *node)
         {
         case cnor_node_fn:
         case cnor_node_native_fn:
+        case cnor_node_local_fn:
             if (!cnor_named_resolve_annotation(self, node, node->data.fn.returns)
                 || !cnor_named_resolve_list(self, node->data.fn.params)
                 || !cnor_named_resolve_list(self, node->data.fn.body)) return lh_bool_false;

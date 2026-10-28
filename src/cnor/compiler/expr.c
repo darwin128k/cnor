@@ -71,6 +71,10 @@ cnor_compile_ident(cnor_compiler_t *self, const cnor_node_t *node)
          * function and called from there. */
         self->type = cnor_static_function;
         return cnor_emit_insn(self, cnor_op_push_function, binding.index, 0U);
+    case cnor_binding_local_fn:
+        /* A local function lives in the frame of the function it is in, so it
+         * cannot be put anywhere else. */
+        return cnor_compile_fail(self, node, cnor_error_not_a_value);
     default:
         /* Natives are not values: there is nothing to push. */
         return cnor_compile_fail_binding(self, node, &binding);

@@ -36,6 +36,7 @@ static const cnor_compile_rule_t m_rules[cnor_node_kind_count] = {
     [cnor_node_match_arm] = {lh_null, lh_null},
     [cnor_node_try] = {lh_null, cnor_compile_try},
     [cnor_node_raise] = {lh_null, cnor_compile_raise},
+    [cnor_node_local_fn] = {lh_null, cnor_compile_local_fn_decl},
     [cnor_node_return] = {lh_null, cnor_compile_return},
     [cnor_node_break] = {lh_null, cnor_compile_break},
     [cnor_node_continue] = {lh_null, cnor_compile_continue},

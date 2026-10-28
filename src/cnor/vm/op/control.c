@@ -204,6 +204,32 @@ cnor_vm_op_ret(cnor_vm_t *vm, const cnor_insn_t *insn)
     return lh_bool_true;
 }
 
+/*
+ * A local function: its code is a part of the code of the function that
+ * declared it, so the frame is the same one and the slots are the same slots.
+ * The address to come back to goes into the slot the call names, and the call
+ * jumps into the body.
+ */
+lh_bool_t
+cnor_vm_op_call_local(cnor_vm_t *vm, const cnor_insn_t *insn)
+{
+    lh_value_t *const slot = cnor_vm_stack_at(&vm->stack, vm->fp + insn->operands[1]);
+
+    cnor_vm_fast_set_uint(slot, (lh_ullong_t) vm->ip);
+    vm->ip = (cnor_code_addr_t) cnor_insn_get_jump_target(insn);
+    return lh_bool_true;
+}
+
+/* The end of a local function: back to where the call was made. */
+lh_bool_t
+cnor_vm_op_ret_local(cnor_vm_t *vm, const cnor_insn_t *insn)
+{
+    const lh_value_t *const slot = cnor_vm_stack_at(&vm->stack, vm->fp + insn->operands[0]);
+
+    vm->ip = (cnor_code_addr_t) slot->data.u;
+    return lh_bool_true;
+}
+
 /* Stops the program; whatever is above the frame's slots is the result. */
 lh_bool_t
 cnor_vm_op_halt(cnor_vm_t *vm, const cnor_insn_t *insn)

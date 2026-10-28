@@ -52,6 +52,8 @@ cnor_compiler_init(cnor_compiler_t *self, const cnor_compiler_config_t *config, 
     cnor_order_init(self);
     lh_array_init(&self->named_types, sizeof(struct cnor_named_type));
     lh_array_init(&self->annotations, sizeof(struct cnor_annotation));
+    lh_array_init(&self->local_calls, sizeof(struct cnor_local_call_edge));
+    self->local_fn = lh_null;
     self->loop_depth = 0U;
     self->try_depth = 0U;
     self->function = 0U;
@@ -66,6 +68,7 @@ cnor_compiler_deinit(cnor_compiler_t *self)
 {
     lh_array_deinit(&self->annotations);
     lh_array_deinit(&self->named_types);
+    lh_array_deinit(&self->local_calls);
     cnor_order_deinit(self);
     cnor_modules_deinit(self);
     cnor_emit_deinit(&self->emit);

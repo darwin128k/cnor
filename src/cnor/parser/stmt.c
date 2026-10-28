@@ -333,6 +333,7 @@ static const struct cnor_parser_stmt_rule m_stmt_rules[] = {
     {cnor_keyword_for, cnor_parser_for, lh_bool_true},
     {cnor_keyword_match, cnor_parser_match, lh_bool_true},
     {cnor_keyword_try, cnor_parser_try, lh_bool_true},
+    {cnor_keyword_fn, cnor_parser_local_fn, lh_bool_true},
     {cnor_keyword_import, cnor_parser_misplaced_import, lh_bool_false},
 };
 

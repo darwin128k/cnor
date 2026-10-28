@@ -172,13 +172,14 @@ simple      := let | assign | expr | "return" [ expr ] | "break" | "continue" | 
 let         := "let" [ "mut" ] IDENT [ ":" type ] [ "=" expr ]
 assign      := target ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" ) expr
 target      := IDENT | IDENT "[" expr "]" | IDENT "." IDENT
-compound    := if | while | for | match | try
+compound    := if | while | for | match | try | local_fn
 if          := "if" expr ":" block [ "else" ( ":" block | if ) ]
 while       := "while" expr ":" block
 for         := "for" IDENT "in" ( expr ".." expr | expr ) ":" block
 match       := "match" expr ":" NEWLINE INDENT arm { arm } DEDENT
 arm         := ( literal | "-" literal | qualified_name "." IDENT | "_" ) "=>" simple [ "," ] end
 try         := "try" ":" block [ "catch" [ IDENT ] ":" block ] [ "finally" ":" block ]
+local_fn    := "fn" IDENT "(" [ params ] ")" [ "->" type ] ":" block
 end         := [ ";" ] ( NEWLINE | DEDENT | EOF )      (or ";" then more on the line)
 expr        := binary [ "if" binary "else" expr ]
 postfix     := primary { "[" expr "]" | "." IDENT }
@@ -266,6 +267,40 @@ usable state (the stack overflowing, the memory running out). An error nobody
 catches ends the run, as it did before: the host sees the code, the line and
 the file.
 
+**[cnor]** A `fn` inside a block is a **local function**: it belongs to the
+function it is declared in, and it is called by name:
+
+```
+fn outer(a: i32) -> i32:
+    let mut k = 10
+    fn inner(b: i32) -> i32:
+        return b * 2 + k
+    k = 20
+    return inner(a) + 1
+```
+
+A local function runs in the frame of the function it is in, so it sees the
+variables that were in sight where it was declared — the parameters of the
+function, and the locals of the block — and it may change them, if they were
+declared with `mut`. What it sees is the value the variable has when the
+function is called, not when it was declared.
+
+Its code is a part of the code of the function that declared it, so a call
+costs nothing: no frame is made and nothing is allocated. The parameters and
+the result live in slots of that frame, and the address to come back to lives
+in a slot as well: the stack is the same before a call and after it.
+
+A local function cannot be a value (`let g = inner` is an error): it lives in
+the frame of the function it is in, and that frame is gone when the function
+returns. It cannot call itself either: its parameters live in one set of
+slots, and a call inside a call would overwrite them. A `break` or a
+`continue` in it has no loop to leave, unless the local function has a loop
+of its own.
+
+A local function makes no frame, so the trace of an error inside it shows the
+function it is in, not the local function itself. The line is the line of the
+local function's code.
+
 A `try` without a finally block costs three instructions when it begins and
 when it ends, and nothing at all inside it: the machine does not look for
 handlers while the program runs. A finally block adds two instructions of its
@@ -307,7 +342,10 @@ answer and fails the run. `>>` keeps the sign of a signed number.
   immutable.
 - Assigning a name that was never declared is an error; there are no implicit
   globals.
-- Functions may be called before their definition in the file.
+- A function may be called before their definition in the file.
+- A `fn` inside a block is a local function: it belongs to the function it is
+  declared in, it sees the variables that were in sight where it was declared,
+  and it is called by name (section 6.1).
 - A call to a name that is no script function resolves to a `native fn`
   declaration, or to the host's native table given to the compiler.
 - `for i in a..b` runs `i` from `a` up to `b`, excluding `b`; `b` is evaluated
@@ -688,7 +726,7 @@ See `examples/namespaces/main.cn` for a complete three-file example.
 
 ---
 
-## 7. The `.cnb` image format, v14
+## 7. The `.cnb` image format, v16
 
 **[cnor]** v1 replaced the original header (whose layout used `sizeof` and
 was not portable) and its names section. Every field is a fixed-width
@@ -710,15 +748,17 @@ slots hold; v11 adds the error handling (`try_push`, `try_pop`); v12 adds the
 finally block and the error that is raised again (`try_finally`,
 `finally_end`, `raise`, `try_exit`); v13 adds the function that splits a text
 (`split_into`); v14 adds the function names (a host calls a function of the
-script by name) and the function as a value (`push_function`, `call_value`).
-An image of another version is refused: v13 images must be compiled again.
+script by name) and the function as a value (`push_function`, `call_value`);
+v15 adds the key of a dictionary that is a constant (`dict_get_lk`); v16 adds
+the local functions (`call_local`, `ret_local`).
+An image of another version is refused: v15 images must be compiled again.
 
 ### 7.1 Header (68 bytes)
 
 | Offset | Field | Type | Meaning |
 |---|---|---|---|
 | 0 | `magic` | 4 bytes | `"cnor"` |
-| 4 | `version` | u16 | format version, currently 14 |
+| 4 | `version` | u16 | format version, currently 16 |
 | 6 | `flags` | u16 | bit 0: the image carries a line table |
 | 8 | `image_size` | u32 | size of the whole image |
 | 12 | `stack_slots` | u32 | largest frame (slots + operands), **computed by the compiler** |
@@ -774,7 +814,7 @@ relocation pass.
 
 ## 8. Instruction set
 
-The full list is `include/cnor/op.h` and its info table `src/cnor/op.c`: 111
+The full list is `include/cnor/op.h` and its info table `src/cnor/op.c`: 120
 opcodes. An opcode is one byte; operands follow it, little-endian. The info
 table holds each opcode's operands and stack effect; the compiler, the
 verifier and the machine all read it.
@@ -790,7 +830,7 @@ verifier and the machine all read it.
 | Logic | `not` |
 | Operand forms | `add_ll` .. `ge_ll`, `add_li` .. `ge_li`, `add_i` .. `ge_i` |
 | Jumps | `jmp`, `jmp_if_false`, `jmp_if_true`, `for_loop`, `switch` |
-| Functions | `call`, `ret`, `native` |
+| Functions | `call`, `ret`, `native`, `call_local`, `ret_local` |
 | Text | `len`, `index`, `index_ll`, `index_li`, `index_i` |
 | Arrays | `array_new`, `array_new_global`, `array_get_l`, `array_set_l`, `array_get`, `array_set` |
 | Dictionaries | `dict_new`, `dict_new_global`, `dict_get_l`, `dict_set_l`, `dict_get`, `dict_set`, `dict_key_l` |
@@ -838,6 +878,19 @@ a `match` with at least four distinct `i32` patterns, then at most a final
 bodies follow the default code, holes in the range jump to the default. The
 arm that runs is the one the tests in turn would pick, since the patterns
 are distinct; it costs two steps (the `switch` and its `jmp`) to reach.
+
+**`call_local`** (s32 offset, slot r; format v16) calls a local function: the
+offset is the address of its code, relative to the end of the instruction, and
+`r` is the slot where the address to come back to is kept. The machine puts
+that address in the slot and jumps into the code. The code of a local
+function is a part of the code of the function that declared it, so no frame
+is made: the slots of the frame are the slots of the local function, and its
+parameters are slots of its own.
+
+**`ret_local`** (slot r; format v16) is the end of that code: the machine
+takes the address out of the slot and goes back to it. The result of the call
+waits in a slot of its own, so the stack is the same before a call and after
+it, and the code of a local function runs with an empty stack.
 
 **The index forms** (format v5) take the text and the index from the frame or
 the code, so `text[i]` does not copy the text onto the stack first:
@@ -1208,6 +1261,9 @@ line in `tests/cli/`):
 - [x] a function as a value: put in a variable, given to a function, called
   through the value; and `cnor_vm_call`, so a host calls a function of the
   script by name (sections 6.1 and 10);
+- [x] a local function: a `fn` inside a block, running in the frame of the
+  function it is in, seeing the variables that were in sight where it was
+  declared (section 6.1);
 - [x] static type checking (section 6.3);
 - [x] global initializers in source order, with use-before-`let` errors
   (section 6.4);

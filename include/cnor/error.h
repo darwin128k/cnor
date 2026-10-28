@@ -69,6 +69,8 @@ enum cnor_error
     cnor_error_imports_too_deep,   /**< Imports nested past ::CNOR_COMPILER_MAX_IMPORT_DEPTH. */
     cnor_error_too_many_files,     /**< More files than a 16-bit index can name. */
     cnor_error_not_a_declaration,   /**< An array literal outside a `let`. */
+    cnor_error_not_a_value,         /**< A local function used where a value is wanted. */
+    cnor_error_recursive,           /**< Local functions calling each other in a circle. */
 
     /* -- image ----------------------------------------------------------- */
     cnor_error_too_small,     /**< The buffer is shorter than a header. */

@@ -126,6 +126,7 @@ set(CNOR_COMPILER_SOURCES
         ${CNOR_SRC_PATH}/cnor/compiler/expr.c
         ${CNOR_SRC_PATH}/cnor/compiler/logic.c
         ${CNOR_SRC_PATH}/cnor/compiler/call.c
+${CNOR_SRC_PATH}/cnor/compiler/localfn.c
         ${CNOR_SRC_PATH}/cnor/compiler/stmt.c
         ${CNOR_SRC_PATH}/cnor/compiler/control_if.c
         ${CNOR_SRC_PATH}/cnor/compiler/control_loop.c

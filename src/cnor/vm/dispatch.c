@@ -39,7 +39,7 @@
 #    endif
 #endif
 
-_Static_assert(cnor_op_count == 118,"a new opcode needs a handler and a dispatch label below");
+_Static_assert(cnor_op_count == 120,"a new opcode needs a handler and a dispatch label below");
 
 /* The three operand forms of binary operator @p name share one handler. */
 #define CNOR_VM_FORM_HANDLERS(name)                                                                \
@@ -87,6 +87,8 @@ static const cnor_vm_handler_t m_handlers[cnor_op_count] = {
     [cnor_op_jmp_if_true] = cnor_vm_op_jmp_if,
     [cnor_op_call] = cnor_vm_op_call,
     [cnor_op_ret] = cnor_vm_op_ret,
+    [cnor_op_call_local] = cnor_vm_op_call_local,
+    [cnor_op_ret_local] = cnor_vm_op_ret_local,
     [cnor_op_native] = cnor_vm_op_native,
     [cnor_op_len] = cnor_vm_op_len,
     [cnor_op_index] = cnor_vm_op_index,
@@ -570,6 +572,8 @@ cnor_vm_dispatch(cnor_vm_t *vm)
         [cnor_op_jmp_if_true] = &&cnor_vm_label_jmp_if_true,
         [cnor_op_call] = &&cnor_vm_label_call,
         [cnor_op_ret] = &&cnor_vm_label_ret,
+        [cnor_op_call_local] = &&cnor_vm_label_call_local,
+        [cnor_op_ret_local] = &&cnor_vm_label_ret_local,
         [cnor_op_native] = &&cnor_vm_label_native,
         [cnor_op_len] = &&cnor_vm_label_len,
         [cnor_op_index] = &&cnor_vm_label_index,
@@ -1021,6 +1025,14 @@ cnor_vm_switch:
         fp = values + frame->fp;
         vm->function = frame->function;
         CNOR_VM_NEXT();
+    }
+    CNOR_VM_OP(call_local)
+    {
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(ret_local)
+    {
+        CNOR_VM_SLOW();
     }
     CNOR_VM_OP(native)
     {

@@ -146,8 +146,10 @@ cnor_scope_init(cnor_scope_t *self)
     lh_array_init(&self->imports, sizeof(lh_str_view_t));
     lh_array_init(&self->globals, sizeof(struct cnor_global_decl));
     lh_array_init(&self->locals, sizeof(struct cnor_local_decl));
+    lh_array_init(&self->local_fns, sizeof(struct cnor_local_fn *));
     self->next_slot = 0U;
     self->slot_count = 0U;
+    self->slot_floor = 0U;
 }
 
 void
@@ -159,6 +161,7 @@ cnor_scope_deinit(cnor_scope_t *self)
     lh_array_deinit(&self->imports);
     lh_array_deinit(&self->globals);
     lh_array_deinit(&self->locals);
+    lh_array_deinit(&self->local_fns);
 }
 
 /* -- lookups --------------------------------------------------------------- */
@@ -414,8 +417,10 @@ void
 cnor_scope_begin_function(cnor_scope_t *self)
 {
     lh_array_clear(&self->locals);
+    lh_array_clear(&self->local_fns);
     self->next_slot = 0U;
     self->slot_count = 0U;
+    self->slot_floor = 0U;
 }
 
 cnor_scope_mark_t
@@ -432,9 +437,11 @@ void
 cnor_scope_leave_block(cnor_scope_t *self, cnor_scope_mark_t mark)
 {
     /* Slots of a closed block are reused by the next one; the frame keeps the
-     * largest count any point of the function needed. */
+     * largest count any point of the function needed. The slots a local
+     * function holds are not reused: its code may run later, and it reads
+     * them. */
     lh_array_resize(&self->locals, mark.locals);
-    self->next_slot = mark.next_slot;
+    self->next_slot = mark.next_slot > self->slot_floor ? mark.next_slot : self->slot_floor;
 }
 
 /* Take @p slots slots for a local, and record it. */
@@ -457,6 +464,9 @@ cnor_scope_take_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_vie
     decl.is_mutable = is_mutable;
     decl.type = type;
     decl.count = count;
+    decl.slots = (lh_u16_t) slots;
+    decl.fn_index = 0U;
+    decl.is_local_fn = lh_bool_false;
     scope->next_slot += (cnor_slot_t) slots;
     lh_array_push_back(&scope->locals, &decl);
     if (scope->next_slot > scope->slot_count)
@@ -488,6 +498,91 @@ cnor_scope_add_dict_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str
      * header and two per pair. */
     return cnor_scope_take_local(self, node, name, is_mutable, cnor_static_dict, room,
                                  (lh_u32_t) room * 2U + 3U, slot);
+}
+
+/* -- local functions -------------------------------------------------------- */
+
+/*
+ * A local function holds slots of the frame it is in: its parameters, the
+ * address to come back to, and the result. They are taken when it is declared
+ * and never given out again: the code of the function may run at any time
+ * until the frame is gone.
+ */
+lh_bool_t
+cnor_scope_take_slots(cnor_scope_t *self, lh_u16_t count, cnor_slot_t *first)
+{
+    if ((lh_u32_t) self->next_slot + count > CNOR_SLOT_MAX)
+    {
+        return lh_bool_false;
+    }
+    *first = self->next_slot;
+    self->next_slot += (cnor_slot_t) count;
+    if (self->next_slot > self->slot_count)
+    {
+        self->slot_count = self->next_slot;
+    }
+    if (self->next_slot > self->slot_floor)
+    {
+        self->slot_floor = self->next_slot;
+    }
+    return lh_bool_true;
+}
+
+/* Bind a name to a slot that is already taken: a parameter of a local
+ * function, whose slot was taken when it was declared. */
+lh_bool_t
+cnor_scope_bind_local(cnor_scope_t *self, lh_str_view_t name, cnor_slot_t slot,
+                       lh_bool_t is_mutable, cnor_static_type_t type)
+{
+    struct cnor_local_decl decl;
+
+    decl.name = name;
+    decl.slot = slot;
+    decl.is_mutable = is_mutable;
+    decl.type = type;
+    decl.count = 0U;
+    decl.slots = 1U;
+    decl.fn_index = 0U;
+    decl.is_local_fn = lh_bool_false;
+    lh_array_push_back(&self->locals, &decl);
+    return lh_bool_true;
+}
+
+/* The name of a local function is a name of the block it is declared in. */
+lh_bool_t
+cnor_scope_add_local_fn(cnor_scope_t *self, lh_str_view_t name, lh_u16_t fn_index)
+{
+    struct cnor_local_decl decl;
+
+    decl.name = name;
+    decl.slot = 0U;
+    decl.is_mutable = lh_bool_false;
+    decl.type = cnor_static_function;
+    decl.count = 0U;
+    decl.slots = 1U;
+    decl.fn_index = fn_index;
+    decl.is_local_fn = lh_bool_true;
+    lh_array_push_back(&self->locals, &decl);
+    return lh_bool_true;
+}
+
+cnor_local_fn_t *
+cnor_scope_local_fn_at(cnor_scope_t *self, lh_u16_t index)
+{
+    struct cnor_local_fn *const *const fns =
+        (struct cnor_local_fn *const *) lh_array_get_begin(&self->local_fns);
+
+    return index < lh_array_get_size(&self->local_fns) ? fns[index] : lh_null;
+}
+
+/* The slots below @p end are not given out again. */
+void
+cnor_scope_keep_slots(cnor_scope_t *self, cnor_slot_t end)
+{
+    if (end > self->slot_floor)
+    {
+        self->slot_floor = end;
+    }
 }
 
 /* -- resolution ------------------------------------------------------------ */
@@ -580,9 +675,16 @@ cnor_scope_resolve(cnor_compiler_t *self, lh_str_view_t name)
 
     if (local != lh_null)
     {
-        cnor_binding_t binding =
-            cnor_binding_make(cnor_binding_local, local->slot, local->is_mutable, local->type);
+        cnor_binding_t binding;
 
+        if (local->is_local_fn)
+        {
+            /* A function declared inside the one being compiled: it is called
+             * by name, and it is not a value. */
+            return cnor_binding_make(cnor_binding_local_fn, local->fn_index, lh_bool_false,
+                                     cnor_static_function);
+        }
+        binding = cnor_binding_make(cnor_binding_local, local->slot, local->is_mutable, local->type);
         binding.count = local->count;
         return binding;
     }

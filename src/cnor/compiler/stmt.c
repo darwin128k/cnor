@@ -613,6 +613,18 @@ cnor_compile_return(cnor_compiler_t *self, const cnor_node_t *node)
          * returned dictionary would point at a frame that is gone. */
         return cnor_compile_fail(self, node, cnor_error_dict_returned);
     }
+    /* A local function gives its result to the caller: the value waits in the
+     * slot of the result, and the machine goes back to where the call was
+     * made. */
+    if (self->local_fn != lh_null)
+    {
+        if (!cnor_emit_insn(self, cnor_op_store_local, self->local_fn->result_slot, 0U))
+        {
+            return lh_bool_false;
+        }
+        return cnor_compile_exit_tries(self, 0U, (lh_u8_t) CNOR_EXIT_JUMP,
+                                        &self->local_fn->end_label, 0U);
+    }
     /* The innermost `try` with a finally block: the value waits in its slot
      * while the finally blocks run. */
     for (i = self->try_depth; i > 0U; --i)

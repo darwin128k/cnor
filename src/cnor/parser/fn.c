@@ -61,23 +61,15 @@ cnor_parser_params(cnor_parser_t *self, cnor_node_t *node)
 
 /* -- declarations ---------------------------------------------------------- */
 
-cnor_node_t *
-cnor_parser_fn(cnor_parser_t *self)
+/* The signature and the body of a `fn`, as a node of @p kind. */
+static cnor_node_t *
+cnor_parser_fn_of_kind(cnor_parser_t *self, cnor_node_kind_t kind)
 {
-    const lh_bool_t is_native = cnor_parser_at_keyword(self, cnor_keyword_native);
-    cnor_node_t *node = cnor_parser_node(self, is_native ? cnor_node_native_fn : cnor_node_fn);
+    cnor_node_t *node = cnor_parser_node(self, kind);
 
     if (node == lh_null)
     {
         return lh_null;
-    }
-    if (is_native)
-    {
-        cnor_parser_advance(self);
-        if (!cnor_parser_at_keyword(self, cnor_keyword_fn))
-        {
-            return cnor_parser_fail(self, cnor_error_unexpected_token);
-        }
     }
     cnor_parser_advance(self);
     if (!cnor_parser_at(self, cnor_token_ident))
@@ -94,17 +86,62 @@ cnor_parser_fn(cnor_parser_t *self)
     {
         return lh_null;
     }
-    if (is_native)
-    {
-        /* A native declaration has no body: it is a line of its own. */
-        return cnor_parser_end_simple(self, lh_bool_false) ? node : lh_null;
-    }
     if (!cnor_parser_expect_punct(self, cnor_punct_colon))
     {
         return lh_null;
     }
     node->data.fn.body = cnor_parser_block(self);
     return node->data.fn.body != lh_null ? node : lh_null;
+}
+
+cnor_node_t *
+cnor_parser_fn(cnor_parser_t *self)
+{
+    const lh_bool_t is_native = cnor_parser_at_keyword(self, cnor_keyword_native);
+    cnor_node_t *node;
+
+    if (!is_native)
+    {
+        return cnor_parser_fn_of_kind(self, cnor_node_fn);
+    }
+    node = cnor_parser_node(self, cnor_node_native_fn);
+    if (node == lh_null)
+    {
+        return lh_null;
+    }
+    cnor_parser_advance(self);
+    if (!cnor_parser_at_keyword(self, cnor_keyword_fn))
+    {
+        return cnor_parser_fail(self, cnor_error_unexpected_token);
+    }
+    cnor_parser_advance(self);
+    if (!cnor_parser_at(self, cnor_token_ident))
+    {
+        return cnor_parser_fail(self, cnor_error_unexpected_token);
+    }
+    if (!cnor_parser_take_name(self, node) || !cnor_parser_advance(self)
+        || !cnor_parser_params(self, node))
+    {
+        return lh_null;
+    }
+    if (cnor_parser_accept_punct(self, cnor_punct_arrow)
+        && !cnor_parser_type(self, &node->data.fn.returns, node))
+    {
+        return lh_null;
+    }
+    /* A native declaration has no body: it is a line of its own. */
+    return cnor_parser_end_simple(self, lh_bool_false) ? node : lh_null;
+}
+
+/* A `fn` inside a block: it is a local function, not a declaration of a file. */
+cnor_node_t *
+cnor_parser_local_fn(cnor_parser_t *self)
+{
+    if (cnor_parser_at_keyword(self, cnor_keyword_native))
+    {
+        return cnor_parser_fail(self, cnor_error_unexpected_token);
+    }
+    return cnor_parser_fn_of_kind(self, cnor_node_local_fn);
 }
 
 /* Named types are top-level declarations. Field types are resolved after imports. */

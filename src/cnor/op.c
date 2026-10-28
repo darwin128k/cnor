@@ -133,6 +133,8 @@ static const cnor_op_info_t m_ops[cnor_op_count] = {
     CNOR_OP_ROW("push_function", u16, none, 3U, 0U, 1U, 0U),
     CNOR_OP_ROW("call_value", u8, none, 2U, 1U, 1U, CNOR_OP_FLAG_POPS_ARGC0),
     CNOR_OP_ROW("dict_get_lk", slot, u16, 4U, 0U, 1U, 0U),
+    CNOR_OP_ROW("call_local", s32, slot, 6U, 0U, 0U, CNOR_OP_FLAG_JUMP),
+    CNOR_OP_ROW("ret_local", slot, none, 2U, 0U, 0U, CNOR_OP_FLAG_TERMINATOR),
 };
 
 /* The binary operators that have operand forms, in the order of each family. */

@@ -22,6 +22,9 @@
 /** @def CNOR_COMPILER_MAX_TRIES @brief `try` blocks nested in one function. */
 #define CNOR_COMPILER_MAX_TRIES CNOR_LEXER_MAX_INDENTS
 
+/** @def CNOR_COMPILER_MAX_LOCAL_FNS @brief Functions declared inside one function. */
+#define CNOR_COMPILER_MAX_LOCAL_FNS 128U
+
 /**
  * @def CNOR_EXIT_JUMP @brief An exit that goes on somewhere: a `break` or a
  *        `continue`.
@@ -157,6 +160,7 @@ enum cnor_binding_kind
 {
     cnor_binding_none = 0,
     cnor_binding_local,
+    cnor_binding_local_fn, /**< A function declared inside the one being compiled. */
     cnor_binding_global,
     cnor_binding_function,
     cnor_binding_native,
@@ -176,7 +180,6 @@ struct cnor_binding
     lh_bool_t is_mutable;     /**< For variables: declared with `mut`. */
     cnor_static_type_t type;  /**< For variables: what they hold. */
     lh_u16_t count;           /**< For an array: how many elements. */
-    lh_u16_t label_index;     /**< For a local function: where its code is. */
 };
 /** @copybrief cnor_binding */
 typedef struct cnor_binding cnor_binding_t;
@@ -222,11 +225,51 @@ struct cnor_local_decl
     cnor_slot_t slot;
     lh_bool_t is_mutable;
     cnor_static_type_t type;
-    lh_u16_t count; /**< For an array: how many elements. */
-    lh_u16_t label_index; /**< For a local function: where its code is. */
+    lh_u16_t count;       /**< For an array: how many elements. */
+    lh_u16_t slots;       /**< How many slots it takes in the frame. */
+    lh_u16_t fn_index;    /**< For a local function: which one it is. */
+    lh_bool_t is_local_fn; /**< Whether this local is a function, not a value. */
 };
 /** @copybrief cnor_local_decl */
 typedef struct cnor_local_decl cnor_local_decl_t;
+
+/**
+ * @struct cnor_local_fn
+ * @brief A function declared inside another one.
+ *
+ * Its code is a part of the code of the function that declared it, so it runs
+ * in the same frame: the parameters and the variables it closes over are slots
+ * of that frame, and nothing is allocated when it is called.
+ *
+ * The code is at the end of the function that holds it, after the `ret` that
+ * ends it: the call jumps into it and the `ret_local` at its end jumps back.
+ */
+struct cnor_local_fn
+{
+    lh_str_view_t name;         /**< The name it is called by. */
+    const cnor_node_t *node;    /**< The `fn` node: the parameters and the body. */
+    cnor_label_t body_label;    /**< Where its code starts. */
+    cnor_label_t end_label;     /**< Where its code ends; every return goes there. */
+    cnor_slot_t param_base;     /**< The first parameter's slot. */
+    cnor_slot_t param_count;    /**< How many parameters it takes. */
+    cnor_slot_t ret_slot;       /**< Where the address to come back to waits. */
+    cnor_slot_t result_slot;    /**< Where the result waits. */
+    cnor_static_type_t returns; /**< What it gives back. */
+    lh_u16_t index;             /**< Which one it is, in the scope's list. */
+    lh_bool_t called;           /**< Whether anything calls it. */
+    lh_bool_t compiled;         /**< Whether its code is written already. */
+    struct cnor_local_decl *captured; /**< The variables it closes over. */
+    lh_u16_t captured_count;    /**< How many of them. */
+};
+/** @copybrief cnor_local_fn */
+typedef struct cnor_local_fn cnor_local_fn_t;
+
+/** @brief A call from one local function to another. */
+struct cnor_local_call_edge
+{
+    lh_u16_t from;
+    lh_u16_t to;
+};
 
 /** @brief One top-level name in ::cnor_name_index. */
 struct cnor_name_entry
@@ -269,8 +312,10 @@ struct cnor_scope
     lh_array_t imports;     /**< lh_str_view_t, the image's native section. */
     lh_array_t globals;     /**< struct cnor_global_decl. */
     lh_array_t locals;      /**< struct cnor_local_decl, innermost last. */
+    lh_array_t local_fns;   /**< struct cnor_local_fn *, the functions declared in this function. */
     cnor_slot_t next_slot;  /**< First free slot. */
     cnor_slot_t slot_count; /**< Slots the function needs so far. */
+    cnor_slot_t slot_floor; /**< Slots below this one are never given out again. */
 };
 /** @copybrief cnor_scope */
 typedef struct cnor_scope cnor_scope_t;
@@ -378,6 +423,8 @@ struct cnor_compiler
     lh_array_t annotations;         /**< Resolved annotations, keyed by AST node. */
     lh_array_t calls;               /**< struct cnor_call_edge, from function code. */
     lh_array_t early_calls;         /**< struct cnor_early_call, from top-level code. */
+    struct cnor_local_fn *local_fn; /**< The local function being compiled, or ::lh_null. */
+    lh_array_t local_calls;         /**< struct cnor_local_call_edge: calls between local functions. */
 };
 /** @copybrief cnor_compiler */
 typedef struct cnor_compiler cnor_compiler_t;
@@ -537,6 +584,32 @@ cnor_scope_add_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view
 lh_bool_t
 cnor_scope_add_dict_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view_t name,
                           lh_bool_t is_mutable, lh_u16_t room, cnor_slot_t *slot);
+/**
+ * @brief Take @p count slots for something that is not a variable, such as
+ *        the parameters of a local function. They are never given out again.
+ * @param[out] first The first of them.
+ */
+lh_bool_t
+cnor_scope_take_slots(cnor_scope_t *self, lh_u16_t count, cnor_slot_t *first);
+/**
+ * @brief Bind @p name to @p slot, which is already taken. It is how the
+ *        parameters of a local function reach its body.
+ */
+lh_bool_t
+cnor_scope_bind_local(cnor_scope_t *self, lh_str_view_t name, cnor_slot_t slot,
+                       lh_bool_t is_mutable, cnor_static_type_t type);
+/** @brief Declare a local function; @p fn_index says which one it is. */
+lh_bool_t
+cnor_scope_add_local_fn(cnor_scope_t *self, lh_str_view_t name, lh_u16_t fn_index);
+/**
+ * @brief Keep the slots below @p end: they are not given out again. It is how
+ *        the variables a local function closes over keep their slots.
+ */
+void
+cnor_scope_keep_slots(cnor_scope_t *self, cnor_slot_t end);
+/** @brief The local function @p index of the function being compiled. */
+cnor_local_fn_t *
+cnor_scope_local_fn_at(cnor_scope_t *self, lh_u16_t index);
 /**
  * @brief Resolve @p name: locals, then the current file's functions, natives
  *        and globals, then those of the files it imports, then the host's
@@ -750,6 +823,15 @@ cnor_compile_branch(cnor_compiler_t *self, const cnor_node_t *node, lh_bool_t wh
 lh_bool_t
 cnor_compile_call(cnor_compiler_t *self, const cnor_node_t *node);
 
+/* localfn.c: a function declared inside another one */
+lh_bool_t
+cnor_compile_local_fn_decl(cnor_compiler_t *self, const cnor_node_t *node);lh_bool_t
+cnor_compile_call_local(cnor_compiler_t *self, const cnor_node_t *node, cnor_local_fn_t *fn);
+/** @brief Compile the code of the local functions declared in the function being
+ *         compiled, and check that they do not call each other in a circle. */
+lh_bool_t
+cnor_compile_local_fn_bodies(cnor_compiler_t *self);
+
 /* stmt.c */
 lh_bool_t
 cnor_compile_let(cnor_compiler_t *self, const cnor_node_t *node);
@@ -812,6 +894,10 @@ cnor_compile_match(cnor_compiler_t *self, const cnor_node_t *node);
 /* function.c */
 lh_bool_t
 cnor_compile_declaration(cnor_compiler_t *self, const cnor_node_t *node);
+/** @brief Whether running @p body can never reach its end: some statement
+ *         returns, an `if` returns when both branches do. */
+lh_bool_t
+cnor_compile_list_returns(const cnor_node_t *body);
 /** @brief Declare every file's top-level code, functions, natives and globals. */
 lh_bool_t
 cnor_compile_declare(cnor_compiler_t *self);

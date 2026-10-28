@@ -149,6 +149,10 @@ cnor_parser_try(cnor_parser_t *self);
 cnor_node_t *
 cnor_parser_fn(cnor_parser_t *self);
 
+/** @brief `fn` inside a block: a local function. */
+cnor_node_t *
+cnor_parser_local_fn(cnor_parser_t *self);
+
 /** @brief `import "path"`, at the top of a file (stmt.c). */
 cnor_node_t *
 cnor_parser_import(cnor_parser_t *self);

@@ -61,6 +61,7 @@ offset, copied name or detail, copied file name), with codes in
 | `expr.c` | Literals, names, unary and binary operators (choosing the operand form, see below), indexing |
 | `logic.c` | Short-circuit `and` / `or` as values, and conditions (`and` / `or` / `not` in `if` and `while`) as jumps |
 | `call.c` | Script calls, native calls, built-in `len` |
+| `localfn.c` | Functions declared inside another one: their code is a part of the code of the function that declared it (it is emitted after that function's `ret`, and the call jumps into it), so they share the frame and see the variables that were in sight where they were declared |
 | `stmt.c` | `let`, assignment, expression statements, `return` |
 | `control_if.c`, `control_loop.c`, `control_match.c` | `if`, `while` (condition tested at the bottom: one conditional jump per iteration), `for` (one `for_loop` per iteration) / `break` / `continue`, `match` (dense integer arms through one `switch` and a table of jumps, other arms test in turn, integer ones with `eq_li`) |
 | `control_try.c` | `try` / `catch`: the catch block is marked, and the error's dictionary is written into the slots reserved for it |

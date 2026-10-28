@@ -103,9 +103,6 @@ cnor_compile_declare(cnor_compiler_t *self)
 
 /* -- returns --------------------------------------------------------------- */
 
-static lh_bool_t
-cnor_compile_list_returns(const cnor_node_t *body);
-
 /* Whether @p body holds a `break` of the loop it is the body of. */
 static lh_bool_t
 cnor_compile_list_breaks(const cnor_node_t *body)
@@ -207,7 +204,7 @@ cnor_compile_stmt_returns(const cnor_node_t *node)
  * arm does. A `for` or a `while` may finish, unless it is `while true` with no
  * `break` of its own.
  */
-static lh_bool_t
+lh_bool_t
 cnor_compile_list_returns(const cnor_node_t *body)
 {
     for (; body != lh_null; body = body->next)
@@ -234,6 +231,8 @@ cnor_compile_begin_function(cnor_compiler_t *self, cnor_function_index_t index)
     self->block_depth = 0U;
     self->loop_depth = 0U;
     self->try_depth = 0U;
+    self->local_fn = lh_null;
+    lh_array_clear(&self->local_calls);
     cnor_scope_begin_function(&self->scope);
     cnor_emit_begin_function(&self->emit);
     if (cnor_module_count(self) > 1U)
@@ -348,7 +347,8 @@ cnor_compile_entry(cnor_compiler_t *self)
     }
     /* Falling off the end returns the last top-level expression's value. */
     return cnor_emit_insn(self, cnor_op_load_local, self->result_slot, 0U)
-           && cnor_emit_op(self, cnor_op_ret) && cnor_compile_end_function(self, lh_null);
+           && cnor_emit_op(self, cnor_op_ret) && cnor_compile_local_fn_bodies(self)
+           && cnor_compile_end_function(self, lh_null);
 }
 
 /* An imported file's top-level code, a function of its own run for its effects. */
@@ -358,7 +358,7 @@ cnor_compile_module_code(cnor_compiler_t *self, cnor_function_index_t index)
     cnor_compile_begin_top_code(self, index);
     return cnor_compile_statements(self, cnor_module_at(self, self->module)->program)
            && cnor_emit_op(self, cnor_op_push_none) && cnor_emit_op(self, cnor_op_ret)
-           && cnor_compile_end_function(self, lh_null);
+           && cnor_compile_local_fn_bodies(self) && cnor_compile_end_function(self, lh_null);
 }
 
 /* -- bodies ---------------------------------------------------------------- */
@@ -382,8 +382,10 @@ cnor_compile_function(cnor_compiler_t *self, cnor_function_index_t index)
     {
         return cnor_compile_fail_name(self, node, cnor_error_missing_return);
     }
+    /* The code of the functions declared inside this one: it goes after the
+     * `ret` that ends this one, and the calls jump into it. */
     return cnor_emit_op(self, cnor_op_push_none) && cnor_emit_op(self, cnor_op_ret)
-           && cnor_compile_end_function(self, node);
+           && cnor_compile_local_fn_bodies(self) && cnor_compile_end_function(self, node);
 }
 
 static lh_bool_t

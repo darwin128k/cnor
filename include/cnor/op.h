@@ -249,6 +249,22 @@ enum cnor_op
      * `dict_get_l` does. A key that is not there gives `none`.
      */
     cnor_op_dict_get_lk, /**< The value of constant k in the dictionary in fp[a]. Operands: slot, u16. */
+    /**
+     * A local function (format v16): `call_local` jumps into the code of a
+     * function declared inside the one being run. That code is a part of the
+     * same function's, so it shares the frame: its parameters and the
+     * variables it closes over are slots of that frame, and no new frame is
+     * made. The operand is the address of that code, relative to the next
+     * instruction; the second is the slot where the address to come back to
+     * is kept.
+     */
+    cnor_op_call_local, /**< Call a local function. Operands: s32, slot. */
+    /**
+     * The end of a local function (format v16): the machine goes back to
+     * where the call was made, which is the address in the slot. The result of
+     * the call waits in a slot of its own, so nothing is left on the stack.
+     */
+    cnor_op_ret_local, /**< Return from a local function. Operand: slot. */
     cnor_op_count /**< Number of opcodes; any byte at or above is invalid. */
 };
 /** @copybrief cnor_op */

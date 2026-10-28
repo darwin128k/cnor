@@ -221,6 +221,9 @@ cnor_compile_call(cnor_compiler_t *self, const cnor_node_t *node)
         return cnor_compile_call_function(self, node, binding.index);
     case cnor_binding_native:
         return cnor_compile_call_native(self, node, binding.index);
+    case cnor_binding_local_fn:
+        return cnor_compile_call_local(self, node,
+                                       cnor_scope_local_fn_at(&self->scope, binding.index));
     case cnor_binding_none:
         if (cnor_namespace_split(self, node->name, &qualified_module, &qualified_name))
             return cnor_compile_fail_name(self, node, cnor_error_unknown_name);
