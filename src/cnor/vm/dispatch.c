@@ -39,7 +39,7 @@
 #    endif
 #endif
 
-_Static_assert(cnor_op_count == 117, "a new opcode needs a handler and a dispatch label below");
+_Static_assert(cnor_op_count == 118,"a new opcode needs a handler and a dispatch label below");
 
 /* The three operand forms of binary operator @p name share one handler. */
 #define CNOR_VM_FORM_HANDLERS(name)                                                                \
@@ -102,6 +102,7 @@ static const cnor_vm_handler_t m_handlers[cnor_op_count] = {
     [cnor_op_dict_new] = cnor_vm_op_dict_new,
     [cnor_op_dict_new_global] = cnor_vm_op_dict_new_global,
     [cnor_op_dict_get_l] = cnor_vm_op_dict_get_l,
+    [cnor_op_dict_get_lk] = cnor_vm_op_dict_get_lk,
     [cnor_op_dict_set_l] = cnor_vm_op_dict_set_l,
     [cnor_op_dict_get] = cnor_vm_op_dict_get,
     [cnor_op_dict_set] = cnor_vm_op_dict_set,
@@ -602,6 +603,7 @@ cnor_vm_dispatch(cnor_vm_t *vm)
         [cnor_op_dict_new] = &&cnor_vm_label_dict_new,
         [cnor_op_dict_new_global] = &&cnor_vm_label_dict_new_global,
         [cnor_op_dict_get_l] = &&cnor_vm_label_dict_get_l,
+        [cnor_op_dict_get_lk] = &&cnor_vm_label_dict_get_lk,
         [cnor_op_dict_set_l] = &&cnor_vm_label_dict_set_l,
         [cnor_op_dict_get] = &&cnor_vm_label_dict_get,
         [cnor_op_dict_set] = &&cnor_vm_label_dict_set,
@@ -1369,7 +1371,7 @@ cnor_vm_switch:
         if (CNOR_VM_LIKELY(cnor_vm_fast_kind(dictionary) == CNOR_VALUE_KIND_DICT
                            && cnor_vm_fast_kind(&sp[-1]) == lh_value_kind_str))
         {
-            lh_value_t *const found = cnor_vm_fast_dict_find(dictionary, &sp[-1]);
+            lh_value_t *const found = cnor_vm_dict_lookup(dictionary, &sp[-1]);
 
             if (found != lh_null)
             {
@@ -1385,6 +1387,30 @@ cnor_vm_switch:
         }
         CNOR_VM_SLOW();
     }
+    CNOR_VM_OP(dict_get_lk)
+    {
+        const lh_value_t *const dictionary = &fp[pc[1]];
+        const lh_value_t *const key = &constants[cnor_vm_fast_u16(pc + 2)];
+
+        if (CNOR_VM_LIKELY(cnor_vm_fast_kind(dictionary) == CNOR_VALUE_KIND_DICT
+                           && cnor_vm_fast_kind(key) == lh_value_kind_str))
+        {
+            lh_value_t *const found = cnor_vm_dict_lookup(dictionary, key);
+
+            if (found != lh_null)
+            {
+                cnor_vm_fast_move(sp++, found);
+            }
+            else
+            {
+                /* No such key: `none`, and the run goes on. */
+                cnor_vm_fast_set_none(sp++);
+            }
+            pc += 4;
+            CNOR_VM_NEXT();
+        }
+        CNOR_VM_SLOW();
+    }
     CNOR_VM_OP(dict_set_l)
     {
         lh_value_t *const dictionary = &fp[pc[1]];
@@ -1392,7 +1418,7 @@ cnor_vm_switch:
         if (CNOR_VM_LIKELY(cnor_vm_fast_kind(dictionary) == CNOR_VALUE_KIND_DICT
                            && cnor_vm_fast_kind(&sp[-2]) == lh_value_kind_str))
         {
-            lh_value_t *const found = cnor_vm_fast_dict_find(dictionary, &sp[-2]);
+            lh_value_t *const found = cnor_vm_dict_lookup(dictionary, &sp[-2]);
 
             if (found != lh_null)
             {

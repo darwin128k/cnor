@@ -323,18 +323,21 @@ cnor_vm_fast_str_equals(const lh_value_t *left, const lh_value_t *right)
 LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_value_t *
 cnor_vm_fast_dict_find(const lh_value_t *dictionary, const lh_value_t *key)
 {
-    lh_value_t *const pairs = cnor_vm_fast_dict_data(dictionary);
-    const lh_u32_t count = cnor_vm_fast_dict_count(dictionary);
-    lh_u32_t i;
+    lh_value_t *candidate = cnor_vm_fast_dict_data(dictionary);
+    const lh_value_t *const end = candidate + cnor_vm_fast_dict_count(dictionary) * 2U;
+    const lh_char_t *const data = cnor_vm_fast_str_data(key);
+    const lh_usize_t size = cnor_vm_fast_str_size(key);
 
-    for (i = 0U; i < count; ++i)
+    /* A pointer to the end rather than a count, and the key read once: inside
+     * the dispatch loop a 32-bit host has few registers left for the walk. */
+    for (; candidate != end; candidate += 2)
     {
-        const lh_value_t *const candidate = &pairs[i * 2U];
-
         if (cnor_vm_fast_kind(candidate) == lh_value_kind_str
-            && cnor_vm_fast_str_equals(candidate, key))
+            && cnor_vm_fast_str_size(candidate) == size
+            && (cnor_vm_fast_str_data(candidate) == data || size == 0U
+                || cnor_vm_fast_bytes_equal(cnor_vm_fast_str_data(candidate), data, size)))
         {
-            return &pairs[i * 2U + 1U];
+            return candidate + 1;
         }
     }
     return lh_null;

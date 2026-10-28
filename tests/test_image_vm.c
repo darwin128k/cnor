@@ -1001,6 +1001,35 @@ CNOR_TEST(rejects_operands_outside_their_tables)
     p_deinit(&p);
 }
 
+/* `dict_get_lk` takes its key from the constant table: an ordinal outside it
+ * is refused at load, and a local that is not a dictionary fails the run. */
+CNOR_TEST(checks_the_constant_key_of_a_dictionary_read)
+{
+    program_t p;
+
+    p_init(&p);
+    add_const(&p, "key");
+    op(&p, cnor_op_dict_get_lk);
+    cnor_byte_writer_put_u8(&p.code, 0U);
+    cnor_byte_writer_put_u16(&p.code, 1U);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 1U, 1U);
+    build(&p, 1U);
+    CHECK_EQ(load_error(&p), cnor_error_bad_operand);
+    p_deinit(&p);
+
+    p_init(&p);
+    add_const(&p, "key");
+    op(&p, cnor_op_dict_get_lk);
+    cnor_byte_writer_put_u8(&p.code, 0U);
+    cnor_byte_writer_put_u16(&p.code, 0U);
+    op(&p, cnor_op_halt);
+    end_function(&p, 0U, 0U, 1U, 1U); /* Local 0 starts as none. */
+    build(&p, 1U);
+    CHECK_EQ(load_and_run(&p, lh_null), cnor_error_type);
+    p_deinit(&p);
+}
+
 CNOR_TEST(rejects_a_call_with_the_wrong_argument_count)
 {
     program_t p;
@@ -1807,6 +1836,7 @@ static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(refuses_an_empty_section_beyond_the_image),
     CNOR_TEST_CASE(refuses_a_catch_dictionary_outside_the_frame),
     CNOR_TEST_CASE(rejects_dictionary_operations_on_other_values),
+    CNOR_TEST_CASE(checks_the_constant_key_of_a_dictionary_read),
     CNOR_TEST_CASE(reads_the_sections_of_a_well_formed_image),
     CNOR_TEST_CASE(runs_a_program_that_only_stops),
     CNOR_TEST_CASE(adds_two_numbers),

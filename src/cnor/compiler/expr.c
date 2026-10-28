@@ -326,11 +326,24 @@ cnor_compile_index_array_value(cnor_compiler_t *self, const cnor_node_t *node)
 }
 
 /* `settings["key"]`: a pair of the dictionary in a local. The pairs are
- * slots of the frame, so the dictionary is not copied onto the stack first. */
+ * slots of the frame, so the dictionary is not copied onto the stack first.
+ * A literal key is a constant of the instruction (`dict_get_lk`), so it is not
+ * pushed either. */
 static lh_bool_t
 cnor_compile_index_dict(cnor_compiler_t *self, const cnor_node_t *node,
                          const cnor_binding_t *binding)
 {
+    if (node->data.index.index->kind == cnor_node_string)
+    {
+        cnor_const_index_t key;
+
+        if (!cnor_constant_pool_intern(self, node->data.index.index, cnor_const_str, &key))
+        {
+            return lh_bool_false;
+        }
+        self->type = cnor_type_element(binding->type);
+        return cnor_emit_insn(self, cnor_op_dict_get_lk, binding->index, key);
+    }
     if (!cnor_compile_expr(self, node->data.index.index)
         || !cnor_type_require(self, node, cnor_static_str, self->type))
     {

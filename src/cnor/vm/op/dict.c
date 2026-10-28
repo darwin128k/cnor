@@ -35,6 +35,16 @@ cnor_vm_dict_find(const lh_value_t *dictionary, const lh_value_t *key)
     return cnor_vm_fast_dict_find(dictionary, key);
 }
 
+/* The same for the dispatch loop, where the dictionary and the key are known
+ * to be one and a text. It is a call of its own on purpose: inlined, the walk
+ * takes registers the whole loop needs (on a 32-bit host it slowed every
+ * workload, the ones without a dictionary too). */
+lh_value_t *
+cnor_vm_dict_lookup(const lh_value_t *dictionary, const lh_value_t *key)
+{
+    return cnor_vm_fast_dict_find(dictionary, key);
+}
+
 /* Write @p value under @p key in the dictionary @p dictionary, adding the key
  * when it is not there yet. */
 static lh_bool_t
@@ -122,6 +132,27 @@ cnor_vm_op_dict_get_l(cnor_vm_t *vm, const cnor_insn_t *insn)
         return lh_bool_true;
     }
     cnor_vm_fast_move(key, value);
+    return lh_bool_true;
+}
+
+/* The value of a key of the dictionary in fp[slot]: the key is constant k. A
+ * key that is not there gives `none`, and the run goes on. */
+lh_bool_t
+cnor_vm_op_dict_get_lk(cnor_vm_t *vm, const cnor_insn_t *insn)
+{
+    const cnor_slot_t slot = (cnor_slot_t) insn->operands[0];
+    const lh_value_t *const dictionary = cnor_vm_stack_at(&vm->stack, vm->fp + slot);
+    /* The operand is an ordinal into the constant table, range-checked at load. */
+    const lh_value_t *const key = &vm->constants[insn->operands[1]];
+    const lh_value_t *value;
+
+    if (cnor_vm_fast_kind(dictionary) != CNOR_VALUE_KIND_DICT
+        || cnor_vm_fast_kind(key) != lh_value_kind_str)
+    {
+        return cnor_vm_fail(vm, insn, cnor_error_type);
+    }
+    value = cnor_vm_dict_find(dictionary, key);
+    cnor_vm_stack_push(&vm->stack, value == lh_null ? lh_value_make_none() : *value);
     return lh_bool_true;
 }
 

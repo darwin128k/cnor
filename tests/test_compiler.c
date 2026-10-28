@@ -1230,7 +1230,54 @@ CNOR_TEST(takes_the_index_of_a_local_in_one_instruction)
     CHECK_EQ(run_sint(large), 200LL);
 }
 
-/* An array is a declaration: its elements are slots of the frame, so it is
+/* A literal key is a constant of the instruction (`dict_get_lk`): one
+ * instruction less per lookup than the same key in a local, and the same
+ * value, whether the key was written from a literal or from a variable. */
+CNOR_TEST(looks_up_a_literal_key_in_one_instruction)
+{
+    static const char source[] = "fn f(n: i32) -> i32:\n"
+                                 "    let mut d = dict(4)\n"
+                                 "    let w = \"we\" + \"apon\"\n"
+                                 "    let k = \"hp\"\n"
+                                 "    d[\"hp\"] = 3\n"
+                                 "    d[w] = 4\n"
+                                 "    let mut s = 0\n"
+                                 "    for i in 0..n:\n"
+                                 "        s = s + %s + %s\n"
+                                 "    return s\n"
+                                 "f(%d)\n";
+    char src[512];
+    cnor_step_count_t literal_small;
+    cnor_step_count_t literal_large;
+    cnor_step_count_t local_small;
+    cnor_step_count_t local_large;
+
+    (void) snprintf(src, sizeof src, source, "d[\"hp\"]", "d[\"weapon\"]", 100);
+    literal_small = steps_of(src);
+    (void) snprintf(src, sizeof src, source, "d[\"hp\"]", "d[\"weapon\"]", 200);
+    literal_large = steps_of(src);
+    /* The key written from a joined text is found by its bytes. */
+    CHECK_EQ(run_sint(src), 1400LL);
+    (void) snprintf(src, sizeof src, source, "d[k]", "d[w]", 100);
+    local_small = steps_of(src);
+    (void) snprintf(src, sizeof src, source, "d[k]", "d[w]", 200);
+    local_large = steps_of(src);
+    CHECK_EQ(run_sint(src), 1400LL);
+    /* A hundred iterations more, two lookups each: the key in a local is
+     * pushed first. */
+    CHECK_EQ((local_large - local_small) - (literal_large - literal_small), 200U);
+    /* A literal key that is not there is `none`. */
+    CHECK_EQ(run_sint("fn f() -> i32:\n"
+                      "    let mut d = dict(4)\n"
+                      "    d[\"hp\"] = 3\n"
+                      "    if d[\"armor\"] == none:\n"
+                      "        return 1\n"
+                      "    return 0\n"
+                      "f()\n"),
+             1LL);
+}
+
+/* An array is a declaration:its elements are slots of the frame, so it is
  * only a local, and only in a `let`. */
 CNOR_TEST(makes_an_array_and_writes_its_elements)
 {
@@ -2394,6 +2441,7 @@ static const cnor_test_case_t m_cases[] = {
     CNOR_TEST_CASE(divides_at_the_width_the_value_fits_in),
     CNOR_TEST_CASE(makes_an_array_and_writes_its_elements),
     CNOR_TEST_CASE(takes_the_index_of_a_local_in_one_instruction),
+    CNOR_TEST_CASE(looks_up_a_literal_key_in_one_instruction),
     CNOR_TEST_CASE(keeps_the_rule_of_the_remainder_by_a_power_of_two),
     CNOR_TEST_CASE(runs_a_for_step_in_one_instruction),
     CNOR_TEST_CASE(stops_after_exactly_the_budget_inside_for_loops),

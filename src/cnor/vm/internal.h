@@ -140,6 +140,8 @@ lh_bool_t cnor_vm_op_array_set(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_dict_new(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_dict_new_global(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_dict_get_l(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_bool_t cnor_vm_op_dict_get_lk(cnor_vm_t *vm, const cnor_insn_t *insn);
+lh_value_t *cnor_vm_dict_lookup(const lh_value_t *dictionary, const lh_value_t *key);
 lh_bool_t cnor_vm_op_dict_set_l(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_dict_get(cnor_vm_t *vm, const cnor_insn_t *insn);
 lh_bool_t cnor_vm_op_dict_set(cnor_vm_t *vm, const cnor_insn_t *insn);

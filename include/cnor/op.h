@@ -243,6 +243,12 @@ enum cnor_op
      * place it was made in.
      */
     cnor_op_call_value, /**< Call the function on the stack. Operand: u8. */
+    /**
+     * A key of the dictionary in a local that is a constant (format v15):
+     * `settings["hp"]` reads the value without pushing the key first, as
+     * `dict_get_l` does. A key that is not there gives `none`.
+     */
+    cnor_op_dict_get_lk, /**< The value of constant k in the dictionary in fp[a]. Operands: slot, u16. */
     cnor_op_count /**< Number of opcodes; any byte at or above is invalid. */
 };
 /** @copybrief cnor_op */

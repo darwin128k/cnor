@@ -135,6 +135,8 @@ cnor_verify_operands(struct cnor_verify *self, const cnor_insn_t *insn)
     {
     case cnor_op_push_const:
         return operand < self->view->const_count;
+    case cnor_op_dict_get_lk:
+        return insn->operands[1] < self->view->const_count;
     case cnor_op_load_global:
     case cnor_op_store_global:
         return operand < self->view->header.globals_count;
