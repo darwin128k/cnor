@@ -176,6 +176,7 @@ struct cnor_binding
     lh_bool_t is_mutable;     /**< For variables: declared with `mut`. */
     cnor_static_type_t type;  /**< For variables: what they hold. */
     lh_u16_t count;           /**< For an array: how many elements. */
+    lh_u16_t label_index;     /**< For a local function: where its code is. */
 };
 /** @copybrief cnor_binding */
 typedef struct cnor_binding cnor_binding_t;
@@ -222,7 +223,10 @@ struct cnor_local_decl
     lh_bool_t is_mutable;
     cnor_static_type_t type;
     lh_u16_t count; /**< For an array: how many elements. */
+    lh_u16_t label_index; /**< For a local function: where its code is. */
 };
+/** @copybrief cnor_local_decl */
+typedef struct cnor_local_decl cnor_local_decl_t;
 
 /** @brief One top-level name in ::cnor_name_index. */
 struct cnor_name_entry
