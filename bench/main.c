@@ -146,7 +146,7 @@ cnor_bench_compile(const char *name, const char *source, const cnor_bench_option
     unsigned round;
 
     config.natives = cnor_bench_natives();
-    lh_str_init_by_size(&text, source, strlen(source));
+    lh_str_view_init_by_size(&text, source, strlen(source));
     for (round = 0U; round < options->warmup + options->iterations; ++round)
     {
         const uint64_t start = cnor_bench_clock_ns();

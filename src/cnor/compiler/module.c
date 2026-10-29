@@ -316,8 +316,8 @@ cnor_namespace_split(cnor_compiler_t *self, lh_str_view_t name,
     {
         lh_str_view_t alias;
         if (text[i] != '.') continue;
-        lh_str_init_by_size(&alias, text, i);
-        lh_str_init_by_size(member, text + i + 1U, name.size - i - 1U);
+        lh_str_view_init_by_size(&alias, text, i);
+        lh_str_view_init_by_size(member, text + i + 1U, name.size - i - 1U);
         *module = cnor_namespace_module(self, alias);
         return lh_bool_true;
     }

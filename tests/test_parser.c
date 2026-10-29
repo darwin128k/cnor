@@ -31,7 +31,7 @@ parse(parsed_t *out, const char *text)
     }
     else
     {
-        lh_str_init_by_size(&src, text, strlen(text));
+        lh_str_view_init_by_size(&src, text, strlen(text));
     }
     cnor_arena_init(&out->arena, 0U);
     cnor_parser_init(&out->parser, src, &out->arena);

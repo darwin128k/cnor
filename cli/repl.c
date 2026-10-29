@@ -300,7 +300,7 @@ cnor_cli_repl_run(struct cnor_cli_repl *self, const cnor_cli_options_t *options)
         config.file = view;
     }
     config.emit_lines = lh_bool_true;
-    lh_str_init_by_size(&text, self->source, self->source_size);
+    lh_str_view_init_by_size(&text, self->source, self->source_size);
     cnor_diag_init(&diag);
     ok = cnor_compiler_compile_source(text, &config, &image, &diag);
     if (!ok)

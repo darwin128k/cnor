@@ -156,7 +156,7 @@ cnor_type_fail(cnor_compiler_t *self, const cnor_node_t *node, cnor_error_t code
 {
     lh_str_view_t text;
 
-    lh_str_init_by_size(&text, detail->text, detail->size);
+    lh_str_view_init_by_size(&text, detail->text, detail->size);
     return cnor_compile_fail_text(self, node->line, code, text);
 }
 

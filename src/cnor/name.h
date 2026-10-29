@@ -14,7 +14,7 @@ cnor_name_join(cnor_arena_t *arena, lh_str_view_t left, lh_str_view_t right, lh_
     memcpy(text, left.begin, left.size);
     text[left.size] = '.';
     memcpy(text + left.size + 1U, right.begin, right.size);
-    lh_str_init_by_size(out, text, left.size + right.size + 1U);
+    lh_str_view_init_by_size(out, text, left.size + right.size + 1U);
     return lh_bool_true;
 }
 
@@ -44,7 +44,7 @@ cnor_node_name(cnor_arena_t *arena, const cnor_node_t *node, lh_str_view_t *out)
         text[--pos] = '.';
     }
     memcpy(text, part->name.begin, part->name.size);
-    lh_str_init_by_size(out, text, size);
+    lh_str_view_init_by_size(out, text, size);
     return lh_bool_true;
 }
 #endif

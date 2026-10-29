@@ -72,7 +72,7 @@ view_of(const char *text)
     {
         return lh_str_view_empty();
     }
-    lh_str_init_by_size(&view, text, strlen(text));
+    lh_str_view_init_by_size(&view, text, strlen(text));
     return view;
 }
 

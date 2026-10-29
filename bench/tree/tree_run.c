@@ -830,7 +830,7 @@ tree_program_compile(const char *source, cnor_diag_t *diag)
     {
         lh_str_view_t text;
 
-        lh_str_init_by_size(&text, source, strlen(source));
+        lh_str_view_init_by_size(&text, source, strlen(source));
         cnor_parser_init(&parser, text, &program->arena);
     }
     program->top = cnor_parser_parse(&parser);

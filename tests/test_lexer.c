@@ -32,7 +32,7 @@ view_of(const char *text)
         lh_str_view_init_empty(&view);
         return view;
     }
-    lh_str_init_by_size(&view, text, strlen(text));
+    lh_str_view_init_by_size(&view, text, strlen(text));
     return view;
 }
 

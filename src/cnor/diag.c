@@ -121,7 +121,7 @@ cnor_diag_get_name(const cnor_diag_t *self)
     {
         return lh_str_view_empty();
     }
-    lh_str_init_by_size(&name, self->name, self->name_size);
+    lh_str_view_init_by_size(&name, self->name, self->name_size);
     return name;
 }
 
@@ -135,6 +135,6 @@ cnor_diag_get_file(const cnor_diag_t *self)
     {
         return lh_str_view_empty();
     }
-    lh_str_init_by_size(&file, self->file, self->file_size);
+    lh_str_view_init_by_size(&file, self->file, self->file_size);
     return file;
 }

@@ -122,7 +122,7 @@ tree_bench_vm_open(struct tree_bench_vm *machine, const char *name, const char *
     cnor_diag_t diag;
     lh_str_view_t text;
 
-    lh_str_init_by_size(&text, source, strlen(source));
+    lh_str_view_init_by_size(&text, source, strlen(source));
     if (!cnor_compiler_compile_source(text, &config, &machine->image, &diag))
     {
         fprintf(stderr, "%s: compile failed: %s (line %u)\n", name,
