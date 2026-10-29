@@ -48,6 +48,7 @@ static const lh_char_t *const m_type_names[cnor_static_type_count] = {
     [cnor_static_i32] = "i32",   [cnor_static_u32] = "u32",   [cnor_static_f32] = "f32",
     [cnor_static_str] = "str",   [cnor_static_array] = "array",
     [cnor_static_dict] = "dict", [cnor_static_function] = "function",
+    [cnor_static_number] = "number",
 };
 
 static const lh_char_t *const m_binary_spellings[cnor_binary_count] = {
@@ -191,6 +192,13 @@ cnor_type_may_be_number(cnor_static_type_t type)
 lh_bool_t
 cnor_type_accepts(cnor_static_type_t wanted, cnor_static_type_t found)
 {
+    if (wanted == cnor_static_number)
+    {
+        /* A whole number is asked for: an unknown one may be one, so it is
+         * accepted too and the machine checks it when it runs. */
+        return (found == cnor_static_any || cnor_type_is_number(found)) ? lh_bool_true
+                                                                       : lh_bool_false;
+    }
     return (wanted == cnor_static_any || found == cnor_static_any || wanted == found
             || (cnor_type_is_integer(wanted) && cnor_type_is_integer(found)))
                ? lh_bool_true
@@ -301,6 +309,22 @@ cnor_type_of_arithmetic(cnor_static_type_t left, cnor_static_type_t right)
     }
     return (left == cnor_static_u32 && right == cnor_static_u32) ? cnor_static_u32
                                                                  : cnor_static_i32;
+}
+
+/* The common type of the numbers in @p args: what a numeric builtin gives.
+ * The rules are the ones of the arithmetic above, so `min` of two unsigned
+ * numbers is unsigned and `min` of a real and a whole number is a real. */
+cnor_static_type_t
+cnor_type_numeric_result(const cnor_static_type_t *args, lh_u8_t argc)
+{
+    cnor_static_type_t result = cnor_static_u32;
+    lh_u8_t i;
+
+    for (i = 0U; i < argc; ++i)
+    {
+        result = cnor_type_of_arithmetic(result, args[i]);
+    }
+    return result;
 }
 
 /* `and` / `or` give whichever operand decided. */

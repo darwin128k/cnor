@@ -58,6 +58,12 @@ enum cnor_static_type
     cnor_static_array,   /**< An array of values; its elements hold `any`. */
     cnor_static_dict,    /**< A dictionary of pairs; its values hold `any`. */
     cnor_static_function, /**< A function; it takes no closure over its place. */
+    /**
+     * A whole number: `i32`, `u32` or `f32`. It is not a type a value has: it
+     * is what a builtin's signature asks for, and what such a builtin gives
+     * back when the result follows the arguments.
+     */
+    cnor_static_number,
     cnor_static_type_count
 };
 /** @copybrief cnor_static_type */
@@ -69,6 +75,15 @@ typedef enum cnor_static_type cnor_static_type_t;
 cnor_static_type_t cnor_type_base(cnor_static_type_t type);
 cnor_static_type_t cnor_type_element(cnor_static_type_t type);
 cnor_static_type_t cnor_type_collection(cnor_static_type_t base, cnor_static_type_t element);
+
+/**
+ * @brief The type a numeric builtin gives: the common type of its arguments.
+ *
+ * Two unsigned numbers give an unsigned one, a real among them gives a real,
+ * an unknown among them gives an unknown, and a mix of signed and unsigned
+ * gives a signed one, as the arithmetic of the language does.
+ */
+cnor_static_type_t cnor_type_numeric_result(const cnor_static_type_t *args, lh_u8_t argc);
 
 /* -- files (module.c, path.c) ---------------------------------------------- */
 
@@ -897,7 +912,7 @@ cnor_compile_declaration(cnor_compiler_t *self, const cnor_node_t *node);
 /** @brief Whether running @p body can never reach its end: some statement
  *         returns, an `if` returns when both branches do. */
 lh_bool_t
-cnor_compile_list_returns(const cnor_node_t *body);
+cnor_compile_list_returns(cnor_compiler_t *self, const cnor_node_t *body);
 /** @brief Declare every file's top-level code, functions, natives and globals. */
 lh_bool_t
 cnor_compile_declare(cnor_compiler_t *self);

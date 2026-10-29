@@ -74,6 +74,8 @@ static const lh_char_t *const m_messages[cnor_error_count] = {
     "the separator is empty",
     "the array is too small",
     "no function of that name",
+    "the script failed",
+    "the number does not fit into a whole number",
     "a struct must be constructed in its declaration and passed by reference; it cannot be stored or returned",
 };
 
@@ -162,6 +164,8 @@ static const lh_char_t *const m_names[cnor_error_count] = {
     "empty_separator",
     "array_too_small",
     "unknown_function",
+    "script_error",
+    "out_of_range",
     "struct_lifetime",
 };
 

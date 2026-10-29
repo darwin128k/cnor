@@ -193,6 +193,7 @@ struct cnor_vm
     cnor_code_addr_t trace_at;        /**< Fault origin, also used when storage was exhausted. */
     lh_bool_t trace_valid;            /**< A runtime failure was captured. */
     lh_bool_t trace_truncated;        /**< Some caller frames did not fit. */
+    lh_str_view_t script_error;       /**< The text of the script's own failure, empty when there is none. */
 };
 /** @copybrief cnor_vm */
 typedef struct cnor_vm cnor_vm_t;

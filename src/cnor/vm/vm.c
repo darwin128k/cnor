@@ -53,6 +53,7 @@ cnor_vm_unload(cnor_vm_t *self)
     self->running = lh_bool_false;
     self->steps = 0U;
     self->result = lh_value_make_none();
+    self->script_error = lh_str_view_empty();
 }
 
 /* -- lifetime -------------------------------------------------------------- */
@@ -96,6 +97,7 @@ cnor_vm_reset(cnor_vm_t *self)
     self->try_count = 0U;
     self->running = lh_bool_false;
     self->result = lh_value_make_none();
+    self->script_error = lh_str_view_empty();
 }
 
 lh_bool_t
@@ -153,6 +155,7 @@ cnor_vm_run(cnor_vm_t *self)
     cnor_vm_trace_clear(self);
     self->result = lh_value_make_none();
     self->steps = 0U;
+    self->script_error = lh_str_view_empty();
     if (self->image == lh_null)
     {
         return cnor_diag_set(&self->diag, cnor_error_not_loaded, 0U, 0U);
@@ -246,6 +249,7 @@ cnor_vm_call(cnor_vm_t *self, lh_str_view_t name, const lh_value_t *args, cnor_a
     cnor_vm_trace_clear(self);
     self->result = lh_value_make_none();
     self->steps = 0U;
+    self->script_error = lh_str_view_empty();
     if (self->image == lh_null)
     {
         return cnor_diag_set(&self->diag, cnor_error_not_loaded, 0U, 0U);
@@ -367,7 +371,19 @@ cnor_vm_fail(cnor_vm_t *vm, const cnor_insn_t *insn, cnor_error_t code)
 {
     cnor_vm_trace_capture(vm, insn->at);
     vm->running = lh_bool_false;
-    (void) cnor_diag_set(&vm->diag, code, cnor_vm_get_line_at(vm, insn->at), insn->at);
+    if (code == cnor_error_script)
+    {
+        /* The script failed with its own text: that text is the message. */
+        (void) cnor_diag_set_name(&vm->diag, code, cnor_vm_get_line_at(vm, insn->at),
+                                  vm->script_error);
+    }
+    else
+    {
+        /* A failure of the machine's own has no text: a text of a script error
+         * that was caught earlier must not stand in for it. */
+        vm->script_error = lh_str_view_empty();
+        (void) cnor_diag_set(&vm->diag, code, cnor_vm_get_line_at(vm, insn->at), insn->at);
+    }
     cnor_diag_set_file(&vm->diag, cnor_vm_get_file_at(vm, insn->at));
     return lh_bool_false;
 }

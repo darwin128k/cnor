@@ -1,6 +1,6 @@
 # The cnor language
 
-Status: draft, language version 0.1, image format v3.
+Status: draft, language version 0.1, image format v17.
 
 > A small script language for embedded systems and hosts, run by an
 > interpreter built on `lh`.
@@ -253,6 +253,11 @@ error.
 as if it had just happened: the error keeps its code, its line and its file.
 A `raise` with no error in flight is the failure `nothing_to_raise`.
 
+**[cnor]** A script can fail with a text of its own: `fail("no hp")`. The call
+never comes back, the failure has the kind `script_error`, and the text is the
+`message` of the error the `catch` above takes. Without a catch the host sees
+the text too, as the detail of the failure.
+
 The error is a **dictionary** of five pairs: `message` (the text of the
 failure), `line` (the line it happened on), `code` (the number of the failure,
 the `cnor_error_t` of the machine), `kind` (its name, `div_by_zero` and the
@@ -414,7 +419,10 @@ the machine when an operator executes, as before.
   must fit its parameter's type: for script functions, and for natives that a
   `native fn` declaration describes. The result of a call is the declared
   return type, or `any` without one (host natives without a declaration
-  included). `len(s)` requires a `str` and gives an `i32`.
+  included). `len(s)` requires a `str` and gives an `i32`. **[cnor]** The
+  language's own functions have their types too: the numeric ones take a
+  **number** — an `i32`, an `u32` or an `f32`, which is not a type a value has
+  but what they ask for (section 9.2).
 - **Returns.** In a function with `-> T`, every `return e` must give a `T`, a
   bare `return` is refused (it returns `none`), and the end of the body must
   be unreachable, decided by the rule a reader applies: some statement of the
@@ -422,7 +430,9 @@ the machine when an operator executes, as before.
   returns, a `match` when it has a `_` and every arm returns, and
   `while true` returns when its body has no `break` of its own (it never ends
   otherwise). `for` and other `while` loops may finish. A function without
-  `->` may return anything, or fall off its end with `none`.
+  `->` may return anything, or fall off its end with `none`. **[cnor]** A
+  `fail` never comes back, so a body that ends with it is unreachable too, and
+  a function whose body is only a `fail` does return.
 - **Operators** fail only where the machine always would: arithmetic
   (`- * / %`) and ordering (`< <= > >=`) need numbers (or `any`); `+` takes
   two numbers or two strings; unary `-` needs a number; `s[i]` needs a `str`
@@ -726,7 +736,7 @@ See `examples/namespaces/main.cn` for a complete three-file example.
 
 ---
 
-## 7. The `.cnb` image format, v16
+## 7. The `.cnb` image format, v17
 
 **[cnor]** v1 replaced the original header (whose layout used `sizeof` and
 was not portable) and its names section. Every field is a fixed-width
@@ -750,15 +760,18 @@ finally block and the error that is raised again (`try_finally`,
 (`split_into`); v14 adds the function names (a host calls a function of the
 script by name) and the function as a value (`push_function`, `call_value`);
 v15 adds the key of a dictionary that is a constant (`dict_get_lk`); v16 adds
-the local functions (`call_local`, `ret_local`).
-An image of another version is refused: v15 images must be compiled again.
+the local functions (`call_local`, `ret_local`); v17 adds the numbers of the
+language (`min`, `max`, `abs`, `clamp`, `floor`, `ceil`, `round`, `int`) and
+the failure of the script itself (`fail`) — the numbers of the builtins are
+part of the format, as the `call_builtin` instruction carries their number.
+An image of another version is refused: v16 images must be compiled again.
 
 ### 7.1 Header (68 bytes)
 
 | Offset | Field | Type | Meaning |
 |---|---|---|---|
 | 0 | `magic` | 4 bytes | `"cnor"` |
-| 4 | `version` | u16 | format version, currently 16 |
+| 4 | `version` | u16 | format version, currently 17 |
 | 6 | `flags` | u16 | bit 0: the image carries a line table |
 | 8 | `image_size` | u32 | size of the whole image |
 | 12 | `stack_slots` | u32 | largest frame (slots + operands), **computed by the compiler** |
@@ -814,7 +827,7 @@ relocation pass.
 
 ## 8. Instruction set
 
-The full list is `include/cnor/op.h` and its info table `src/cnor/op.c`: 120
+The full list is `include/cnor/op.h` and its info table `src/cnor/op.c`: 131
 opcodes. An opcode is one byte; operands follow it, little-endian. The info
 table holds each opcode's operands and stack effect; the compiler, the
 verifier and the machine all read it.
@@ -1107,10 +1120,38 @@ both.
 | `str(value)` | `any` | the value as text | `str` |
 | `parse_int(text)` | `str` | the number in the text, or 0 when there is none | `i32` |
 | `split_into(text, separator, array)` | `str`, `str`, `array` | the pieces of the text, written into the array | `i32` (how many) |
+| `min(a, b)` | number, number | the smaller of the two | the common type |
+| `max(a, b)` | number, number | the larger of the two | the common type |
+| `abs(x)` | number | the number without its sign | the common type |
+| `clamp(x, low, high)` | number, number, number | the number inside the bounds | the common type |
+| `floor(x)` | number | the whole number below the real one | `i32` |
+| `ceil(x)` | number | the whole number above the real one | `i32` |
+| `round(x)` | number | the whole number nearest to the real one | `i32` |
+| `int(x)` | number | the whole number the real one is cut to | `i32` |
+| `fail(text)` | `str` | the script fails with its own text | `none` (it never comes back) |
 
 The compiler knows the argument types and the result type, so a call with the
 wrong type or the wrong number of arguments is refused before it runs. A
 `str` argument that is not a string fails the run at the call.
+
+**[cnor]** A **number** is a whole number: `i32`, `u32` or `f32`. It is not a
+type a value has; it is what the numeric functions ask for. The result of
+`min`, `max`, `abs` and `clamp` **follows the arguments**: two unsigned numbers
+give an unsigned one, a real among them gives a real, and a mix of a signed and
+an unsigned number gives a signed one, as the arithmetic of the language does.
+`floor`, `ceil`, `round` and `int` always give an `i32`: a whole number stays
+what it is, and a real is turned into one — `floor` toward minus infinity,
+`ceil` toward plus infinity, `round` to the nearest one with a half away from
+zero, and `int` toward zero. A real that does not fit into a whole number
+fails the run with `out_of_range`.
+
+**[cnor]** `fail` is the one function that never comes back: the script fails
+with the text it was given, and a `catch` above takes that text as the error's
+`message` (section 6.1). The failure has its own kind, `script_error`. A
+function whose body ends with `fail` is a function that returns, so the
+compiler does not ask for a `return` there. A script function or a host native
+of the same name takes the place of `fail`, and then the call comes back like
+any other call.
 
 **[cnor]** `split_into` is the way to split a text: a collection cannot be
 made while the program runs (section 8), so the array is made by the program
@@ -1222,7 +1263,7 @@ command line built with it runs images only: `exec` is there, `run` and
 | Left out | Why |
 |---|---|
 | Closures | They need environments; in a stack VM that is a subsystem of its own |
-| Structs and classes | Strings, numbers and native calls are enough for scripts |
+| Classes and inheritance | **[cnor]** The named records of section 6.6 are enough for scripts: they carry the fields a script needs, without a type hierarchy or a vtable |
 | **[cnor]** C++-style exceptions | The machine unwinds a `try` itself (section 6.1): no unwinder tables, no `longjmp`, and the hot path does not look for handlers |
 | Overloading, generics | They grow both compile time and bytecode size |
 | `f32` without `LH_REAL_ENABLED` | The type is not available on an STM32 by default; a real literal is then a compile error (`no_reals`) |
@@ -1231,7 +1272,7 @@ command line built with it runs images only: `exec` is there, `run` and
 
 ## 14. Status
 
-Done and covered by tests (`tests/`, 217 cases, and 50 runs of the command
+Done and covered by tests (`tests/`, 264 cases, and the runs of the command
 line in `tests/cli/`):
 
 - [x] lexer: tokens, keywords, indentation as `indent` / `dedent`, newline
@@ -1257,7 +1298,10 @@ line in `tests/cli/`):
   numbers, with the shift checked (section 6.1);
 - [x] the language's own functions: `len`, `find`, `contains`, `replace`,
   `trim`, `upper`, `lower`, `starts_with`, `ends_with`, `substr`, `ord`,
-  `char`, `str`, `parse_int`, `split_into` (section 9.2);
+  `char`, `str`, `parse_int`, `split_into`, and the numbers of the language:
+  `min`, `max`, `abs`, `clamp`, `floor`, `ceil`, `round`, `int` (section 9.2);
+- [x] the failure of the script itself: `fail` with a text of its own, which
+  the `catch` above takes as the message of the error (section 6.1);
 - [x] a function as a value: put in a variable, given to a function, called
   through the value; and `cnor_vm_call`, so a host calls a function of the
   script by name (sections 6.1 and 10);

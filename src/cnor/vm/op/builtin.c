@@ -651,6 +651,266 @@ builtin_do_split_into(cnor_vm_t *vm, cnor_argc_t argc)
     return cnor_error_none;
 }
 
+/* -- numbers ---------------------------------------------------------------- */
+
+/*
+ * The kind two numbers are given in: a real among them makes a real, two
+ * unsigned ones make an unsigned one, and the rest is signed. The compiler
+ * works the same thing out from the types it knows.
+ */
+static lh_value_kind_t
+builtin_common_kind(lh_value_kind_t a, lh_value_kind_t b)
+{
+    if (a == lh_value_kind_real || b == lh_value_kind_real)
+    {
+        return lh_value_kind_real;
+    }
+    if (a == lh_value_kind_uint && b == lh_value_kind_uint)
+    {
+        return lh_value_kind_uint;
+    }
+    return lh_value_kind_sint;
+}
+
+/* The number @p value holds, in the kind @p kind asks for. */
+static lh_value_t
+builtin_convert(const lh_value_t *value, lh_value_kind_t kind)
+{
+    if (kind == lh_value_kind_uint)
+    {
+        return lh_value_make_uint(cnor_vm_fast_kind(value) == lh_value_kind_uint
+                                       ? value->data.u
+                                       : (lh_ullong_t) value->data.i);
+    }
+#if LH_REAL_ENABLED
+    if (kind == lh_value_kind_real)
+    {
+        return lh_value_make_real(cnor_vm_value_to_real(value));
+    }
+#endif
+    return lh_value_make_sint(cnor_vm_value_to_sint(value));
+}
+
+/* Whether the real @p number is a whole number the machine can hold. */
+#if LH_REAL_ENABLED
+static lh_bool_t
+builtin_real_fits(lh_real_t number)
+{
+    if (number != number)
+    {
+        /* Not a number at all. */
+        return lh_bool_false;
+    }
+    if (number >= (lh_real_t) 9223372036854775808.0) return lh_bool_false;
+    if (number < (lh_real_t) -9223372036854775808.0) return lh_bool_false;
+    return lh_bool_true;
+}
+#endif
+
+/* The whole number the real @p number is cut to: toward zero. */
+#if LH_REAL_ENABLED
+static lh_sllong_t
+builtin_real_to_int(lh_real_t number)
+{
+    return (lh_sllong_t) number;
+}
+#endif
+
+/* min(a, b): the smaller of the two numbers. */
+static cnor_error_t
+builtin_do_min(cnor_vm_t *vm, cnor_argc_t argc)
+{
+    const lh_value_t *const left = builtin_arg(vm, argc, 0U);
+    const lh_value_t *const right = builtin_arg(vm, argc, 1U);
+    const lh_value_t *chosen;
+    lh_value_t result;
+
+    if (!cnor_vm_value_is_number(left) || !cnor_vm_value_is_number(right))
+    {
+        return cnor_error_type;
+    }
+    chosen = cnor_vm_value_order_holds(left, right, cnor_op_le) ? left : right;
+    result = builtin_convert(chosen, builtin_common_kind(cnor_vm_fast_kind(left),
+                                                          cnor_vm_fast_kind(right)));
+    builtin_result(vm, argc, result);
+    return cnor_error_none;
+}
+
+/* max(a, b): the larger of the two numbers. */
+static cnor_error_t
+builtin_do_max(cnor_vm_t *vm, cnor_argc_t argc)
+{
+    const lh_value_t *const left = builtin_arg(vm, argc, 0U);
+    const lh_value_t *const right = builtin_arg(vm, argc, 1U);
+    const lh_value_t *chosen;
+    lh_value_t result;
+
+    if (!cnor_vm_value_is_number(left) || !cnor_vm_value_is_number(right))
+    {
+        return cnor_error_type;
+    }
+    chosen = cnor_vm_value_order_holds(left, right, cnor_op_ge) ? left : right;
+    result = builtin_convert(chosen, builtin_common_kind(cnor_vm_fast_kind(left),
+                                                          cnor_vm_fast_kind(right)));
+    builtin_result(vm, argc, result);
+    return cnor_error_none;
+}
+
+/* abs(x): the number without its sign. */
+static cnor_error_t
+builtin_do_abs(cnor_vm_t *vm, cnor_argc_t argc)
+{
+    const lh_value_t *const value = builtin_arg(vm, argc, 0U);
+    lh_value_t result;
+
+    if (!cnor_vm_value_is_number(value))
+    {
+        return cnor_error_type;
+    }
+    switch (cnor_vm_fast_kind(value))
+    {
+    case lh_value_kind_sint:
+    {
+        const lh_sllong_t number = value->data.i;
+
+        /* The smallest signed number has no positive counterpart; it stays as
+         * it is, as the arithmetic of the machine wraps. */
+        result = lh_value_make_sint(number < 0
+                                        ? (lh_sllong_t) (0U - (lh_ullong_t) number)
+                                        : number);
+        break;
+    }
+    case lh_value_kind_uint:
+        result = *value;
+        break;
+    default:
+#if LH_REAL_ENABLED
+        result = lh_value_make_real(value->data.r < (lh_real_t) 0 ? -value->data.r : value->data.r);
+#else
+        return cnor_error_type;
+#endif
+        break;
+    }
+    builtin_result(vm, argc, result);
+    return cnor_error_none;
+}
+
+/* clamp(x, low, high): the number inside the bounds. */
+static cnor_error_t
+builtin_do_clamp(cnor_vm_t *vm, cnor_argc_t argc)
+{
+    const lh_value_t *const value = builtin_arg(vm, argc, 0U);
+    const lh_value_t *const low = builtin_arg(vm, argc, 1U);
+    const lh_value_t *const high = builtin_arg(vm, argc, 2U);
+    const lh_value_t *chosen;
+    lh_value_kind_t kind;
+    lh_value_t result;
+
+    if (!cnor_vm_value_is_number(value) || !cnor_vm_value_is_number(low)
+        || !cnor_vm_value_is_number(high))
+    {
+        return cnor_error_type;
+    }
+    kind = builtin_common_kind(builtin_common_kind(cnor_vm_fast_kind(value),
+                                                   cnor_vm_fast_kind(low)),
+                               cnor_vm_fast_kind(high));
+    if (cnor_vm_value_order_holds(value, low, cnor_op_lt))
+    {
+        chosen = low;
+    }
+    else if (cnor_vm_value_order_holds(value, high, cnor_op_gt))
+    {
+        chosen = high;
+    }
+    else
+    {
+        chosen = value;
+    }
+    result = builtin_convert(chosen, kind);
+    builtin_result(vm, argc, result);
+    return cnor_error_none;
+}
+
+/*
+ * floor(x), ceil(x), round(x) and int(x): the whole number the real one is
+ * turned into.
+ *
+ * The way a real is turned into a whole number is worked out here, without
+ * the library of the platform: the machine must run where there is none.
+ */
+typedef enum builtin_whole
+{
+    builtin_whole_floor, /**< Toward minus infinity. */
+    builtin_whole_ceil,  /**< Toward plus infinity. */
+    builtin_whole_round, /**< The nearest one, a half away from zero. */
+    builtin_whole_int    /**< Toward zero. */
+} builtin_whole_t;
+
+static cnor_error_t
+builtin_do_whole(cnor_vm_t *vm, cnor_argc_t argc, builtin_whole_t how)
+{
+    const lh_value_t *const value = builtin_arg(vm, argc, 0U);
+    lh_sllong_t number;
+
+    if (!cnor_vm_value_is_number(value))
+    {
+        return cnor_error_type;
+    }
+    if (cnor_vm_fast_kind(value) == lh_value_kind_sint)
+    {
+        number = value->data.i;
+    }
+    else if (cnor_vm_fast_kind(value) == lh_value_kind_uint)
+    {
+        if (value->data.u > (lh_ullong_t) 9223372036854775807ULL)
+        {
+            /* The number is larger than any signed whole number. */
+            return cnor_error_out_of_range;
+        }
+        number = (lh_sllong_t) value->data.u;
+    }
+    else
+    {
+#if LH_REAL_ENABLED
+        const lh_real_t real = value->data.r;
+
+        if (!builtin_real_fits(real))
+        {
+            return cnor_error_out_of_range;
+        }
+        number = builtin_real_to_int(real);
+        if (how == builtin_whole_floor && (lh_real_t) number > real) number -= 1;
+        if (how == builtin_whole_ceil && (lh_real_t) number < real) number += 1;
+        if (how == builtin_whole_round)
+        {
+            const lh_real_t rest = real - (lh_real_t) number;
+
+            if (rest >= (lh_real_t) 0.5) number += 1;
+            else if (rest <= (lh_real_t) -0.5) number -= 1;
+        }
+#else
+        return cnor_error_type;
+#endif
+    }
+    builtin_result(vm, argc, lh_value_make_sint(number));
+    return cnor_error_none;
+}
+
+/* fail(text): the script fails with its own text. The call never comes back:
+ * the machine takes the text as the error's message. */
+static cnor_error_t
+builtin_do_fail(cnor_vm_t *vm, cnor_argc_t argc)
+{
+    builtin_text_t text;
+
+    if (!builtin_view(builtin_arg(vm, argc, 0U), &text))
+    {
+        return cnor_error_type;
+    }
+    lh_str_view_init_by_size(&vm->script_error, text.bytes, text.size);
+    return cnor_error_script;
+}
+
 /* -- the handler ------------------------------------------------------------ */
 
 lh_bool_t
@@ -707,6 +967,33 @@ cnor_vm_op_call_builtin(cnor_vm_t *vm, const cnor_insn_t *insn)
         break;
     case cnor_builtin_split_into:
         error = builtin_do_split_into(vm, argc);
+        break;
+    case cnor_builtin_min:
+        error = builtin_do_min(vm, argc);
+        break;
+    case cnor_builtin_max:
+        error = builtin_do_max(vm, argc);
+        break;
+    case cnor_builtin_abs:
+        error = builtin_do_abs(vm, argc);
+        break;
+    case cnor_builtin_clamp:
+        error = builtin_do_clamp(vm, argc);
+        break;
+    case cnor_builtin_floor:
+        error = builtin_do_whole(vm, argc, builtin_whole_floor);
+        break;
+    case cnor_builtin_ceil:
+        error = builtin_do_whole(vm, argc, builtin_whole_ceil);
+        break;
+    case cnor_builtin_round:
+        error = builtin_do_whole(vm, argc, builtin_whole_round);
+        break;
+    case cnor_builtin_int:
+        error = builtin_do_whole(vm, argc, builtin_whole_int);
+        break;
+    case cnor_builtin_fail:
+        error = builtin_do_fail(vm, argc);
         break;
     default:
         error = cnor_error_bad_operand;

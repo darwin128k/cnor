@@ -105,6 +105,8 @@ enum cnor_error
     cnor_error_empty_separator,  /**< A separator that is empty. */
     cnor_error_array_too_small,  /**< An array with too few places for what goes into it. */
     cnor_error_unknown_function, /**< The image has no function of that name. */
+    cnor_error_script,           /**< The script failed with its own text: `fail("...")`. */
+    cnor_error_out_of_range,     /**< A number does not fit into a whole number. */
 
     cnor_error_struct_lifetime, /**< A frame-backed record escapes through a value store or return. */
 

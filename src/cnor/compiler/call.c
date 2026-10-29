@@ -89,6 +89,7 @@ cnor_compile_call_string_builtin(cnor_compiler_t *self, const cnor_node_t *node,
     const cnor_static_type_t *const params = cnor_compiler_builtin_params(builtin);
     const lh_u8_t argc = cnor_builtin_argc(builtin);
     const cnor_node_t *arg;
+    cnor_static_type_t arg_types[3];
     lh_u8_t index = 0U;
 
     if (node->data.call.argc != argc)
@@ -101,6 +102,7 @@ cnor_compile_call_string_builtin(cnor_compiler_t *self, const cnor_node_t *node,
         {
             return lh_bool_false;
         }
+        arg_types[index] = self->type;
         if (builtin == cnor_builtin_split_into && index == 2U
             && cnor_type_base(self->type) == cnor_static_array
             && cnor_type_element(self->type) == cnor_static_str)
@@ -112,7 +114,13 @@ cnor_compile_call_string_builtin(cnor_compiler_t *self, const cnor_node_t *node,
             return lh_bool_false;
         }
     }
-    self->type = cnor_compiler_builtin_result(builtin);
+    {
+        const cnor_static_type_t result = cnor_compiler_builtin_result(builtin);
+
+        /* A numeric builtin gives the common type of its arguments. */
+        self->type = (result == cnor_static_number) ? cnor_type_numeric_result(arg_types, argc)
+                                                     : result;
+    }
     self->emit.line = node->line;
     return cnor_emit_insn(self, cnor_op_call_builtin, (lh_u32_t) builtin, argc);
 }

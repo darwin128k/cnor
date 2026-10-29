@@ -1,5 +1,6 @@
 #include <cnor/compiler/internal.h>
 #include <lh/null.h>
+#include <lh/str/view.h>
 
 /* -- declaration pass ------------------------------------------------------ */
 
@@ -148,14 +149,14 @@ cnor_compile_list_breaks(const cnor_node_t *body)
 
 /* A `match` returns when it has a `_` and every arm returns. */
 static lh_bool_t
-cnor_compile_match_returns(const cnor_node_t *node)
+cnor_compile_match_returns(cnor_compiler_t *self, const cnor_node_t *node)
 {
     const cnor_node_t *arm;
     lh_bool_t has_default = lh_bool_false;
 
     for (arm = node->data.match.arms; arm != lh_null; arm = arm->next)
     {
-        if (!cnor_compile_list_returns(arm->data.arm.body))
+        if (!cnor_compile_list_returns(self, arm->data.arm.body))
         {
             return lh_bool_false;
         }
@@ -164,26 +165,49 @@ cnor_compile_match_returns(const cnor_node_t *node)
     return has_default;
 }
 
+/*
+ * Whether @p expr is a call to the builtin `fail`, which never comes back.
+ *
+ * A script function or a host native of that name is not the builtin, and then
+ * the call comes back like any other: the name is looked up the same way the
+ * call itself is.
+ */
+static lh_bool_t
+cnor_compile_fails(cnor_compiler_t *self, const cnor_node_t *expr)
+{
+    const lh_str_view_t fail = lh_str_view_lit("fail");
+    cnor_binding_t binding;
+
+    if (expr == lh_null || expr->kind != cnor_node_call) return lh_bool_false;
+    if (expr->data.call.argc != 1U) return lh_bool_false;
+    if (!lh_str_view_equals(&expr->name, &fail, lh_bool_false)) return lh_bool_false;
+    binding = cnor_scope_resolve(self, expr->name);
+    return binding.kind == cnor_binding_none ? lh_bool_true : lh_bool_false;
+}
+
 /* Whether running @p node can never go on to the next statement. */
 static lh_bool_t
-cnor_compile_stmt_returns(const cnor_node_t *node)
+cnor_compile_stmt_returns(cnor_compiler_t *self, const cnor_node_t *node)
 {
     switch (node->kind)
     {
     case cnor_node_return:
         return lh_bool_true;
+    case cnor_node_expr_stmt:
+        /* `fail("...")` never comes back. */
+        return cnor_compile_fails(self, node->data.expr_stmt.expr);
     case cnor_node_if:
         return (node->data.if_.else_body != lh_null
-                && cnor_compile_list_returns(node->data.if_.then_body)
-                && cnor_compile_list_returns(node->data.if_.else_body))
+                && cnor_compile_list_returns(self, node->data.if_.then_body)
+                && cnor_compile_list_returns(self, node->data.if_.else_body))
                    ? lh_bool_true
                    : lh_bool_false;
     case cnor_node_match:
-        return cnor_compile_match_returns(node);
+        return cnor_compile_match_returns(self, node);
     case cnor_node_try:
         /* The try may fail and go to the catch: both must return. */
-        return (cnor_compile_list_returns(node->data.try_.body)
-                && cnor_compile_list_returns(node->data.try_.catch_body))
+        return (cnor_compile_list_returns(self, node->data.try_.body)
+                && cnor_compile_list_returns(self, node->data.try_.catch_body))
                    ? lh_bool_true
                    : lh_bool_false;
     case cnor_node_while:
@@ -205,11 +229,11 @@ cnor_compile_stmt_returns(const cnor_node_t *node)
  * `break` of its own.
  */
 lh_bool_t
-cnor_compile_list_returns(const cnor_node_t *body)
+cnor_compile_list_returns(cnor_compiler_t *self, const cnor_node_t *body)
 {
     for (; body != lh_null; body = body->next)
     {
-        if (cnor_compile_stmt_returns(body))
+        if (cnor_compile_stmt_returns(self, body))
         {
             return lh_bool_true;
         }
@@ -378,7 +402,8 @@ cnor_compile_function(cnor_compiler_t *self, cnor_function_index_t index)
     }
     /* Falling off the end of a function returns `none`, which a function with
      * a return type may not do. */
-    if (node->data.fn.returns != cnor_type_none && !cnor_compile_list_returns(node->data.fn.body))
+    if (node->data.fn.returns != cnor_type_none
+        && !cnor_compile_list_returns(self, node->data.fn.body))
     {
         return cnor_compile_fail_name(self, node, cnor_error_missing_return);
     }

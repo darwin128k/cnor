@@ -32,6 +32,20 @@ static const struct cnor_builtin_rule m_rules[cnor_builtin_count] = {
     [cnor_builtin_parse_int] = {{cnor_static_str}, cnor_static_i32},
     [cnor_builtin_split_into] = {{cnor_static_str, cnor_static_str, cnor_static_array},
                                  cnor_static_i32},
+    /* The numeric ones: the arguments are whole numbers, and the result
+     * follows them (::cnor_type_numeric_result). */
+    [cnor_builtin_min] = {{cnor_static_number, cnor_static_number}, cnor_static_number},
+    [cnor_builtin_max] = {{cnor_static_number, cnor_static_number}, cnor_static_number},
+    [cnor_builtin_abs] = {{cnor_static_number}, cnor_static_number},
+    [cnor_builtin_clamp] = {{cnor_static_number, cnor_static_number, cnor_static_number},
+                            cnor_static_number},
+    /* The ones that give a whole number back. */
+    [cnor_builtin_floor] = {{cnor_static_number}, cnor_static_i32},
+    [cnor_builtin_ceil] = {{cnor_static_number}, cnor_static_i32},
+    [cnor_builtin_round] = {{cnor_static_number}, cnor_static_i32},
+    [cnor_builtin_int] = {{cnor_static_number}, cnor_static_i32},
+    /* The one that never comes back. */
+    [cnor_builtin_fail] = {{cnor_static_str}, cnor_static_none},
 };
 
 lh_bool_t

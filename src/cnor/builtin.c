@@ -21,6 +21,15 @@ static const lh_char_t *const m_names[cnor_builtin_count] = {
     [cnor_builtin_str] = "str",
     [cnor_builtin_parse_int] = "parse_int",
     [cnor_builtin_split_into] = "split_into",
+    [cnor_builtin_min] = "min",
+    [cnor_builtin_max] = "max",
+    [cnor_builtin_abs] = "abs",
+    [cnor_builtin_clamp] = "clamp",
+    [cnor_builtin_floor] = "floor",
+    [cnor_builtin_ceil] = "ceil",
+    [cnor_builtin_round] = "round",
+    [cnor_builtin_int] = "int",
+    [cnor_builtin_fail] = "fail",
 };
 
 static const lh_u8_t m_argc[cnor_builtin_count] = {
@@ -38,6 +47,15 @@ static const lh_u8_t m_argc[cnor_builtin_count] = {
     [cnor_builtin_str] = 1U,
     [cnor_builtin_parse_int] = 1U,
     [cnor_builtin_split_into] = 3U,
+    [cnor_builtin_min] = 2U,
+    [cnor_builtin_max] = 2U,
+    [cnor_builtin_abs] = 1U,
+    [cnor_builtin_clamp] = 3U,
+    [cnor_builtin_floor] = 1U,
+    [cnor_builtin_ceil] = 1U,
+    [cnor_builtin_round] = 1U,
+    [cnor_builtin_int] = 1U,
+    [cnor_builtin_fail] = 1U,
 };
 
 const lh_char_t *

@@ -1436,6 +1436,124 @@ CNOR_TEST(checks_the_arguments_of_the_string_functions)
              cnor_error_wrong_arg_count);
 }
 
+CNOR_TEST(does_the_math_of_the_numbers)
+{
+    /* min and max take the smaller and the larger. */
+    CHECK_EQ(value_of("fn f() -> i32:\n    return min(3, 5)\nf()\n"), 3);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return max(3, 5)\nf()\n"), 5);
+    /* An unsigned number is above a negative one, as in any comparison. */
+    CHECK_EQ(value_of("fn f() -> i32:\n    return max(4294967295, 1)\nf()\n"), 4294967295LL);
+    /* abs takes the sign away. */
+    CHECK_EQ(value_of("fn f() -> i32:\n    return abs(-7)\nf()\n"), 7);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return abs(7)\nf()\n"), 7);
+    /* clamp keeps the number inside the bounds. */
+    CHECK_EQ(value_of("fn f() -> i32:\n    return clamp(15, 0, 10)\nf()\n"), 10);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return clamp(-1, 0, 10)\nf()\n"), 0);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return clamp(5, 0, 10)\nf()\n"), 5);
+    /* A whole number stays what it is. */
+    CHECK_EQ(value_of("fn f() -> i32:\n    return floor(7)\nf()\n"), 7);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return ceil(7)\nf()\n"), 7);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return round(7)\nf()\n"), 7);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return int(7)\nf()\n"), 7);
+#if LH_REAL_ENABLED
+    /* floor, ceil, round and int turn a real into a whole number. */
+    CHECK_EQ(value_of("fn f() -> i32:\n    return floor(2.7)\nf()\n"), 2);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return ceil(2.1)\nf()\n"), 3);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return round(2.5)\nf()\n"), 3);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return round(-2.5)\nf()\n"), -3);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return int(2.9)\nf()\n"), 2);
+    CHECK_EQ(value_of("fn f() -> i32:\n    return int(-2.9)\nf()\n"), -2);
+    /* A real among the arguments makes the result a real. */
+    {
+        char text[32];
+
+        REQUIRE(text_of("fn f() -> str:\n    return str(min(1.5, 2))\nf()\n", text, sizeof(text)));
+        CHECK(strcmp(text, "1.5") == 0);
+    }
+#endif
+}
+
+CNOR_TEST(checks_the_arguments_of_the_number_functions)
+{
+    cnor_line_t line = 0U;
+
+    /* The arguments must be numbers. */
+    CHECK_EQ(error_of("fn f() -> i32:\n    return min(\"a\", 1)\nf()\n", &line),
+             cnor_error_type_mismatch);
+    CHECK_EQ(error_of("fn f() -> i32:\n    return abs(true)\nf()\n", &line),
+             cnor_error_type_mismatch);
+    CHECK_EQ(error_of("fn f() -> i32:\n    return clamp(1, 2, \"x\")\nf()\n", &line),
+             cnor_error_type_mismatch);
+    /* The number of arguments is fixed. */
+    CHECK_EQ(error_of("fn f() -> i32:\n    return min(1)\nf()\n", &line),
+             cnor_error_wrong_arg_count);
+    CHECK_EQ(error_of("fn f() -> i32:\n    return clamp(1, 2)\nf()\n", &line),
+             cnor_error_wrong_arg_count);
+    /* The result follows the arguments: two whole numbers give a whole one. */
+    CHECK_EQ(error_of("fn f() -> i32:\n    let x: f32 = min(1, 2)\n    return 0\nf()\n", &line),
+             cnor_error_type_mismatch);
+}
+
+CNOR_TEST(fails_with_the_text_of_the_script)
+{
+    char text[64];
+
+    /* The text of the failure comes to the catch. */
+    REQUIRE(text_of("fn f() -> str:\n"
+                    "    try:\n"
+                    "        fail(\"no hp\")\n"
+                    "    catch e:\n"
+                    "        return e[\"message\"]\n"
+                    "    return \"\"\n"
+                    "f()\n",
+                    text, sizeof(text)));
+    CHECK(strcmp(text, "no hp") == 0);
+    /* The kind of the failure is the script's own. */
+    REQUIRE(text_of("fn f() -> str:\n"
+                    "    try:\n"
+                    "        fail(\"no hp\")\n"
+                    "    catch e:\n"
+                    "        return e[\"kind\"]\n"
+                    "    return \"\"\n"
+                    "f()\n",
+                    text, sizeof(text)));
+    CHECK(strcmp(text, "script_error") == 0);
+    /* The text comes along when the error is raised again. */
+    REQUIRE(text_of("fn f() -> str:\n"
+                    "    try:\n"
+                    "        try:\n"
+                    "            fail(\"no hp\")\n"
+                    "        catch inner:\n"
+                    "            raise\n"
+                    "    catch e:\n"
+                    "        return e[\"message\"]\n"
+                    "    return \"\"\n"
+                    "f()\n",
+                    text, sizeof(text)));
+    CHECK(strcmp(text, "no hp") == 0);
+    /* Without a catch the run fails with the script's own error. */
+    CHECK_EQ(failure_of("fail(\"no hp\")\n"), cnor_error_script);
+    /* A function that only fails does return: the call never comes back. */
+    CHECK_EQ(failure_of("fn f() -> i32:\n    fail(\"no hp\")\nf()\n"), cnor_error_script);
+    /* The host sees the text of the failure. */
+    {
+        const outcome_t out = run_source("fail(\"no hp\")\n");
+
+        CHECK(out.compiled);
+        CHECK_EQ(out.code, cnor_error_script);
+        CHECK(strcmp(out.name, "no hp") == 0);
+    }
+}
+
+CNOR_TEST(keeps_a_script_function_of_the_same_name)
+{
+    /* A script function of the name of a builtin takes its place, and then the
+     * call comes back like any other call. */
+    CHECK_EQ(value_of("fn fail(text: str) -> i32:\n    return 7\n"
+                      "fn f() -> i32:\n    return fail(\"no hp\")\nf()\n"),
+             7);
+}
+
 /* -- types ------------------------------------------------------------------- */
 
 CNOR_TEST(runs_well_typed_programs)
@@ -2610,6 +2728,10 @@ CNOR_TEST_CASE(keeps_a_global_dictionary_whole),
 CNOR_TEST_CASE(refuses_a_dictionary_where_it_does_not_fit),
     CNOR_TEST_CASE(has_the_string_functions),
     CNOR_TEST_CASE(checks_the_arguments_of_the_string_functions),
+    CNOR_TEST_CASE(does_the_math_of_the_numbers),
+    CNOR_TEST_CASE(checks_the_arguments_of_the_number_functions),
+    CNOR_TEST_CASE(fails_with_the_text_of_the_script),
+    CNOR_TEST_CASE(keeps_a_script_function_of_the_same_name),
     CNOR_TEST_CASE(runs_well_typed_programs),
     CNOR_TEST_CASE(accepts_values_of_unknown_type_anywhere),
     CNOR_TEST_CASE(refuses_arguments_of_the_wrong_type),

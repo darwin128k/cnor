@@ -357,7 +357,7 @@ cnor_compile_local_fn_bodies(cnor_compiler_t *self)
                 continue;
             }
             if (fn->node->data.fn.returns != cnor_type_none
-                && !cnor_compile_list_returns(fn->node->data.fn.body))
+                && !cnor_compile_list_returns(self, fn->node->data.fn.body))
             {
                 return cnor_compile_fail_name(self, fn->node, cnor_error_missing_return);
             }

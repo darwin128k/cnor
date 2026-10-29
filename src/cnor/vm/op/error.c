@@ -143,7 +143,16 @@ cnor_vm_error_dict(cnor_vm_t *vm, cnor_slot_t slot, const cnor_error_t code,
     cnor_vm_fast_set_str(&pairs[4], m_key_code, sizeof(m_key_code) - 1U);
     cnor_vm_fast_set_str(&pairs[6], m_key_kind, sizeof(m_key_kind) - 1U);
     cnor_vm_fast_set_str(&pairs[8], m_key_file, sizeof(m_key_file) - 1U);
-    cnor_vm_fast_set_str(&pairs[1], message, strlen(message));
+    if (code == cnor_error_script && vm->script_error.size != 0U)
+    {
+        /* The script failed with its own text: that text is the message. */
+        cnor_vm_fast_set_str(&pairs[1], (const lh_char_t *) vm->script_error.begin,
+                             vm->script_error.size);
+    }
+    else
+    {
+        cnor_vm_fast_set_str(&pairs[1], message, strlen(message));
+    }
     cnor_vm_fast_set_sint(&pairs[3], (lh_sllong_t) cnor_vm_get_line_at(vm, at));
     cnor_vm_fast_set_sint(&pairs[5], (lh_sllong_t) code);
     cnor_vm_fast_set_str(&pairs[7], kind, strlen(kind));

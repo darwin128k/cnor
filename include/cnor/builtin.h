@@ -46,6 +46,19 @@ typedef enum cnor_builtin
      * program runs, so the array is made by the program and given here.
      */
     cnor_builtin_split_into,
+    cnor_builtin_min,   /**< `min(a, b)`: the smaller of two numbers. */
+    cnor_builtin_max,   /**< `max(a, b)`: the larger of two numbers. */
+    cnor_builtin_abs,   /**< `abs(x)`: the number without its sign. */
+    cnor_builtin_clamp, /**< `clamp(x, low, high)`: the number inside the bounds. */
+    cnor_builtin_floor, /**< `floor(x)`: the whole number below the real one. */
+    cnor_builtin_ceil,  /**< `ceil(x)`: the whole number above the real one. */
+    cnor_builtin_round, /**< `round(x)`: the whole number nearest to the real one. */
+    cnor_builtin_int,   /**< `int(x)`: the whole number the real one is cut to. */
+    /**
+     * `fail(text)`: the script fails with its own text. The call never comes
+     * back; a `catch` above takes the text as the error's message.
+     */
+    cnor_builtin_fail,
     cnor_builtin_count
 } cnor_builtin_t;
 
