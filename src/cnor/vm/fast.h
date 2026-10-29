@@ -156,27 +156,55 @@ cnor_vm_fast_set_str(lh_value_t *value, const lh_char_t *data, lh_usize_t size)
     value->data.s.size = size;
 }
 
+/**
+ * @brief The header of the array @p value: the count of its elements and the
+ *        room it has. The elements follow it.
+ *
+ * The header is not in the value but where the array was made, so an array
+ * that was copied elsewhere (into a parameter, say) still shares the count
+ * with the one it came from: what a function pushes into it, the caller sees.
+ */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_value_t *
+cnor_vm_fast_array_header(const lh_value_t *value)
+{
+    return (lh_value_t *) (void *) (const void *) value->data.s.begin;
+}
+
 /** @brief The elements of the array @p value holds; its kind is known. */
 LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_value_t *
 cnor_vm_fast_array_data(const lh_value_t *value)
 {
-    return (lh_value_t *) (void *) (const void *) value->data.s.begin;
+    return cnor_vm_fast_array_header(value) + 2;
 }
 
 /** @brief How many elements the array @p value holds; its kind is known. */
 LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_u32_t
 cnor_vm_fast_array_count(const lh_value_t *value)
 {
-    return (lh_u32_t) value->data.s.size;
+    return (lh_u32_t) cnor_vm_fast_sint(&cnor_vm_fast_array_header(value)[0]);
 }
 
-/** @brief Overwrite @p value with the array of @p count elements at @p data. */
+/** @brief How many elements the array @p value may hold; its kind is known. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE lh_u32_t
+cnor_vm_fast_array_room(const lh_value_t *value)
+{
+    return (lh_u32_t) cnor_vm_fast_sint(&cnor_vm_fast_array_header(value)[1]);
+}
+
+/** @brief Make the array @p value hold @p count elements. */
 LH_COMPILER_ATTRIBUTE_FORCE_INLINE void
-cnor_vm_fast_set_array(lh_value_t *value, lh_value_t *data, lh_u32_t count)
+cnor_vm_fast_array_set_count(const lh_value_t *value, lh_u32_t count)
+{
+    cnor_vm_fast_set_sint(&cnor_vm_fast_array_header(value)[0], (lh_sllong_t) count);
+}
+
+/** @brief Overwrite @p value with the array whose header is @p header. */
+LH_COMPILER_ATTRIBUTE_FORCE_INLINE void
+cnor_vm_fast_set_array(lh_value_t *value, lh_value_t *header)
 {
     value->kind = CNOR_VALUE_KIND_ARRAY;
-    value->data.s.begin = (const lh_char_t *) (const void *) data;
-    value->data.s.size = (lh_usize_t) count;
+    value->data.s.begin = (const lh_char_t *) (const void *) header;
+    value->data.s.size = 0U;
 }
 
 /**

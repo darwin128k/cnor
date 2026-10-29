@@ -46,6 +46,10 @@ static const struct cnor_builtin_rule m_rules[cnor_builtin_count] = {
     [cnor_builtin_int] = {{cnor_static_number}, cnor_static_i32},
     /* The one that never comes back. */
     [cnor_builtin_fail] = {{cnor_static_str}, cnor_static_none},
+    /* The ones that work on an array: the compiler knows the type of its
+     * elements (see `cnor_compile_call_builtin_array`). */
+    [cnor_builtin_push] = {{cnor_static_array, cnor_static_any}, cnor_static_none},
+    [cnor_builtin_pop] = {{cnor_static_array}, cnor_static_any},
 };
 
 lh_bool_t

@@ -149,14 +149,22 @@ enum cnor_op
     cnor_op_index_li, /**< fp[a][k]. Operands: slot, s32. */
     cnor_op_index_i,  /**< top[k]. Operand: s32. */
     /**
-     * An array (format v6): the elements are slots of the frame, and the
-     * array's value (where they are and how many) is in the slot before them.
-     * `array_new` fills the elements and writes the array's value;
+     * An array (format v6; the header of v18): the elements are slots of the
+     * frame, the header that counts them is in the slot before them, and the
+     * array's value (where the header is) in the slot before that.
+     * `array_new` fills the elements and writes the header and the value;
      * `array_get_l` reads an element of the array in fp[a], `array_set_l`
      * writes one. The bounds are checked at run time.
      */
     cnor_op_array_new, /**< Make an array of fp[a] and its `count` elements. Operands: slot, u16. */
+    /**
+     * An empty array with room for `room` elements (format v18): the same
+     * layout, but the count of the header is zero, so the array grows as
+     * things are pushed into it.
+     */
+    cnor_op_array_room, /**< An empty array in fp[a] with room for `room` elements. Operands: slot, u16. */
     cnor_op_array_new_global, /**< The same, in the globals. Operands: u16 index, u16. */
+    cnor_op_array_room_global, /**< The same, in the globals. Operands: u16 index, u16. */
     cnor_op_array_get_l, /**< An element of fp[a]. Operand: slot. */
     cnor_op_array_set_l, /**< Write an element of fp[a]. Operand: slot. */
     /**

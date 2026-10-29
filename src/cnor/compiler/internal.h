@@ -591,6 +591,12 @@ lh_bool_t
 cnor_scope_add_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view_t name,
                      lh_bool_t is_mutable, cnor_static_type_t type, lh_u16_t count,
                      cnor_slot_t *slot);
+/** @brief A local that is an array declaration: it takes a slot for its value,
+ *         two for its header and a slot per element. */
+lh_bool_t
+cnor_scope_add_array_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view_t name,
+                            lh_bool_t is_mutable, cnor_static_type_t type, lh_u16_t count,
+                            cnor_slot_t *slot);
 /**
  * @brief Declare a local dictionary of @p room pairs; the pairs are its own,
  *        so it takes a slot for its value, two for its header and two per
@@ -823,6 +829,34 @@ cnor_compiler_dict_form(const cnor_node_t *init, lh_u32_t *room);
 /** @brief Whether the script names a function or native of its own `dict`. */
 lh_bool_t
 cnor_compiler_names_its_own_dict(cnor_compiler_t *self);
+
+/**
+ * @enum cnor_array_form
+ * @brief What an initializer says about an array.
+ */
+enum cnor_array_form
+{
+    cnor_array_not_an_array = 0, /**< Not an array declaration. */
+    cnor_array_declared,          /**< `array(n)`: an array with room for `n` elements. */
+    cnor_array_malformed          /**< `array(...)`, but not of a whole number. */
+};
+/** @copybrief cnor_array_form */
+typedef enum cnor_array_form cnor_array_form_t;
+
+/**
+ * @brief What the initializer @p init says about an array.
+ *
+ * `array(n)` is a declaration, like an array literal: the room is a whole
+ * number the compiler knows, since the array takes its slots.
+ *
+ * @param[out] room How many elements the array has room for, when it is one.
+ */
+cnor_array_form_t
+cnor_compiler_array_form(const cnor_node_t *init, lh_u32_t *room);
+
+/** @brief Whether the script names a function or native of its own `array`. */
+lh_bool_t
+cnor_compiler_names_its_own_array(cnor_compiler_t *self);
 
 /* logic.c */
 lh_bool_t

@@ -77,6 +77,51 @@ cnor_compiler_names_its_own_dict(cnor_compiler_t *self)
                : lh_bool_false;
 }
 
+/* -- arrays with room ------------------------------------------------------ */
+
+/*
+ * `array(n)` is a declaration, like `dict(n)`: it names the room the array has,
+ * and the room is a whole number the compiler knows, since the array takes its
+ * slots.
+ */
+cnor_array_form_t
+cnor_compiler_array_form(const cnor_node_t *init, lh_u32_t *room)
+{
+    const lh_str_view_t array = lh_str_view_lit("array");
+    const cnor_node_t *arg;
+
+    if (init == lh_null || init->kind != cnor_node_call
+        || !lh_str_view_equals(&init->name, &array, lh_bool_false))
+    {
+        return cnor_array_not_an_array;
+    }
+    if (init->data.call.argc != 1U)
+    {
+        return cnor_array_malformed;
+    }
+    arg = init->data.call.args;
+    if (arg->kind != cnor_node_int)
+    {
+        return cnor_array_malformed;
+    }
+    *room = arg->data.int_.value;
+    return cnor_array_declared;
+}
+
+/* Whether the script names a function or native of its own `array`: such a
+ * name wins, as it does for `dict`. */
+lh_bool_t
+cnor_compiler_names_its_own_array(cnor_compiler_t *self)
+{
+    const lh_str_view_t array = lh_str_view_lit("array");
+    const cnor_binding_t binding = cnor_scope_resolve(self, array);
+
+    return (binding.kind == cnor_binding_function || binding.kind == cnor_binding_native
+            || binding.kind == cnor_binding_ambiguous)
+               ? lh_bool_true
+               : lh_bool_false;
+}
+
 /* -- let ------------------------------------------------------------------- */
 
 /* A top-level `let`: the global was declared by the declaration pass, so
@@ -94,7 +139,8 @@ cnor_compile_let_global(cnor_compiler_t *self, const cnor_node_t *node, cnor_sta
     return cnor_compile_store(self, &binding);
 }
 
-/* Fixed arrays use one header slot and one slot per element, globally or locally. */
+/* Fixed arrays use two header slots and one slot per element, globally or
+ * locally. */
 static lh_bool_t
 cnor_compile_let_array(cnor_compiler_t *self, const cnor_node_t *node, cnor_static_type_t type)
 {
@@ -117,9 +163,9 @@ cnor_compile_let_array(cnor_compiler_t *self, const cnor_node_t *node, cnor_stat
         const cnor_binding_t binding = cnor_scope_resolve(self, node->name);
         slot = binding.index;
         cnor_scope_global_at(&self->scope, slot)->type = type;
-        if (slot + count + 1U > self->globals_ready) self->globals_ready = slot + count + 1U;
+        if (slot + count + 3U > self->globals_ready) self->globals_ready = slot + count + 3U;
     }
-    else if (!cnor_scope_add_local(self, node, node->name, node->data.let.is_mutable,
+    else if (!cnor_scope_add_array_local(self, node, node->name, node->data.let.is_mutable,
                                   type, (lh_u16_t) count, &slot)) return lh_bool_false;
     if (array->data.array.is_list && !cnor_emit_op(self, cnor_op_push_none)) return lh_bool_false;
     if (!cnor_emit_insn(self, global ? cnor_op_array_new_global : cnor_op_array_new, slot, count))
@@ -127,8 +173,30 @@ cnor_compile_let_array(cnor_compiler_t *self, const cnor_node_t *node, cnor_stat
     if (array->data.array.is_list)
         for (index = count; index > 0U; --index)
             if (!cnor_emit_insn(self, global ? cnor_op_store_global : cnor_op_store_local,
-                               slot + index, 0U)) return lh_bool_false;
+                               slot + index + 2U, 0U)) return lh_bool_false;
     return lh_bool_true;
+}
+
+/* An empty array with room for `room` elements: the same layout as an array
+ * made from a literal, but nothing is in it yet. */
+static lh_bool_t
+cnor_compile_let_array_room(cnor_compiler_t *self, const cnor_node_t *node, lh_u32_t room,
+                            cnor_static_type_t type)
+{
+    const lh_bool_t global = cnor_compile_at_top_level(self);
+    cnor_slot_t slot;
+
+    if (global)
+    {
+        const cnor_binding_t binding = cnor_scope_resolve(self, node->name);
+        slot = binding.index;
+        cnor_scope_global_at(&self->scope, slot)->type = type;
+        if (slot + room + 3U > self->globals_ready) self->globals_ready = slot + room + 3U;
+    }
+    else if (!cnor_scope_add_array_local(self, node, node->name, node->data.let.is_mutable,
+                                   type, (lh_u16_t) room, &slot)) return lh_bool_false;
+    return cnor_emit_insn(self, global ? cnor_op_array_room_global : cnor_op_array_room,
+                          slot, room);
 }
 
 /* A top-level dictionary: its pairs live in the globals, so they outlive the
@@ -187,6 +255,24 @@ cnor_compile_let(cnor_compiler_t *self, const cnor_node_t *node)
         type = annotation == cnor_type_none ? cnor_static_array : cnor_type_of_node(self, node, annotation);
         if (!cnor_type_require(self, node, cnor_static_array, cnor_type_base(type))) return lh_bool_false;
         return cnor_compile_let_array(self, node, type);
+    }
+    /* An array with room: `array(n)` names the room the array has, and the
+     * array is empty. A name of the script's own wins, as it does for
+     * `dict`. */
+    {
+        lh_u32_t room = 0U;
+        const cnor_array_form_t form = cnor_compiler_array_form(node->data.let.init, &room);
+
+        if (form != cnor_array_not_an_array && !cnor_compiler_names_its_own_array(self))
+        {
+            if (form == cnor_array_malformed || room > CNOR_ARRAY_ROOM_MAX)
+            {
+                return cnor_compile_fail(self, node, cnor_error_array_room);
+            }
+            type = annotation == cnor_type_none ? cnor_static_array : cnor_type_of_node(self, node, annotation);
+            if (!cnor_type_require(self, node, cnor_static_array, cnor_type_base(type))) return lh_bool_false;
+            return cnor_compile_let_array_room(self, node, room, type);
+        }
     }
     /* A dictionary initializer: `dict(n)` names the room the dictionary has.
      * A name of the script's own wins, as it does for `len`. */

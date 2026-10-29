@@ -107,6 +107,9 @@ enum cnor_error
     cnor_error_unknown_function, /**< The image has no function of that name. */
     cnor_error_script,           /**< The script failed with its own text: `fail("...")`. */
     cnor_error_out_of_range,     /**< A number does not fit into a whole number. */
+    cnor_error_array_full,       /**< An array has no room for another element. */
+    cnor_error_array_empty,      /**< An element is taken out of an empty array. */
+    cnor_error_array_room,       /**< The room of an array is not a whole number the machine can hold. */
 
     cnor_error_struct_lifetime, /**< A frame-backed record escapes through a value store or return. */
 

@@ -39,7 +39,7 @@
 #    endif
 #endif
 
-_Static_assert(cnor_op_count == 120,"a new opcode needs a handler and a dispatch label below");
+_Static_assert(cnor_op_count == 122,"a new opcode needs a handler and a dispatch label below");
 
 /* The three operand forms of binary operator @p name share one handler. */
 #define CNOR_VM_FORM_HANDLERS(name)                                                                \
@@ -96,7 +96,9 @@ static const cnor_vm_handler_t m_handlers[cnor_op_count] = {
     [cnor_op_index_li] = cnor_vm_op_index_operands,
     [cnor_op_index_i] = cnor_vm_op_index_operands,
     [cnor_op_array_new] = cnor_vm_op_array_new,
+    [cnor_op_array_room] = cnor_vm_op_array_room,
     [cnor_op_array_new_global] = cnor_vm_op_array_new_global,
+    [cnor_op_array_room_global] = cnor_vm_op_array_room_global,
     [cnor_op_array_get_l] = cnor_vm_op_array_get_l,
     [cnor_op_array_set_l] = cnor_vm_op_array_set_l,
     [cnor_op_array_get] = cnor_vm_op_array_get,
@@ -599,7 +601,9 @@ cnor_vm_dispatch(cnor_vm_t *vm)
         [cnor_op_index_li] = &&cnor_vm_label_index_li,
         [cnor_op_index_i] = &&cnor_vm_label_index_i,
         [cnor_op_array_new] = &&cnor_vm_label_array_new,
+        [cnor_op_array_room] = &&cnor_vm_label_array_room,
         [cnor_op_array_new_global] = &&cnor_vm_label_array_new_global,
+        [cnor_op_array_room_global] = &&cnor_vm_label_array_room_global,
         [cnor_op_array_get_l] = &&cnor_vm_label_array_get_l,
         [cnor_op_array_set_l] = &&cnor_vm_label_array_set_l,
         [cnor_op_array_get] = &&cnor_vm_label_array_get,
@@ -1298,26 +1302,48 @@ cnor_vm_switch:
         }
         CNOR_VM_SLOW();
     }
-    /* The array forms: the elements are slots of the frame, and the array's
-     * value is in the slot before them. */
+    /* The array forms: the elements are slots of the frame, the header that
+     * counts them is in the slot before them, and the array's value is in the
+     * slot before that. */
     CNOR_VM_OP(array_new)
     {
         const cnor_slot_t slot = (cnor_slot_t) pc[1];
         const lh_u16_t count = (lh_u16_t) cnor_vm_fast_u16(pc + 2);
-        lh_value_t *const elements = &fp[slot + 1U];
+        lh_value_t *const header = &fp[slot + 1U];
+        lh_value_t *const elements = &fp[slot + 3U];
         lh_u16_t i;
 
         for (i = 0U; i < count; ++i)
         {
             cnor_vm_fast_move(&elements[i], &sp[-1]);
         }
-        cnor_vm_fast_set_array(&fp[slot], elements, count);
+        cnor_vm_fast_set_sint(&header[0], (lh_sllong_t) count);
+        cnor_vm_fast_set_sint(&header[1], (lh_sllong_t) count);
+        cnor_vm_fast_set_array(&fp[slot], header);
         --sp;
+        pc += 4;
+        CNOR_VM_NEXT();
+    }
+    /* An empty array with room for more: the elements are `none` until
+     * something is pushed into them. */
+    CNOR_VM_OP(array_room)
+    {
+        const cnor_slot_t slot = (cnor_slot_t) pc[1];
+        const lh_u16_t room = (lh_u16_t) cnor_vm_fast_u16(pc + 2);
+        lh_value_t *const header = &fp[slot + 1U];
+
+        cnor_vm_fast_set_sint(&header[0], 0);
+        cnor_vm_fast_set_sint(&header[1], (lh_sllong_t) room);
+        cnor_vm_fast_set_array(&fp[slot], header);
         pc += 4;
         CNOR_VM_NEXT();
     }
     /* The same, in the globals: they outlive the frame that made them. */
     CNOR_VM_OP(array_new_global)
+    {
+        CNOR_VM_SLOW();
+    }
+    CNOR_VM_OP(array_room_global)
     {
         CNOR_VM_SLOW();
     }

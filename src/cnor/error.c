@@ -76,6 +76,9 @@ static const lh_char_t *const m_messages[cnor_error_count] = {
     "no function of that name",
     "the script failed",
     "the number does not fit into a whole number",
+    "the array has no room for another element",
+    "the array is empty",
+    "an array's room must be a whole number the machine can hold",
     "a struct must be constructed in its declaration and passed by reference; it cannot be stored or returned",
 };
 
@@ -166,6 +169,9 @@ static const lh_char_t *const m_names[cnor_error_count] = {
     "unknown_function",
     "script_error",
     "out_of_range",
+    "array_full",
+    "array_empty",
+    "array_room",
     "struct_lifetime",
 };
 

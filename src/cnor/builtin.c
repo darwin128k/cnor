@@ -30,6 +30,8 @@ static const lh_char_t *const m_names[cnor_builtin_count] = {
     [cnor_builtin_round] = "round",
     [cnor_builtin_int] = "int",
     [cnor_builtin_fail] = "fail",
+    [cnor_builtin_push] = "push",
+    [cnor_builtin_pop] = "pop",
 };
 
 static const lh_u8_t m_argc[cnor_builtin_count] = {
@@ -56,6 +58,8 @@ static const lh_u8_t m_argc[cnor_builtin_count] = {
     [cnor_builtin_round] = 1U,
     [cnor_builtin_int] = 1U,
     [cnor_builtin_fail] = 1U,
+    [cnor_builtin_push] = 2U,
+    [cnor_builtin_pop] = 1U,
 };
 
 const lh_char_t *

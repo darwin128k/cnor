@@ -166,4 +166,11 @@ typedef lh_u32_t cnor_count_t;
  */
 #define CNOR_DICT_ROOM_MAX 32766U
 
+/**
+ * @def CNOR_ARRAY_ROOM_MAX
+ * @brief Largest room an array may have: an array takes three slots and one per
+ *        element, and the slots of the globals are counted by a 16-bit index.
+ */
+#define CNOR_ARRAY_ROOM_MAX 65532U
+
 #endif /* CNOR_TYPES_H */

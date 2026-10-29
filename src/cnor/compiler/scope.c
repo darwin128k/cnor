@@ -482,12 +482,22 @@ cnor_scope_add_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view
                      lh_bool_t is_mutable, cnor_static_type_t type, lh_u16_t count,
                      cnor_slot_t *slot)
 {
-    /* An array takes a slot for its value and a slot per element; the others
-     * take one. A dictionary is a value here: the pairs it holds live where it
-     * was made, and only its declaration takes them. */
-    const lh_u32_t slots = (cnor_type_base(type) == cnor_static_array) ? (lh_u32_t) count + 1U : 1U;
+    /* A binding holds a value: one slot, whatever its type. The elements of an
+     * array it names live where the array was made, not here; a dictionary is
+     * a value here as well: the pairs it holds live where it was made, and
+     * only its declaration takes them. */
+    return cnor_scope_take_local(self, node, name, is_mutable, type, count, 1U, slot);
+}
 
-    return cnor_scope_take_local(self, node, name, is_mutable, type, count, slots, slot);
+lh_bool_t
+cnor_scope_add_array_local(cnor_compiler_t *self, const cnor_node_t *node, lh_str_view_t name,
+                            lh_bool_t is_mutable, cnor_static_type_t type, lh_u16_t count,
+                            cnor_slot_t *slot)
+{
+    /* An array declared here takes a slot for its value, two for its header
+     * and a slot per element. */
+    return cnor_scope_take_local(self, node, name, is_mutable, type, count,
+                                 (lh_u32_t) count + 3U, slot);
 }
 
 lh_bool_t

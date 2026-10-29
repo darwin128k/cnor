@@ -129,6 +129,16 @@ static const char m_dict[] = "fn lookups(rounds: i32) -> i32:\n"
                              "    return total\n"
                              "lookups(1000000)\n";
 
+static const char m_array[] = "fn walk(rounds: i32) -> i32:\n"
+                              "    let mut values = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]\n"
+                              "    let mut total = 0\n"
+                              "    for r in 0..rounds:\n"
+                              "        for i in 0..16:\n"
+                              "            values[i] = values[i] + 1\n"
+                              "            total = total + values[i]\n"
+                              "    return total\n"
+                              "walk(100000)\n";
+
 static const char m_try[] = "fn guarded(rounds: i32) -> i32:\n"
                             "    let mut total = 0\n"
                             "    for r in 0..rounds:\n"
@@ -150,6 +160,8 @@ static const cnor_bench_workload_t m_workloads[] = {
     {"match", "1M iterations of a 7-arm match", m_match, 1750000, 1000000U, "iteration"},
     {"dict", "1M rounds of three dictionary lookups", m_dict, 132000000, 3000000U, "lookup"},
     {"try", "1M rounds of a try that does not fail", m_try, 499999500000LL, 1000000U, "iteration"},
+    {"array", "1.6M rounds of reading and writing an array", m_array, 80012800000LL, 1600000U,
+     "element"},
     {"compile", "generated program, 1000 functions", lh_null, 0, 0U, "line"},
 };
 

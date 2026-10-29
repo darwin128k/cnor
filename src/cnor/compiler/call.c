@@ -80,6 +80,50 @@ cnor_compile_call_native(cnor_compiler_t *self, const cnor_node_t *node, lh_u16_
     return cnor_emit_insn(self, cnor_op_native, cnor_scope_import_native(self, index), argc);
 }
 
+/*
+ * `push(array, value)` and `pop(array)`: the type of the elements comes from
+ * the array itself, so it cannot be a rule of the builtin.
+ */
+static lh_bool_t
+cnor_compile_call_builtin_array(cnor_compiler_t *self, const cnor_node_t *node,
+                                cnor_builtin_t builtin)
+{
+    const cnor_node_t *const array = node->data.call.args;
+    cnor_static_type_t element;
+
+    if (!cnor_compile_expr(self, array))
+    {
+        return lh_bool_false;
+    }
+    if (cnor_type_base(self->type) != cnor_static_array)
+    {
+        return cnor_type_require(self, array, cnor_static_array, cnor_type_base(self->type));
+    }
+    element = cnor_type_element(self->type);
+    if (builtin == cnor_builtin_push)
+    {
+        const cnor_node_t *const value = array->next;
+
+        if (!cnor_compile_expr(self, value))
+        {
+            return lh_bool_false;
+        }
+        if (!cnor_type_require(self, value, element, self->type))
+        {
+            return lh_bool_false;
+        }
+        self->type = cnor_static_none;
+    }
+    else
+    {
+        /* What comes out is an element of the array. */
+        self->type = element;
+    }
+    self->emit.line = node->line;
+    return cnor_emit_insn(self, cnor_op_call_builtin, (lh_u32_t) builtin,
+                          cnor_builtin_argc(builtin));
+}
+
 /* A function of the language itself: its arguments are checked against the
  * builtin's signature. */
 static lh_bool_t
@@ -95,6 +139,10 @@ cnor_compile_call_string_builtin(cnor_compiler_t *self, const cnor_node_t *node,
     if (node->data.call.argc != argc)
     {
         return cnor_compile_fail_name(self, node, cnor_error_wrong_arg_count);
+    }
+    if (builtin == cnor_builtin_push || builtin == cnor_builtin_pop)
+    {
+        return cnor_compile_call_builtin_array(self, node, builtin);
     }
     for (arg = node->data.call.args; arg != lh_null; arg = arg->next, ++index)
     {

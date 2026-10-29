@@ -368,12 +368,12 @@ cnor_compile_struct_let(cnor_compiler_t *self, const cnor_node_t *node,
         const cnor_binding_t binding = cnor_scope_resolve(self, node->name);
         slot = binding.index;
         cnor_scope_global_at(&self->scope, slot)->type = named->type;
-        if (slot + named->node->data.fn.param_count + 1U > self->globals_ready)
-            self->globals_ready = slot + named->node->data.fn.param_count + 1U;
+        if (slot + named->node->data.fn.param_count + 3U > self->globals_ready)
+            self->globals_ready = slot + named->node->data.fn.param_count + 3U;
     }
     else
     {
-        if (!cnor_scope_add_local(self, node, node->name, node->data.let.is_mutable,
+        if (!cnor_scope_add_array_local(self, node, node->name, node->data.let.is_mutable,
             cnor_static_array, named->node->data.fn.param_count, &slot)) return lh_bool_false;
         /* The allocator reserves the frame array; its binding keeps the nominal type. */
         {
@@ -388,7 +388,7 @@ cnor_compile_struct_let(cnor_compiler_t *self, const cnor_node_t *node,
     /* Values remain on the operand stack in declaration order; pop them backwards. */
     for (index = named->node->data.fn.param_count; index > 0U; --index)
         if (!cnor_emit_insn(self, global ? cnor_op_store_global : cnor_op_store_local,
-                           slot + index, 0U)) return lh_bool_false;
+                           slot + index + 2U, 0U)) return lh_bool_false;
     return lh_bool_true;
 }
 

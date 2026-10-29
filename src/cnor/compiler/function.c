@@ -23,14 +23,24 @@ cnor_compile_declaration(cnor_compiler_t *self, const cnor_node_t *node)
             init != lh_null && init->kind == cnor_node_call ? cnor_named_find(self, init->name) : lh_null;
         if (named != lh_null && named->node->kind == cnor_node_struct)
         {
-            count = (lh_u16_t) (named->node->data.fn.param_count + 1U);
+            /* A record takes a slot for itself, two for its header and a slot
+             * per field. */
+            count = (lh_u16_t) (named->node->data.fn.param_count + 3U);
         }
         else if (init != lh_null && init->kind == cnor_node_array)
         {
-            /* An array takes a slot for itself and a slot per element. */
+            /* An array takes a slot for itself, two for its header and a slot
+             * per element. */
             if (init->data.array.count >= CNOR_SLOT_MAX)
                 return cnor_compile_fail(self, node, cnor_error_too_many_globals);
-            count = (lh_u16_t) (init->data.array.count + 1U);
+            count = (lh_u16_t) (init->data.array.count + 3U);
+        }
+        else if (cnor_compiler_array_form(init, &room) == cnor_array_declared
+                 && room <= CNOR_ARRAY_ROOM_MAX)
+        {
+            /* An array with room takes a slot for itself, two for its header
+             * and a slot per element. */
+            count = (lh_u16_t) (room + 3U);
         }
         else if (cnor_compiler_dict_form(init, &room) == cnor_dict_declared
                  && room <= CNOR_DICT_ROOM_MAX)

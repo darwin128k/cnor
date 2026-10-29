@@ -25,6 +25,7 @@ workload's unit of work (one call, one loop iteration, one character).
 | `match` | 1M iterations of a 7-arm `match` on `i % 8` | iteration |
 | `dict` | 1M rounds of three lookups in a dictionary of five keys | lookup |
 | `try` | 1M rounds of a `try` that does not fail | iteration |
+| `array` | 1.6M rounds of reading and writing an element of an array of 16 | element |
 | `compile` | a generated program of 1000 functions (if, while, match each) and 1000 calls | source line (compile time) |
 
 The C references (`reference.c`) do the `fib` and `loop` work in C, compiled

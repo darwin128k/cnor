@@ -1,6 +1,6 @@
 # The cnor language
 
-Status: draft, language version 0.1, image format v17.
+Status: draft, language version 0.1, image format v18.
 
 > A small script language for embedded systems and hosts, run by an
 > interpreter built on `lh`.
@@ -257,6 +257,11 @@ A `raise` with no error in flight is the failure `nothing_to_raise`.
 never comes back, the failure has the kind `script_error`, and the text is the
 `message` of the error the `catch` above takes. Without a catch the host sees
 the text too, as the detail of the failure.
+
+**[cnor]** `push` and `pop` work on an array that has a room (section 6.7): the
+element of `push` must fit the array's element type, and the room of the array
+is the limit — a push into an array with no room left fails the run with
+`array_full`, and a pop out of an empty array fails it with `array_empty`.
 
 The error is a **dictionary** of five pairs: `message` (the text of the
 failure), `line` (the line it happened on), `code` (the number of the failure,
@@ -655,6 +660,29 @@ iteration gives string keys. Reads from a typed collection have static type
 `len` accepts either typed or untyped collections. `split_into` accepts an
 untyped array or `array[str]` and refuses other typed arrays.
 
+**[cnor]** An array has a **room**: how many elements may be in it. A literal
+(`[a, b, c]` or `[fill; count]`) has as much room as it has elements, so it
+does not grow. `array(n)` makes an array that is empty and has room for `n`
+elements, and it grows as things are pushed into it:
+
+```cn
+let mut scores = array(16)
+push(scores, 10)
+push(scores, 20)
+println(len(scores))     # 2
+```
+
+`push(array, value)` puts an element at the end of the array, and `pop(array)`
+takes the last one out and gives it back. The room is the limit: a push into
+an array with no room left fails the run with `array_full`, and a pop out of
+an empty array fails it with `array_empty`. The element of a typed array is
+checked as it is pushed.
+
+The count of an array is not in the array's value but in the header it was
+made with, so an array that was copied elsewhere (into a parameter, say)
+shares the count with the one it came from: what a function pushes into it,
+the caller sees. A dictionary has always been like that.
+
 Mutable collection signatures are invariant: `array[i32]` and `array[str]`
 are incompatible, as are typed and untyped collection signatures. This prevents
 a typed array from being passed to an untyped parameter that might write a
@@ -668,7 +696,8 @@ An element type may be a scalar, a function value, or a named enum (including
 one loaded through an import). Different enum types remain distinct inside
 collections. Nested collection annotations and struct elements are currently
 rejected. Collections still cannot be returned from script functions; their
-existing frame lifetime and fixed capacity rules are unchanged.
+existing frame lifetime and capacity rules are unchanged, except that an
+array now counts what is in it and has a room of its own (section 6.7).
 
 A missing dictionary key still yields `none`, including in a typed dictionary.
 The element annotation checks stored values and does not prove key presence;
@@ -736,7 +765,7 @@ See `examples/namespaces/main.cn` for a complete three-file example.
 
 ---
 
-## 7. The `.cnb` image format, v17
+## 7. The `.cnb` image format, v18
 
 **[cnor]** v1 replaced the original header (whose layout used `sizeof` and
 was not portable) and its names section. Every field is a fixed-width
@@ -763,15 +792,18 @@ v15 adds the key of a dictionary that is a constant (`dict_get_lk`); v16 adds
 the local functions (`call_local`, `ret_local`); v17 adds the numbers of the
 language (`min`, `max`, `abs`, `clamp`, `floor`, `ceil`, `round`, `int`) and
 the failure of the script itself (`fail`) — the numbers of the builtins are
-part of the format, as the `call_builtin` instruction carries their number.
-An image of another version is refused: v16 images must be compiled again.
+part of the format, as the `call_builtin` instruction carries their number;
+v18 gives the array a header of its own, as a dictionary has, and adds the
+array that is empty and has room (`array_room`, `array_room_global`) and the
+functions that grow it (`push`, `pop`).
+An image of another version is refused: v17 images must be compiled again.
 
 ### 7.1 Header (68 bytes)
 
 | Offset | Field | Type | Meaning |
 |---|---|---|---|
 | 0 | `magic` | 4 bytes | `"cnor"` |
-| 4 | `version` | u16 | format version, currently 17 |
+| 4 | `version` | u16 | format version, currently 18 |
 | 6 | `flags` | u16 | bit 0: the image carries a line table |
 | 8 | `image_size` | u32 | size of the whole image |
 | 12 | `stack_slots` | u32 | largest frame (slots + operands), **computed by the compiler** |
@@ -827,7 +859,7 @@ relocation pass.
 
 ## 8. Instruction set
 
-The full list is `include/cnor/op.h` and its info table `src/cnor/op.c`: 131
+The full list is `include/cnor/op.h` and its info table `src/cnor/op.c`: 122
 opcodes. An opcode is one byte; operands follow it, little-endian. The info
 table holds each opcode's operands and stack effect; the compiler, the
 verifier and the machine all read it.
@@ -845,7 +877,7 @@ verifier and the machine all read it.
 | Jumps | `jmp`, `jmp_if_false`, `jmp_if_true`, `for_loop`, `switch` |
 | Functions | `call`, `ret`, `native`, `call_local`, `ret_local` |
 | Text | `len`, `index`, `index_ll`, `index_li`, `index_i` |
-| Arrays | `array_new`, `array_new_global`, `array_get_l`, `array_set_l`, `array_get`, `array_set` |
+| Arrays | `array_new`, `array_room`, `array_new_global`, `array_room_global`, `array_get_l`, `array_set_l`, `array_get`, `array_set` |
 | Dictionaries | `dict_new`, `dict_new_global`, `dict_get_l`, `dict_set_l`, `dict_get`, `dict_set`, `dict_key_l` |
 | Collections of an unknown kind | `collection_get_l` |
 | Errors | `try_push`, `try_pop` |
@@ -917,13 +949,15 @@ the code, so `text[i]` does not copy the text onto the stack first:
 A form computes exactly what `index` computes on the same two values: the same
 bounds, the same error.
 
-**The array instructions** (format v6, extended in v8) work on the elements of
-an array, which are slots of a frame or of the globals:
+**The array instructions** (format v6, extended in v8 and v18) work on the
+elements of an array, which are slots of a frame or of the globals:
 
 | Opcode | Operands | Computes |
 |---|---|---|
-| `array_new` | slot a, u16 count | the `count` elements at `FRAME.a + 1` take the value on the stack; `FRAME.a` becomes the array |
-| `array_new_global` | u16 index, u16 count | the same, in the globals: the elements at `GLOBALS.index + 1`, and `GLOBALS.index` becomes the array |
+| `array_new` | slot a, u16 count | the `count` elements at `FRAME.a + 3` take the value on the stack; `FRAME.a + 1` becomes the header (the count and the room), `FRAME.a` becomes the array |
+| `array_new_global` | u16 index, u16 count | the same, in the globals: the elements at `GLOBALS.index + 3`, the header at `GLOBALS.index + 1`, and `GLOBALS.index` becomes the array |
+| `array_room` | slot a, u16 room | an empty array: the header of `FRAME.a + 1` holds a count of zero and the room, `FRAME.a` becomes the array |
+| `array_room_global` | u16 index, u16 room | the same, in the globals |
 | `array_get_l` | slot a | the element of `FRAME.a` at the index on the stack, in its place |
 | `array_set_l` | slot a | the element of `FRAME.a` at the index on the stack takes the value on top of it |
 | `array_get` | none | the element of the array on the stack, at the index above it, in the index's place |
@@ -931,6 +965,13 @@ an array, which are slots of a frame or of the globals:
 
 The bounds are checked at run time: an index outside the array fails the run
 with `index`.
+
+**[cnor]** An array has a header of two slots, as a dictionary has: the count
+of its elements and the room it has. The header is not in the array's value
+but where the array was made, so an array that was copied elsewhere shares the
+count with the one it came from. `array_room` makes one with a room and
+nothing in it; `array_new` makes one with as many elements as it is told and
+as much room.
 
 `array_get_l` and `array_set_l` read the array out of a local slot, so a
 local array is not copied onto the stack. `array_get` and `array_set` take the
@@ -1129,6 +1170,8 @@ both.
 | `round(x)` | number | the whole number nearest to the real one | `i32` |
 | `int(x)` | number | the whole number the real one is cut to | `i32` |
 | `fail(text)` | `str` | the script fails with its own text | `none` (it never comes back) |
+| `push(array, value)` | `array`, the element | an element at the end of the array | `none` |
+| `pop(array)` | `array` | the last element of the array, taken out of it | the element |
 
 The compiler knows the argument types and the result type, so a call with the
 wrong type or the wrong number of arguments is refused before it runs. A
@@ -1272,7 +1315,7 @@ command line built with it runs images only: `exec` is there, `run` and
 
 ## 14. Status
 
-Done and covered by tests (`tests/`, 264 cases, and the runs of the command
+Done and covered by tests (`tests/`, 266 cases, and the runs of the command
 line in `tests/cli/`):
 
 - [x] lexer: tokens, keywords, indentation as `indent` / `dedent`, newline
@@ -1302,6 +1345,10 @@ line in `tests/cli/`):
   `min`, `max`, `abs`, `clamp`, `floor`, `ceil`, `round`, `int` (section 9.2);
 - [x] the failure of the script itself: `fail` with a text of its own, which
   the `catch` above takes as the message of the error (section 6.1);
+- [x] an array that grows: `array(n)` makes one with a room and nothing in it,
+  `push` puts an element at the end and `pop` takes the last one out; the
+  count of an array is in a header of its own, so a function that pushes into
+  an array it was given is seen by the caller (section 6.7);
 - [x] a function as a value: put in a variable, given to a function, called
   through the value; and `cnor_vm_call`, so a host calls a function of the
   script by name (sections 6.1 and 10);

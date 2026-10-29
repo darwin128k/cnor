@@ -1554,6 +1554,91 @@ CNOR_TEST(keeps_a_script_function_of_the_same_name)
              7);
 }
 
+CNOR_TEST(grows_an_array_with_push_and_pop)
+{
+    cnor_line_t line = 0U;
+
+    /* An array made with a room grows as things are pushed into it. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut a = array(4)\n"
+                      "    push(a, 10)\n"
+                      "    push(a, 20)\n"
+                      "    return len(a) + a[1]\n"
+                      "f()\n"),
+             22);
+    /* What comes out is the last element, and the array is shorter. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut a = array(4)\n"
+                      "    push(a, 10)\n"
+                      "    push(a, 20)\n"
+                      "    let last = pop(a)\n"
+                      "    return last * 100 + len(a)\n"
+                      "f()\n"),
+             2001);
+    /* A loop walks what is in the array, not what it has room for. */
+    CHECK_EQ(value_of("fn f() -> i32:\n"
+                      "    let mut a = array(8)\n"
+                      "    push(a, 3)\n"
+                      "    push(a, 4)\n"
+                      "    let mut sum = 0\n"
+                      "    for v in a:\n"
+                      "        sum += v\n"
+                      "    return sum\n"
+                      "f()\n"),
+             7);
+    /* The elements of a typed array are checked. */
+    CHECK_EQ(error_of("fn f() -> i32:\n"
+                      "    let mut a: array[i32] = array(4)\n"
+                      "    push(a, \"x\")\n"
+                      "    return 0\n"
+                      "f()\n",
+                      &line),
+             cnor_error_type_mismatch);
+    /* The array itself has to be one. */
+    CHECK_EQ(error_of("fn f() -> i32:\n"
+                      "    push(1, 2)\n"
+                      "    return 0\n"
+                      "f()\n",
+                      &line),
+             cnor_error_type_mismatch);
+    /* The room of the array is its limit. */
+    CHECK_EQ(failure_of("let mut a = array(1)\npush(a, 1)\npush(a, 2)\n"), cnor_error_array_full);
+    /* An empty array has nothing to take out. */
+    CHECK_EQ(failure_of("let mut a = array(1)\npop(a)\n"), cnor_error_array_empty);
+    /* An array made from a literal has no room to grow. */
+    CHECK_EQ(failure_of("let mut a = [1, 2]\npush(a, 3)\n"), cnor_error_array_full);
+    /* The room of an array is a whole number. */
+    CHECK_EQ(error_of("let mut a = array(\"x\")\n", &line), cnor_error_array_room);
+    CHECK_EQ(error_of("let mut a = array()\n", &line), cnor_error_array_room);
+}
+
+CNOR_TEST(shares_the_count_of_an_array_with_the_caller)
+{
+    /* A function that pushes into an array it was given: the caller sees it,
+     * as it sees the dictionary it was given. */
+    CHECK_EQ(value_of("fn add(a: array, v: i32):\n"
+                      "    push(a, v)\n"
+                      "fn f() -> i32:\n"
+                      "    let mut a = array(4)\n"
+                      "    add(a, 7)\n"
+                      "    return len(a) + a[0]\n"
+                      "f()\n"),
+             8);
+    /* The same the other way: what the function takes out, the caller does not
+     * have any more. */
+    CHECK_EQ(value_of("fn take(a: array) -> i32:\n"
+                      "    return pop(a)\n"
+                      "fn f() -> i32:\n"
+                      "    let mut a = array(4)\n"
+                      "    push(a, 5)\n"
+                      "    let taken = take(a)\n"
+                      "    return taken + len(a)\n"
+                      "f()\n"),
+             5);
+    /* An array at the top level grows the same way. */
+    CHECK_EQ(value_of("let mut a = array(4)\npush(a, 5)\nlen(a) + a[0]\n"), 6);
+}
+
 /* -- types ------------------------------------------------------------------- */
 
 CNOR_TEST(runs_well_typed_programs)
@@ -2732,6 +2817,8 @@ CNOR_TEST_CASE(refuses_a_dictionary_where_it_does_not_fit),
     CNOR_TEST_CASE(checks_the_arguments_of_the_number_functions),
     CNOR_TEST_CASE(fails_with_the_text_of_the_script),
     CNOR_TEST_CASE(keeps_a_script_function_of_the_same_name),
+    CNOR_TEST_CASE(grows_an_array_with_push_and_pop),
+    CNOR_TEST_CASE(shares_the_count_of_an_array_with_the_caller),
     CNOR_TEST_CASE(runs_well_typed_programs),
     CNOR_TEST_CASE(accepts_values_of_unknown_type_anywhere),
     CNOR_TEST_CASE(refuses_arguments_of_the_wrong_type),

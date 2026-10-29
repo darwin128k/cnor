@@ -605,7 +605,7 @@ builtin_do_split_into(cnor_vm_t *vm, cnor_argc_t argc)
         return cnor_error_empty_separator;
     }
     elements = cnor_vm_fast_array_data(out);
-    room = cnor_vm_fast_array_count(out);
+    room = cnor_vm_fast_array_room(out);
     while (at + separator.size <= text.size)
     {
         lh_value_t piece;
@@ -647,6 +647,8 @@ builtin_do_split_into(cnor_vm_t *vm, cnor_argc_t argc)
         cnor_vm_fast_move(&elements[written], &piece);
         ++written;
     }
+    /* The array holds the pieces and nothing else. */
+    cnor_vm_fast_array_set_count(out, written);
     builtin_result(vm, argc, lh_value_make_sint((lh_sllong_t) written));
     return cnor_error_none;
 }
@@ -911,6 +913,53 @@ builtin_do_fail(cnor_vm_t *vm, cnor_argc_t argc)
     return cnor_error_script;
 }
 
+/* push(array, value): an element at the end of the array. The count is in the
+ * header the array was made with, so the array that is elsewhere sees it too. */
+static cnor_error_t
+builtin_do_push(cnor_vm_t *vm, cnor_argc_t argc)
+{
+    const lh_value_t *const array = builtin_arg(vm, argc, 0U);
+    const lh_value_t *const value = builtin_arg(vm, argc, 1U);
+    lh_u32_t count;
+
+    if (cnor_vm_fast_kind(array) != CNOR_VALUE_KIND_ARRAY)
+    {
+        return cnor_error_type;
+    }
+    count = cnor_vm_fast_array_count(array);
+    if (count >= cnor_vm_fast_array_room(array))
+    {
+        /* The array is full: the element cannot be added. */
+        return cnor_error_array_full;
+    }
+    cnor_vm_fast_move(&cnor_vm_fast_array_data(array)[count], value);
+    cnor_vm_fast_array_set_count(array, count + 1U);
+    builtin_result(vm, argc, lh_value_make_none());
+    return cnor_error_none;
+}
+
+/* pop(array): the last element of the array, taken out of it. */
+static cnor_error_t
+builtin_do_pop(cnor_vm_t *vm, cnor_argc_t argc)
+{
+    const lh_value_t *const array = builtin_arg(vm, argc, 0U);
+    lh_u32_t count;
+
+    if (cnor_vm_fast_kind(array) != CNOR_VALUE_KIND_ARRAY)
+    {
+        return cnor_error_type;
+    }
+    count = cnor_vm_fast_array_count(array);
+    if (count == 0U)
+    {
+        return cnor_error_array_empty;
+    }
+    --count;
+    cnor_vm_fast_array_set_count(array, count);
+    builtin_result(vm, argc, cnor_vm_fast_array_data(array)[count]);
+    return cnor_error_none;
+}
+
 /* -- the handler ------------------------------------------------------------ */
 
 lh_bool_t
@@ -994,6 +1043,12 @@ cnor_vm_op_call_builtin(cnor_vm_t *vm, const cnor_insn_t *insn)
         break;
     case cnor_builtin_fail:
         error = builtin_do_fail(vm, argc);
+        break;
+    case cnor_builtin_push:
+        error = builtin_do_push(vm, argc);
+        break;
+    case cnor_builtin_pop:
+        error = builtin_do_pop(vm, argc);
         break;
     default:
         error = cnor_error_bad_operand;

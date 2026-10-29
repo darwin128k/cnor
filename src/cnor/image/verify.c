@@ -84,15 +84,15 @@ cnor_verify_slots(const struct cnor_verify *self, const cnor_insn_t *insn)
     return lh_bool_true;
 }
 
-/* An `array_new` writes its elements in the slots after the array's own, so
- * they must be inside the function's frame. */
+/* An `array_new` writes its header and its elements in the slots after the
+ * array's own, so they must be inside the function's frame. */
 static lh_bool_t
 cnor_verify_array(const struct cnor_verify *self, const cnor_insn_t *insn)
 {
     const lh_u64_t slot = insn->operands[0];
     const lh_u64_t count = insn->operands[1];
 
-    return slot + 1U + count <= (lh_u64_t) self->function.slot_count ? lh_bool_true
+    return slot + 3U + count <= (lh_u64_t) self->function.slot_count ? lh_bool_true
                                                                     : lh_bool_false;
 }
 
@@ -116,7 +116,7 @@ cnor_verify_global(const struct cnor_verify *self, const cnor_insn_t *insn)
     const lh_u64_t index = insn->operands[0];
     const lh_u64_t count = insn->operands[1];
     const lh_u64_t slots = insn->op == cnor_op_dict_new_global ? count * 2U + 3U
-                                                               : count + 1U;
+                                                               : count + 3U;
 
     return index + slots <= (lh_u64_t) self->view->header.globals_count ? lh_bool_true
                                                                         : lh_bool_false;
@@ -147,6 +147,8 @@ cnor_verify_operands(struct cnor_verify *self, const cnor_insn_t *insn)
     case cnor_op_switch:
         return cnor_verify_switch(self, insn);
     case cnor_op_array_new:
+        return cnor_verify_array(self, insn);
+    case cnor_op_array_room:
         return cnor_verify_array(self, insn);
     case cnor_op_dict_new:
         return cnor_verify_dict(self, insn);

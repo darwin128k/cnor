@@ -59,6 +59,8 @@ typedef enum cnor_builtin
      * back; a `catch` above takes the text as the error's message.
      */
     cnor_builtin_fail,
+    cnor_builtin_push, /**< `push(array, value)`: an element at the end of the array. */
+    cnor_builtin_pop,  /**< `pop(array)`: the last element of the array, taken out of it. */
     cnor_builtin_count
 } cnor_builtin_t;
 
